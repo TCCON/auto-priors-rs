@@ -1,0 +1,3 @@
+[submodule "deps/Rocket"]
+	path = deps/Rocket
+	url = https://github.com/SergioBenitez/Rocket.git
