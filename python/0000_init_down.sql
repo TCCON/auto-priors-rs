@@ -1,0 +1,5 @@
+DROP TABLE GeosFiles;
+DROP TABLE GeosPaths;
+DROP TABLE Jobs;
+DROP TABLE StdSiteJobs;
+DROP TABLE StdSiteList;
