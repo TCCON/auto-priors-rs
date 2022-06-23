@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 import enum
 import sqlalchemy as db
-from sqlalchemy import orm, sql
+from sqlalchemy import orm, sql, func
 
 BaseSqlite = orm.declarative_base()
 BaseSql = orm.declarative_base()
@@ -200,11 +200,22 @@ def migrate_std_sites(sqlite_engine, mysql_engine):
         s_mysql.commit()
 
     with orm.Session(sqlite_engine) as s_lite, orm.Session(mysql_engine) as s_mysql:
-        
+        # My sqlite3 StdSites table has some duplicate rows. I'm sure we could come up with clever
+        # SQL to select the entire rows with the most recent job, but getting the ORM to return
+        # arbitrary columns is difficult.
+        #
+        # TODO: properly, we should actually check against the job table to make sure which job produced
+        # which sites, since these duplicates are probably backfilling.
+        q = s_lite.query(StdSiteSqlite, func.max(StdSiteSqlite.job_id)).group_by(StdSiteSqlite.date)
+        jobs_to_include = set(r[1] for r in q)
 
         result = s_lite.execute(sql.text('SELECT * FROM StdSites'))
         
         for i, row in enumerate(result, start=1):
+            if row['job_id'] not in jobs_to_include:
+                print(f'Skipping row {i}, another row has a more recent job for the same date')
+                continue
+
             print(f'\rCopying row {i} from StdSites', end='')
             site_states = []
             for site in sites:

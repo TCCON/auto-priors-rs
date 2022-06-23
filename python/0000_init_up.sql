@@ -47,6 +47,18 @@ CREATE TABLE IF NOT EXISTS StdSiteJobs (
     date DATE NOT NULL,
     state TINYINT DEFAULT -1,
     job INT,
+    CONSTRAINT U_Site_Date UNIQUE (site, date),
     FOREIGN KEY (site) REFERENCES StdSiteList(id),
     FOREIGN KEY (job) REFERENCES Jobs(job_id)
 );
+
+CREATE VIEW v_StdSiteJobs
+AS
+SELECT StdSiteJobs.*, StdSiteList.site_id FROM
+StdSiteJobs LEFT JOIN StdSiteList ON StdSiteJobs.site = StdSiteList.id;
+
+-- If we knew what sites were possible ahead of time
+-- SELECT date, 
+-- min(IF(site_id='ae', state, NULL)) as site_ae, 
+-- min(IF(site_id='ny', state, NULL)) as site_ny 
+-- FROM v_StdSiteJobs GROUP BY date LIMIT 5;
