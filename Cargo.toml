@@ -1,0 +1,29 @@
+[package]
+name = "tccon-priors-portal"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+chrono = "0.4"
+
+# Could not use the contrib rocket_dyn_templates with a Git pinned copy of Rocket itself. My guess
+# is that the dyn_templates cargo crate was trying to connect to a different version of the main
+# crate, so traits weren't being satisfied just because they were different versions of the trait.
+[dependencies.rocket]
+# rocket = { git = "https://github.com/SergioBenitez/Rocket", rev = "4dcd928" }
+path = "deps/Rocket/core/lib"
+
+[dependencies.rocket_dyn_templates]
+# version = "0.1.0-rc.2"
+path = "deps/Rocket/contrib/dyn_templates"
+features = ["tera"]
+
+[dependencies.rocket_db_pools]
+path = "deps/Rocket/contrib/db_pools/lib"
+features = ["sqlx_mysql"]
+
+[dependencies.sqlx]
+version = "0.5"
+# Copied version and runtime from deps/Rocket/contrib/db_pools/lib/Cargo.toml
+features = ["runtime-tokio-rustls", "chrono"]
