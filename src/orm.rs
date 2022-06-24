@@ -2,11 +2,75 @@ use std::fmt::Display;
 
 use chrono::naive::NaiveDate;
 use rocket_db_pools::{Database, Connection};
-use rocket_db_pools::sqlx::{self, Row, FromRow};
+use rocket_db_pools::sqlx::{self, FromRow};
 
 #[derive(Database)]
 #[database("tccon_priors")]
 pub struct PriorsDb(sqlx::MySqlPool);
+
+// Deriving the type with each variant having an assigned value and
+// giving it a repr that matches the SQL type seems to be enough to
+// decode this without needing to implement sqlx::Decode
+#[derive(Debug, sqlx::Type)]
+#[repr(i8)]
+enum SiteState {
+    Pending = 0,
+    Complete = 1,
+    Nonop = -1
+}
+
+impl Display for SiteState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            Self::Pending => "pending",
+            Self::Complete => "complete",
+            Self::Nonop => "nonop"
+        };
+        write!(f, "{}", state)
+    }
+}
+
+#[derive(Debug, sqlx::Type)]
+#[repr(i8)]
+enum JobState {
+    Pending = 0,
+    Running = 1,
+    Complete = 2,
+    Errored = 3,
+    Cleaned = 4
+}
+
+impl Display for JobState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Complete => "complete",
+            Self::Errored => "errored",
+            Self::Cleaned => "cleaned"
+        };
+        write!(f, "{}", state)
+    }
+}
+
+#[derive(Debug, sqlx::Type)]
+#[repr(i8)]
+enum TarOption {
+    No = 0,
+    Yes = 1,
+    Egi = 2
+}
+
+impl Display for TarOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            Self::No => "no",
+            Self::Yes => "yes",
+            Self::Egi => "EGI"
+        };
+        write!(f, "{}", state)
+    }
+}
 
 // FromRow: https://docs.rs/sqlx/latest/sqlx/trait.FromRow.html
 // SQLX type mapping: https://docs.rs/sqlx/latest/sqlx/mysql/types/index.html
@@ -17,7 +81,7 @@ pub struct StdSiteJob {
     #[sqlx(rename = "site")]
     site_fk: i64,
     date: NaiveDate,
-    state: i8,
+    state: SiteState,
     #[sqlx(rename = "job")]
     job_fk: Option<i64>,
 }
@@ -51,6 +115,7 @@ impl StdSiteJob {
         return if let Ok(r) = result {
             Some(r)
         }else{
+            eprint!("Oops: {result:?}");
             return None
         };
     }
