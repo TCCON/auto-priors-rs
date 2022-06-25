@@ -23,6 +23,9 @@ async fn read(mut db: Connection<orm::PriorsDb>, id: i64) -> Option<String> {
     }
 }
 
+// GET parameters are apparently treated as forms in Rocket:
+//  https://rocket.rs/v0.5-rc/guide/requests/#query-strings
+// Need to figure out forms to do this properly.
 #[get("/daterange")]
 async fn read_daterange(mut db: Connection<orm::PriorsDb>) -> String {
     let start_date = NaiveDate::from_ymd(2010, 1, 1);

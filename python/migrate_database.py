@@ -1,5 +1,7 @@
 from argparse import ArgumentParser
+from datetime import datetime
 import enum
+import json
 import sqlalchemy as db
 from sqlalchemy import orm, sql, func
 
@@ -134,11 +136,18 @@ class StdSiteSqlite(BaseSqlite):
     day_state = db.Column(db.Integer)
 
 
+class SiteTypeEnum(enum.Enum):
+    Unknown = 1
+    TCCON = 2
+    EM27 = 3
+
+
 class StdSiteSql(BaseSql):
     __tablename__ = 'StdSiteList'
 
     id = db.Column(db.Integer, primary_key=True)
     site_id = db.Column(db.String(2))
+    site_type = db.Column(db.Enum(SiteTypeEnum))
 
 
 class StdSiteJob(BaseSql):
@@ -154,14 +163,29 @@ class StdSiteJob(BaseSql):
         return f'StdSiteJob({self.site} {self.date}: job {self.job}, state {self.state}'
 
 
+class StdSiteInfoSql(BaseSql):
+    __tablename__ = 'StdSiteInfo'
 
-def migrate(sqlite_db, sql_db, sql_user, sql_pw):
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    site = db.Column(db.Integer)
+    name = db.Column(db.String(32))
+    location = db.Column(db.String(64))
+    latitude = db.Column(db.Float)
+    longitude = db.Column(db.Float)
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    comment = db.Column(db.Text)
+
+
+def migrate(sqlite_db, sql_db, sql_user, sql_pw, sites_json=None):
     sqlite_engine = db.create_engine(f'sqlite:///{sqlite_db}', future=True)
     mysql_engine = db.create_engine(f'mysql://{sql_user}:{sql_pw}@localhost/{sql_db}', future=True)
     # migrate_table(sqlite_engine, mysql_engine, GeosPathsSqlite, GeosPathsSql)
     # migrate_table(sqlite_engine, mysql_engine, GeosFilesSqlite, GeosFilesSql)
     # migrate_table(sqlite_engine, mysql_engine, JobsSqlite, JobsSql)
-    migrate_std_sites(sqlite_engine, mysql_engine)
+    # migrate_std_sites(sqlite_engine, mysql_engine)
+    if sites_json:
+        add_site_info(mysql_engine, sites_json)
 
 
 def migrate_table(sqlite_engine, mysql_engine, sqlite_cls, sql_cls):
@@ -193,7 +217,7 @@ def migrate_std_sites(sqlite_engine, mysql_engine):
         s_mysql.execute(db.delete(StdSiteJob))
         s_mysql.execute(db.delete(StdSiteSql))
         for i, site in enumerate(sites, start=1):
-            o = StdSiteSql(id=i, site_id=site)
+            o = StdSiteSql(id=i, site_id=site, site_type=SiteTypeEnum.TCCON)
             s_mysql.add(o)
             site_mapping[site] = i
 
@@ -228,12 +252,31 @@ def migrate_std_sites(sqlite_engine, mysql_engine):
         print('\nDone.')
 
 
+def add_site_info(sql_engine, site_json):
+    with open(site_json) as f:
+        site_info = json.load(f)
+
+    with orm.Session(sql_engine) as s_mysql:
+        for info in site_info:
+            stmt = db.select(StdSiteSql).where(StdSiteSql.site_id == info.pop('site_id'))
+            result = s_mysql.execute(stmt).scalar()
+            info['site'] = result.id
+            info['start_date'] = datetime.strptime(info['start_date'], '%Y-%m-%d').date()
+            info['end_date'] = None if info['end_date'] is None else datetime.strptime(info['end_date'], '%Y-%m-%d').date()
+            if info.get('comment') is None:
+                info['comment'] = ''
+            new_info = StdSiteInfoSql(**info)
+            s_mysql.add(new_info)
+        s_mysql.commit()
+
+
 def main():
     p = ArgumentParser('Migrate an AutoModPython sqlite3 database to MySQL')
     p.add_argument('sqlite_db', help='Path to the sqlite3 file')
     p.add_argument('sql_db', help='Name of the MySQL database')
     p.add_argument('sql_user', help='MySQL username')
     p.add_argument('sql_pw', help='MySQl password')
+    p.add_argument('sites_json', nargs='?', help='Optional flat JSON of TCCON site locations')
 
     clargs = vars(p.parse_args())
     migrate(**clargs)
