@@ -1,0 +1,15 @@
+[package]
+name = "tccon_priors_orm"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+dotenv = "0.15.0"
+
+[dependencies.sqlx]
+version = "0.5"
+# Copied version and runtime from deps/Rocket/contrib/db_pools/lib/Cargo.toml
+features = ["runtime-tokio-rustls", "chrono", "macros"]
