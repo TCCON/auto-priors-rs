@@ -1,10 +1,8 @@
 #[macro_use] extern crate rocket;
 
-use chrono::NaiveDate;
 use rocket::response::content::RawHtml;
 use rocket_db_pools::{Database, Connection};
-use rocket_db_pools::sqlx::{self};
-use rocket_dyn_templates::Template;
+use rocket_db_pools::sqlx;
 
 use orm::siteinfo;
 
@@ -19,7 +17,7 @@ fn index() -> RawHtml<&'static str> {
 
 #[get("/siteinfo/<id>")]
 async fn get_siteinfo(mut db: Connection<PriorsDb>, id: String) -> Option<String> {
-    let info = siteinfo::get_most_recent_site_location(&mut *db, &id).await.ok()?;
+    let info = siteinfo::SiteInfo::get_most_recent_site_location(&mut *db, &id).await.ok()?;
     let site = info.get_std_site(&mut *db).await.ok()?;
     return Some(format!("Site: {:#?}\n\n Site info: {:#?}", site, info));
 }

@@ -1,8 +1,11 @@
+use std::collections::HashMap;
+
 use anyhow;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Duration};
+use serde::Serialize;
 use sqlx::{self, FromRow, Type};
 
-type MySqlPC = sqlx::pool::PoolConnection<sqlx::MySql>;
+use super::MySqlPC;
 
 #[derive(Debug, Type)]
 pub enum SiteType {
@@ -42,10 +45,12 @@ struct QStdSite {
     site_type: String
 }
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, Clone, FromRow, Serialize)]
 pub struct SiteInfo {
+    #[serde(skip)]
     pub id: i32,
     pub site_id: Option<String>,
+    #[serde(skip)]
     site: i32,
     pub name: String,
     pub location: String,
@@ -57,6 +62,9 @@ pub struct SiteInfo {
 }
 
 impl SiteInfo {
+    /// Return the standard site table entry associated with this site information.
+    /// 
+    /// If a standard site cannot be found, the returned result will be and `Err`.
     pub async fn get_std_site(&self, pool: &mut MySqlPC) -> anyhow::Result<StdSite> {
         let result = sqlx::query_as!(
                 QStdSite,
@@ -67,15 +75,248 @@ impl SiteInfo {
 
         Ok(StdSite::from(result))
     }
-}
 
-pub async fn get_most_recent_site_location(pool: &mut MySqlPC, site_id: &str) -> anyhow::Result<SiteInfo> {
-    let result = sqlx::query_as!(
-            SiteInfo, 
-            "SELECT * FROM v_StdSiteInfo WHERE site_id = ? ORDER BY start_date DESC LIMIT 1",
-            site_id
-        ).fetch_one(pool)
+    /// Create a JSON string representing a list of SiteInfo instances
+    /// 
+    /// # Parameters
+    /// 
+    /// * `infos` - a slice of `SiteInfo` instances (e.g. returned by [`SiteInfo::get_all_site_info`])
+    /// * `pretty` - whether to format the JSON in pretty style or not
+    /// 
+    /// # Returns
+    /// 
+    /// A JSON string representing a sequence of `SiteInfo` instances, with each one serialized directly
+    /// to JSON.
+    /// 
+    /// # See also
+    /// 
+    /// * [`SiteInfo::to_grouped_json`]
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an `Err` if the serialization failed for any reason.
+    pub fn to_flat_json(infos: &[SiteInfo], pretty: bool) -> anyhow::Result<String> {
+        if pretty {
+            Ok(serde_json::to_string_pretty(infos)?)
+        }else{
+            Ok(serde_json::to_string(infos)?)
+        }
+    }
+
+    /// Create a JSON string representing a list of SiteInfo instances
+    /// 
+    /// Unlike [`SiteInfo::to_flat_json`], the JSON returned here will be a map with one
+    /// entry per site ID. Each time period listed for that site will be given in a list of
+    /// sub-maps. If the site's name or location changes in different time periods, then only
+    /// the values in the first time period are retained.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `infos` - a slice of `SiteInfo` instances (e.g. returned by [`SiteInfo::get_all_site_info`])
+    /// * `pretty` - whether to format the JSON in pretty style or not
+    /// 
+    /// # See also
+    /// 
+    /// * [`SiteInfo::to_flat_json`]
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an `Err` if the serialization failed for any reason.
+    pub fn to_grouped_json(infos: &[SiteInfo], pretty: bool) -> anyhow::Result<String> {
+        #[derive(Debug, Serialize)]
+        struct SiteTimePeriod {
+            latitude: f32,
+            longitude: f32,
+            start_date: NaiveDate,
+            end_date: Option<NaiveDate>,
+            comment: String
+        }
+
+        #[derive(Debug, Serialize)]
+        struct Site {
+            name: String,
+            location: String,
+            time_periods: Vec<SiteTimePeriod>
+        }
+
+        fn info_to_tp(s: &SiteInfo) -> SiteTimePeriod {
+            SiteTimePeriod { latitude: s.latitude, longitude: s.longitude, start_date: s.start_date, end_date: s.end_date, comment: s.comment.clone() }
+        }
+
+        let mut json_map = HashMap::new();
+        let mut i_no_id = 0;
+        for this_info in infos {
+            let sid = if let Some(x) = &this_info.site_id {
+                x.clone()
+            }else{
+                let x = format!("no_id_{i_no_id}");
+                i_no_id += 1;
+                x
+            };
+
+
+            if !json_map.contains_key(&sid) {
+                json_map.insert(
+                    sid,
+                    Site {
+                        name: this_info.name.clone(),
+                        location: this_info.location.clone(),
+                        time_periods: vec![info_to_tp(this_info)]
+                    }
+                );
+            }else{
+                // TODO: warn if the name & location do not match
+                let new_tp = info_to_tp(this_info);
+                json_map.get_mut(&sid).unwrap().time_periods.push(new_tp);
+            }
+        }
+        
+        if pretty {
+            return Ok(serde_json::to_string_pretty(&json_map)?)
+        }else{
+            return Ok(serde_json::to_string(&json_map)?);
+        }
+    }
+
+    /// Get the current site information for a given site, i.e. the information with the most recent start date
+    /// 
+    /// # Parameters
+    /// 
+    /// * `pool` - the MySQL pool or connection object to perform the query with
+    /// * `site_id` - the two letter site ID of the site to query, e.g. "pa"
+    pub async fn get_most_recent_site_location(pool: &mut MySqlPC, site_id: &str) -> anyhow::Result<SiteInfo> {
+        let result = sqlx::query_as!(
+                SiteInfo, 
+                "SELECT * FROM v_StdSiteInfo WHERE site_id = ? ORDER BY start_date DESC LIMIT 1",
+                site_id
+            ).fetch_one(pool)
+            .await?;
+    
+        Ok(result)
+    }
+
+    pub async fn get_all_site_info(pool: &mut MySqlPC) -> anyhow::Result<Vec<SiteInfo>> {
+        let result = sqlx::query_as!(
+            SiteInfo,
+            "SELECT * FROM v_StdSiteInfo"
+        ).fetch_all(pool)
         .await?;
 
-    Ok(result)
+        return Ok(result)
+    }
+
+    /// Get the information about standard sites for a given date.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `pool` - the MySQL pool or connection object to perform the query with
+    /// * `date` - the date to get site information for.
+    /// * `active` - determines whether to include sites that are not active on the requested date.
+    ///   If this is `true`, then only sites whose start and end dates bracket `date` are included.
+    ///   If this is `false`, then all sites are included once, and sites whose start and end dates
+    ///   do not bracket `date` will use the information closest in time (forward or back).
+    /// 
+    /// # Notes
+    /// 
+    /// Whether `active` is `true` or `false`, if a site has more than 1 instance of information that
+    /// brackets the given `date`, the one with the most recent start date will be returned.
+    pub async fn get_site_info_for_date(pool: &mut MySqlPC, date: NaiveDate, active: bool) -> anyhow::Result<Vec<SiteInfo>> {
+        if active {
+            let result = sqlx::query_as!(
+                SiteInfo,
+                "SELECT * FROM v_StdSiteInfo WHERE start_date <= ? AND (end_date IS NULL OR end_date > ?)",
+                date,
+                date
+            ).fetch_all(pool)
+            .await?;
+
+            let mut sites = HashMap::new();
+            let mut infos = vec![];
+            for this_info in result.iter() {
+                if !sites.contains_key(&this_info.site) {
+                    sites.insert(this_info.site, infos.len());
+                    infos.push(this_info.clone())
+                }else{
+                    let oidx = *sites.get(&this_info.site).unwrap();
+                    if this_info.start_date > infos[oidx].start_date {
+                        infos[oidx] = this_info.clone();
+                    }
+                }
+            }
+
+            return Ok(infos)
+        }else{
+            let result = sqlx::query_as!(
+                SiteInfo,
+                "SELECT * FROM v_StdSiteInfo",
+            ).fetch_all(pool)
+            .await?;
+
+            let mut final_site = HashMap::new();
+            let mut site_order = vec![];
+            for (idx, info) in result.iter().enumerate() {
+                let sid = info.site;
+                if !final_site.contains_key(&sid) {
+                    final_site.insert(sid, idx);
+                    site_order.push(sid); // each time we add a new site, record the order so that the return is deterministic
+                }else{
+                    // Choose between two site infos to decide which one gives the best match for this site. 
+                    // If one's start/end dates bracket the requested date and the other doesn't use the one
+                    // that brackets it. If both bracket the date, then select the one with the later start date.
+                    // Otherwise, choose the one closer in time to the date.
+                    let cidx = *final_site.get(&sid).unwrap();
+                    let curr = &result[cidx];
+                    let curr_brackets = info_brackets_date(date, curr.start_date, curr.end_date);
+                    let new_brackets = info_brackets_date(date, info.start_date, info.end_date);
+
+                    if curr_brackets && !new_brackets {
+                        // do nothing, keep current info
+                    }else if new_brackets && !curr_brackets {
+                        // new info brackets the date, use it instead
+                        final_site.insert(sid, idx);
+                    }else if curr_brackets && new_brackets && curr.start_date >= info.start_date {
+                        // do nothing, keep current info
+                    }else if curr_brackets && new_brackets {
+                        // the new info has a later start time, use it instead
+                        final_site.insert(sid, idx);
+                    }else if new_info_closer_in_time(date, curr, info){
+                        // use whichever one is closer in time
+                        final_site.insert(sid, idx);
+                    }
+                }
+            }
+
+            let mut infos = vec![];
+            for idx in site_order {
+                let ridx = *final_site.get(&idx).unwrap();
+                infos.push(result[ridx].clone());
+            }
+            return Ok(infos)
+        }
+    }
+}
+
+
+fn info_brackets_date(date: NaiveDate, start_date: NaiveDate, end_date: Option<NaiveDate>) -> bool {
+    if let Some(end) = end_date {
+        return (date >= start_date) && (date < end)
+    }else{
+        return date >= start_date
+    }
+}
+
+fn new_info_closer_in_time(date: NaiveDate, curr: &SiteInfo, new: &SiteInfo) -> bool {
+    let curr_delta = if date < curr.start_date {
+        curr.start_date - date
+    }else{
+        if let Some(end) = curr.end_date { date - end } else { Duration::days(0) }
+    };
+
+    let new_delta = if date < new.start_date {
+        new.start_date - date
+    }else{
+        if let Some(end) = new.end_date { date - end } else { Duration::days(0) }
+    };
+
+    return new_delta < curr_delta
 }

@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS Jobs (
 CREATE TABLE IF NOT EXISTS StdSiteList (
     id INT PRIMARY KEY AUTO_INCREMENT,
     site_id CHAR(2) NOT NULL UNIQUE,
-    site_type ENUM('Unknown', 'TCCON', 'EM27')
+    site_type ENUM('Unknown', 'TCCON', 'EM27') NOT NULL DEFAULT 'Unknown'
 );
 
 CREATE TABLE IF NOT EXISTS StdSiteInfo (

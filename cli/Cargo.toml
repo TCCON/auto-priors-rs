@@ -1,6 +1,22 @@
 [package]
-name = "tccon-priors-portal-cli"
+name = "tccon-priors-cli"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+clap = {version = "3.2", features = ["derive"]}
+env_logger = "0.9"
+log = "0.4"
+orm = {path = "../core-orm", package = "tccon_priors_orm"}
+
+[dependencies.sqlx]
+version = "0.5"
+# Copied version and runtime from deps/Rocket/contrib/db_pools/lib/Cargo.toml
+features = ["mysql", "runtime-tokio-rustls", "chrono"]
+
+[dependencies.tokio]
+# Using the same version as Rocket to *hopefully* avoid weird issues
+version = "1.6.1"
+features = ["full"]
