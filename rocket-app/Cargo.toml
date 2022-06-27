@@ -14,6 +14,7 @@ orm = {path = "../core-orm", package = "tccon_priors_orm"}
 [dependencies.rocket]
 # rocket = { git = "https://github.com/SergioBenitez/Rocket", rev = "4dcd928" }
 path = "../deps/Rocket/core/lib"
+features = ["json"]
 
 [dependencies.rocket_dyn_templates]
 # version = "0.1.0-rc.2"

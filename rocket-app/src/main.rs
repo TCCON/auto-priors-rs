@@ -6,9 +6,11 @@ use rocket_db_pools::sqlx;
 
 use orm::siteinfo;
 
+mod api;
+
 #[derive(Database)]
 #[database("tccon_priors")]
-struct PriorsDb(sqlx::MySqlPool);
+pub struct PriorsDb(sqlx::MySqlPool);
 
 #[get("/")]
 fn index() -> RawHtml<&'static str> {
@@ -26,5 +28,6 @@ async fn get_siteinfo(mut db: Connection<PriorsDb>, id: String) -> Option<String
 fn rocket() -> _ {
     rocket::build()
         .mount("/", routes![index, get_siteinfo])
+        .mount("/api/v1", routes![api::v1::all_site_info])
         .attach(PriorsDb::init())
 }
