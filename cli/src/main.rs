@@ -19,6 +19,7 @@ use env_logger;
 use log;
 use tokio;
 
+mod jobs;
 mod siteinfo;
 
 #[derive(Debug, Parser)]
@@ -29,6 +30,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    AddJob(jobs::AddJobCli),
+    DeleteJob(jobs::DeleteJobCli),
     SiteInfoJson(siteinfo::InfoJsonCli)
 }
 
@@ -45,9 +48,11 @@ async fn main() -> anyhow::Result<()> {
         .filter(Some("tccon_priors_orm"), log::LevelFilter::Info)
         .init();
 
-    let db = orm::get_database_pool(None).await.unwrap();
+    let mut db = orm::get_database_pool(None).await.unwrap();
 
     match args.command {
+        Commands::AddJob(subargs) => {jobs::add_job(&mut db.acquire().await?, subargs).await?;},
+        Commands::DeleteJob(subargs) => {jobs::delete_job(&mut db, subargs).await?},
         Commands::SiteInfoJson(subargs) => siteinfo::site_info_json(&mut db.acquire().await?, &subargs).await?
     };
 

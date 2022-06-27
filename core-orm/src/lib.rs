@@ -6,7 +6,9 @@ use log;
 use sqlx;
 
 pub mod siteinfo;
+pub mod jobs;
 
+pub type MySqlPool = sqlx::pool::Pool<sqlx::MySql>;
 pub type MySqlPC = sqlx::pool::PoolConnection<sqlx::MySql>;
 static DB_ENV_VARS: [&'static str; 2] = ["PRIORS_DATABASE_URL", "DATABASE_URL"];
 

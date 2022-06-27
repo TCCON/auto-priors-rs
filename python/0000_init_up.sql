@@ -18,22 +18,23 @@ CREATE TABLE IF NOT EXISTS GeosFiles (
 CREATE TABLE IF NOT EXISTS Jobs (
     job_id INT PRIMARY KEY AUTO_INCREMENT,
     state TINYINT NOT NULL,
-    site_id TEXT NOT NULL,
+    site_id JSON NOT NULL,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    lat TEXT NOT NULL,
-    lon TEXT NOT NULL,
+    lat JSON NOT NULL,
+    lon JSON NOT NULL,
     email VARCHAR(64),
     delete_time DATETIME,
-    priority INTEGER DEFAULT 0,
-    save_dir TEXT,
-    save_tarball TINYINT DEFAULT 1,
+    priority INTEGER DEFAULT 0 NOT NULL,
+    save_dir TEXT NOT NULL,
+    save_tarball TINYINT DEFAULT 1 NOT NULL,
     mod_fmt VARCHAR(8) NOT NULL,
     vmr_fmt VARCHAR(8) NOT NULL,
     map_fmt VARCHAR(8) NOT NULL,
     submit_time DATETIME NOT NULL,
     complete_time DATETIME,
-    output_file TEXT
+    output_file TEXT,
+    CONSTRAINT Eq_Id_Lat_Lon CHECK (JSON_LENGTH(site_id) = JSON_LENGTH(lat) AND JSON_LENGTH(site_id) = JSON_LENGTH(lon))
 );
 
 CREATE TABLE IF NOT EXISTS StdSiteList (

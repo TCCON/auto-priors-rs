@@ -102,11 +102,11 @@ class JobsSql(BaseSql):
 
     job_id = db.Column(db.Integer, primary_key=True)
     state = db.Column(db.Integer)
-    site_id = db.Column(db.Text)
+    site_id = db.Column(db.JSON)
     start_date = db.Column(db.Date)
     end_date = db.Column(db.Date)
-    lat = db.Column(db.Text)
-    lon = db.Column(db.Text)
+    lat = db.Column(db.JSON)
+    lon = db.Column(db.JSON)
     email = db.Column(db.String(64))
     delete_time = db.Column(db.DateTime)
     priority = db.Column(db.Integer)
@@ -121,10 +121,39 @@ class JobsSql(BaseSql):
 
     @classmethod
     def from_sqlite(cls, obj: JobsSqlite):
-        return cls(job_id=obj.job_id, state=obj.state, site_id=obj.site_id, start_date=obj.start_date, end_date=obj.end_date,
-                   lat=obj.lat, lon=obj.lon, email=obj.email, delete_time=obj.delete_time, priority=obj.priority, save_dir=obj.save_dir,
+        site_id = obj.site_id.split(',')
+        lat = cls._convert_latlon(obj.lat)
+        lon = cls._convert_latlon(obj.lon)
+        site_id, lat, lon = cls._match_lengths(site_id, lat, lon)
+        return cls(job_id=obj.job_id, state=obj.state, site_id=site_id, start_date=obj.start_date, end_date=obj.end_date,
+                   lat=lat, lon=lon, email=obj.email, delete_time=obj.delete_time, priority=obj.priority, save_dir=obj.save_dir,
                    save_tarball=obj.save_tarball, mod_fmt=obj.mod_fmt, map_fmt=obj.map_fmt, vmr_fmt=obj.vmr_fmt, submit_time=obj.submit_time,
                    complete_time=obj.complete_time, output_file=obj.output_file)
+
+    @staticmethod
+    def _convert_latlon(coords):
+        coords = [float(x) for x in coords.split(',')]
+        if len(coords) == 1 and coords[0] < -999:
+            return [None]
+        else:
+            return coords
+
+    @staticmethod
+    def _match_lengths(*args):
+        if all(len(x) == 1 for x in args):
+            return args
+        n = set(len(x) for x in args if len(x) != 1)
+
+        if len(n) != 1:
+            raise ValueError('Input arguments are not all length 1 or n')
+        n = n.pop()
+        out = []
+        for a in args:
+            if len(a) == 1:
+                out.append(a * n)
+            else:
+                out.append(a)
+        return out
 
 
 class StdSiteSqlite(BaseSqlite):
@@ -182,8 +211,8 @@ def migrate(sqlite_db, sql_db, sql_user, sql_pw, sites_json=None):
     mysql_engine = db.create_engine(f'mysql://{sql_user}:{sql_pw}@localhost/{sql_db}', future=True)
     # migrate_table(sqlite_engine, mysql_engine, GeosPathsSqlite, GeosPathsSql)
     # migrate_table(sqlite_engine, mysql_engine, GeosFilesSqlite, GeosFilesSql)
-    # migrate_table(sqlite_engine, mysql_engine, JobsSqlite, JobsSql)
-    # migrate_std_sites(sqlite_engine, mysql_engine)
+    migrate_table(sqlite_engine, mysql_engine, JobsSqlite, JobsSql)
+    migrate_std_sites(sqlite_engine, mysql_engine)
     if sites_json:
         add_site_info(mysql_engine, sites_json)
 
