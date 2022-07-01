@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json;
 use sqlx::{self, FromRow, Type};
 
-use crate::{MySqlPC, MySqlPool};
+use crate::{MySqlPC, MySqlPool, siteinfo};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
@@ -347,8 +347,83 @@ impl Job {
         return Ok(Job::try_from(result)?)
     }
 
+    pub fn parse_site_id_str(site_id_str: &str) -> Vec<String> {
+        return site_id_str
+                .split(',')
+                .map(|s| s.to_owned())
+                .collect();
+    }
+
+    pub fn parse_lat_str(lat_str: &str) -> anyhow::Result<Option<Vec<Option<f32>>>> {
+        return Self::parse_latlon_str(lat_str, 90.0, "Latitudes");
+    }
+
+    pub fn parse_lon_str(lon_str: &str) -> anyhow::Result<Option<Vec<Option<f32>>>> {
+        return Self::parse_latlon_str(lon_str, 180.0, "Longitudes");
+    }
+
+    fn parse_latlon_str(coord_str: &str, limit: f32, varname: &str) -> anyhow::Result<Option<Vec<Option<f32>>>> {
+        if coord_str.len() == 0 {
+            return Ok(None)
+        }
+
+        let mut values = vec![];
+        for s in coord_str.split(',') {
+            let v = s.parse()?;
+            if v < -limit || v > limit {
+                anyhow::bail!("{varname} must be between -{limit:.1} and +{limit:.1}")
+            }
+            values.push(Some(v))
+        }
+
+        return Ok(Some(values));
+    }
+
+    pub fn expand_site_lat_lon(site_id: Vec<String>, lat: Option<Vec<Option<f32>>>, lon: Option<Vec<Option<f32>>>) 
+    -> anyhow::Result<(Vec<String>, Vec<Option<f32>>, Vec<Option<f32>>)> {
+        // Rules:
+        //  1. Lat and lon must either both be given or neither be given
+        //  2. The outputs must all be the same length
+        //  3. If lat/lon not given, they default to vectors of None the same length as site IDs;
+        //     this means that we will infer their lat/lon from the site ID. (Should probably verify
+        //     that we can find this site.)
+        //  4. If lat/lon are given, then the site ID vector must be the same length as the lat/lons
+
+        let lat_given = lat.is_some();
+        let lon_given = lon.is_some();
+
+        if lat_given != lon_given {
+            anyhow::bail!("lat and lon must both be given or not, cannot have one given and not the other")
+        }
+
+        if !lat_given && !lon_given {
+            let lat = vec![None; site_id.len()];
+            let lon = vec![None; site_id.len()];
+            return Ok((site_id, lat, lon))
+        }
+
+        let lat = lat.unwrap();
+        let lon = lon.unwrap();
+
+        if lat.len() != lon.len() {
+            anyhow::bail!("If given, lat and lon must have the same number of elements.")
+        }
+
+        if site_id.len() == lat.len() {
+            return Ok((site_id, lat, lon))
+        }
+
+        if site_id.len() == 1 {
+            let site_id = vec![site_id[0].clone(); lat.len()];
+            return Ok((site_id, lat, lon))
+        }
+
+        anyhow::bail!("site_id must have length 1 or the same number of elements as lat & lon (got {} site ID, {} lat/lon)", 
+                      site_id.len(), lat.len());
+    }
+
     pub async fn add_job_from_args(
-        pool: &mut MySqlPC,
+        conn: &mut MySqlPC,
         site_id: Vec<String>,
         start_date: NaiveDate,
         end_date: NaiveDate,
@@ -364,9 +439,33 @@ impl Job {
         save_tarball: TarChoice
     ) -> anyhow::Result<i32> {
 
+        // Verify that we have matching site_id, lat, lon vectors. Any expansion needs to be done outside of this function.
         if site_id.len() != lat.len() || site_id.len() != lon.len() {
-            anyhow::bail!("site_id, lat, and lon must all be the same length");
+            anyhow::bail!("site_id, lat, and lon must all be the same length (got {}, {}, {})",
+                site_id.len(), lat.len(), lon.len());
         }
+
+        // Also verify that any site_ids for which we do not have defined lat/lons in the inputs are
+        // standard sites with at least one time period defined. At the same time, check that we don't 
+        // have any lat/lon pairs where only one is None.
+        let mut unknown_sids = vec![];
+        for (sid, x, y) in itertools::izip!(site_id.iter(), lat.iter(), lon.iter()) {
+            if x.is_none() != y.is_none() {
+                anyhow::bail!("At least one lat/lon pair has a value for one coordinate but not the other");
+            }
+
+            if x.is_none() {
+                if !siteinfo::SiteInfo::verify_info_available_for_site(conn, sid).await? {
+                    unknown_sids.push(&sid[..]);
+                }
+            }
+        }
+
+        if unknown_sids.len() > 0 {
+            let unknown_ids = unknown_sids.join(", ");
+            anyhow::bail!("The site IDs {unknown_ids} do not have standard lat/lons associated with them");
+        }
+
 
         let now = chrono::Local::now().naive_local();
         let mod_fmt: String = mod_fmt.unwrap_or_default().to_string();
@@ -396,7 +495,7 @@ impl Job {
             now, // submit_time
             complete_time, // complete_time
             output_file, // output_file
-        ).execute(pool)
+        ).execute(conn)
         .await?
         .last_insert_id();
 

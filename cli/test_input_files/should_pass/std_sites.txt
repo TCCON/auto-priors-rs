@@ -1,0 +1,7 @@
+pa,oc,ci
+20200101
+20200131
+email=test@test.mix
+mod_fmt=none
+map_fmt=none
+vmr_fmt=text

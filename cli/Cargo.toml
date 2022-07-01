@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1.0"
 chrono = "0.4"
 clap = {version = "3.2", features = ["derive"]}
+dotenv = "0.15"
 env_logger = "0.9"
 log = "0.4"
 orm = {path = "../core-orm", package = "tccon_priors_orm"}

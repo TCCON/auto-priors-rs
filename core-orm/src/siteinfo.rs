@@ -220,14 +220,14 @@ impl SiteInfo {
     /// 
     /// Whether `active` is `true` or `false`, if a site has more than 1 instance of information that
     /// brackets the given `date`, the one with the most recent start date will be returned.
-    pub async fn get_site_info_for_date(pool: &mut MySqlPC, date: NaiveDate, active: bool) -> anyhow::Result<Vec<SiteInfo>> {
+    pub async fn get_site_info_for_date(conn: &mut MySqlPC, date: NaiveDate, active: bool) -> anyhow::Result<Vec<SiteInfo>> {
         if active {
             let result = sqlx::query_as!(
                 SiteInfo,
                 "SELECT * FROM v_StdSiteInfo WHERE start_date <= ? AND (end_date IS NULL OR end_date > ?)",
                 date,
                 date
-            ).fetch_all(pool)
+            ).fetch_all(conn)
             .await?;
 
             let mut sites = HashMap::new();
@@ -249,7 +249,7 @@ impl SiteInfo {
             let result = sqlx::query_as!(
                 SiteInfo,
                 "SELECT * FROM v_StdSiteInfo",
-            ).fetch_all(pool)
+            ).fetch_all(conn)
             .await?;
 
             let mut final_site = HashMap::new();
@@ -293,6 +293,15 @@ impl SiteInfo {
             }
             return Ok(infos)
         }
+    }
+
+    pub async fn verify_info_available_for_site(conn: &mut MySqlPC, site_id: &str) -> anyhow::Result<bool> {
+        let n_match = sqlx::query!("SELECT COUNT(*) as count FROM v_StdSiteInfo WHERE site_id = ?", site_id)
+            .fetch_one(conn)
+            .await?
+            .count;
+
+        return Ok(n_match > 0);
     }
 }
 

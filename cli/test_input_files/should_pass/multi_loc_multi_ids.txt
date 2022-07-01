@@ -1,0 +1,9 @@
+mc,md,me
+20200101
+20200131
+42,43,44.1
+-42,-41,-40
+email=test@test.mix
+mod_fmt=none
+map_fmt=none
+vmr_fmt=text

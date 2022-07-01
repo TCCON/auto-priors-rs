@@ -1,6 +1,7 @@
 use anyhow;
 use chrono::NaiveDate;
 use clap::{self, Args};
+use log::{info, debug};
 use std::{path::{PathBuf, Path}, str::FromStr, fs::File, io::BufRead, ffi::OsStr};
 
 use orm::jobs::{ModFmt, VmrFmt, MapFmt};
@@ -44,11 +45,11 @@ impl From<std::io::Error> for FailedParsingError {
 
 #[derive(Debug)]
 struct InputJob {
-    site_id: String,
+    site_id: Vec<String>,
     start_date: NaiveDate,
     end_date: NaiveDate,
-    lat: f32,
-    lon: f32,
+    lat: Vec<Option<f32>>,
+    lon: Vec<Option<f32>>,
     email: String,
     mod_fmt: ModFmt,
     vmr_fmt: VmrFmt,
@@ -88,9 +89,9 @@ impl InputJob {
                     return Ok(input_job);
                 }
             },
-            Err(missing_fields) => {
-                for field in missing_fields {
-                    problems.push(format!("Missing required field: {field}"));
+            Err(errors) => {
+                for field in errors {
+                    problems.push(field);
                 }
             }
         }
@@ -118,11 +119,11 @@ impl InputJob {
 }
 
 struct InputJobBuilder {
-    site_id: Option<String>,
+    site_id: Option<Vec<String>>,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
-    lat: Option<f32>,
-    lon: Option<f32>,
+    lat: Option<Vec<Option<f32>>>,
+    lon: Option<Vec<Option<f32>>>,
     email: Option<String>,
     mod_fmt: Option<ModFmt>,
     vmr_fmt: Option<VmrFmt>,
@@ -134,23 +135,44 @@ impl InputJobBuilder {
         Self { site_id: None, start_date: None, end_date: None, lat: None, lon: None, email: None, mod_fmt: None, vmr_fmt: None, map_fmt: None }
     }
 
-    fn finalize(self) -> Result<InputJob, Vec<&'static str>> {
-        let mut missing_fields = vec![];
+    fn finalize(self) -> Result<InputJob, Vec<String>> {
+        let mut errors = vec![];
+        let mut site_id_missing = false;
+
+        let site_ids = self.site_id.unwrap_or_else(|| {
+            errors.push("missing field site_id".to_owned());
+            site_id_missing = true;
+            return vec![]
+        });
+
+        let (site_ids, lats, lons) = if site_id_missing{
+            (vec![], self.lat.unwrap_or_default(), self.lon.unwrap_or_default())
+        }else{
+            let tmp = orm::jobs::Job::expand_site_lat_lon(site_ids, self.lat, self.lon);
+            match tmp {
+                Ok(t) => t,
+                Err(e) => {
+                    errors.push(format!("Inconsistent site_id/lat/lon: {e}"));
+                    (vec![], vec![], vec![])
+                }
+            }
+        };
+
 
         let input_job = InputJob {
-            site_id: self.site_id.unwrap_or_else(|| {missing_fields.push("site_id"); String::new()}),
-            start_date: self.start_date.unwrap_or_else(|| {missing_fields.push("start_date"); NaiveDate::from_ymd(1970, 1, 1)}),
-            end_date: self.end_date.unwrap_or_else(|| {missing_fields.push("end_date"); NaiveDate::from_ymd(1970, 1, 1)}),
-            lat: self.lat.unwrap_or_else(|| {missing_fields.push("lat"); -999.0}),
-            lon: self.lon.unwrap_or_else(|| {missing_fields.push("lon"); -999.0}),
-            email: self.email.unwrap_or_else(|| {missing_fields.push("email"); String::new()}),
+            site_id: site_ids,
+            start_date: self.start_date.unwrap_or_else(|| {errors.push("smissing field tart_date".to_owned()); NaiveDate::from_ymd(1970, 1, 1)}),
+            end_date: self.end_date.unwrap_or_else(|| {errors.push("missing field end_date".to_owned()); NaiveDate::from_ymd(1970, 1, 1)}),
+            lat: lats,
+            lon: lons,
+            email: self.email.unwrap_or_else(|| {errors.push("missing field email".to_owned()); String::new()}),
             mod_fmt: self.mod_fmt.unwrap_or_default(),
             vmr_fmt: self.vmr_fmt.unwrap_or_default(),
             map_fmt: self.map_fmt.unwrap_or_default()
         };
 
-        if missing_fields.len() > 0 {
-            return Err(missing_fields)
+        if errors.len() > 0 {
+            return Err(errors)
         }else{
             return Ok(input_job)
         }
@@ -172,11 +194,8 @@ impl InputJobBuilder {
     }
 
     fn site_id(&mut self, sid: &str) -> Result<(), String> {
-        if sid.len() != 2 {
-            return Err("Site ID must be two characters".to_owned());
-        }
-
-        self.site_id = Some(sid.to_owned());
+        let site_ids = orm::jobs::Job::parse_site_id_str(sid);
+        self.site_id = Some(site_ids);
         Ok(())
     }
 
@@ -221,30 +240,20 @@ impl InputJobBuilder {
     }
 
     fn lat(&mut self, valstr: &str) -> Result<(), String> {
-        let val: f32 = match valstr.parse() {
+        debug!("Parsing lat string: {valstr}");
+        self.lat = match orm::jobs::Job::parse_lat_str(valstr) {
             Ok(v) => v,
             Err(e) => return Err(format!("{e}"))
         };
-
-        if val < -90.0 || val > 90.0 {
-            return Err("Latitude must be between -90 and 90".to_owned());
-        }
-
-        self.lat = Some(val);
         Ok(())
     }
 
     fn lon(&mut self, valstr: &str) -> Result<(), String> {
-        let val: f32 = match valstr.parse() {
+        debug!("Parsing lon string: {valstr}");
+        self.lon = match orm::jobs::Job::parse_lon_str(valstr) {
             Ok(v) => v,
             Err(e) => return Err(format!("{e}"))
         };
-
-        if val < -180.0 || val > 180.0 {
-            return Err("Longitude must be between -180 and 180".to_owned());
-        }
-
-        self.lon = Some(val);
         Ok(())
     }
 
@@ -303,23 +312,51 @@ impl InputJobBuilder {
 }
 
 
-pub fn add_jobs_from_input_files(clargs: ParseInputFilesManualCli) -> anyhow::Result<()> {
+pub async fn add_jobs_from_input_files(conn: &mut orm::MySqlPC, clargs: ParseInputFilesManualCli, config: &orm::config::Config) -> anyhow::Result<()> {
     let input_files = clargs.input_files;
     let mut jobs = vec![];
+    let mut successful_input_files = vec![];
+    let mut failed_input_files = vec![];
+
     for input_file in input_files {
         match InputJob::from_file(&input_file) {
-            Ok(job) => jobs.push(job),
-            Err(e) => handle_failed_parsing(e)
+            Ok(job) => {
+                jobs.push(job);
+                // TODO: move successful input file into the success folder
+                successful_input_files.push(input_file)
+            },
+            Err(e) => {
+                handle_failed_parsing(e);
+                failed_input_files.push(input_file);
+            }
         }
     }
 
-    // TODO: add jobs to database
-    dbg!(jobs);
+    for (job, infile) in jobs.into_iter().zip(successful_input_files) {
+        let new_id = orm::jobs::Job::add_job_from_args(conn,
+            job.site_id,
+            job.start_date,
+            job.end_date,
+            config.execution.output_path.clone(),
+            Some(job.email),
+            job.lat,
+            job.lon,
+            Some(job.mod_fmt),
+            Some(job.vmr_fmt),
+            Some(job.map_fmt),
+            None,
+            None,
+            orm::jobs::TarChoice::Yes
+        ).await?;
+
+        info!("Added job {new_id} from file {}", infile.display());
+    }
     Ok(())
 }
 
 fn handle_failed_parsing(error: FailedParsingError) {
     // TODO: Eventually this will need to email the user and log it as well, but for now, let's just print the message out
+    // TODO: copy the failed input file to the failures directory and delete the original. Maybe also write the error?
     let file = error.input_file.display();
     eprint!("Error parsing {file}. ");
     if let Some(email) = &error.email {

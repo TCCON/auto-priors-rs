@@ -1,0 +1,9 @@
+mx,my,mz
+20200101
+20200131
+42
+-42
+email=test@test.mix
+mod_fmt=none
+map_fmt=none
+vmr_fmt=text

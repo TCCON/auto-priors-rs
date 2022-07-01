@@ -17,8 +17,9 @@ use std::path::PathBuf;
 //      - Proper backfilling (both forced and based on updated site dates)
 //      - Make tarballs
 use clap::{self, Parser, Subcommand, Args};
+use dotenv;
 use env_logger;
-use log;
+use log::{self, debug};
 use orm;
 use tokio;
 
@@ -29,7 +30,9 @@ mod siteinfo;
 #[derive(Debug, Parser)]
 struct Cli {
     #[clap(subcommand)]
-    command: Commands
+    command: Commands,
+    #[clap(short='v', long="--verbose")]
+    verbose: bool
 }
 
 #[derive(Debug, Subcommand)]
@@ -55,23 +58,50 @@ fn generate_config_file(clargs: GenConfigCli) -> anyhow::Result<()> {
 // to have it recognize this macro.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenv::dotenv()?;
     let args = Cli::parse();
+
+    let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
+    let config = orm::config::load_config_file_or_default(config_file);
+
+    let log_level = if args.verbose {
+        log::LevelFilter::Debug
+    }else{
+        log::LevelFilter::Info
+    };
 
     // Need to filter modules to avoid messages from sqlx. Not sure yet if log messages from submodules of
     // tccon_priors_orm will respect this. Note: it *needs* the name specified in Cargo.toml, not how we
-    // refer to it in the code.
+    // refer to it in the code (though with dashes replaced with underscores).
     env_logger::Builder::from_default_env()
-        .filter(Some("tccon_priors_orm"), log::LevelFilter::Info)
+        .filter(Some("tccon_priors_orm"), log_level)
+        .filter(Some("tccon_priors_cli"), log_level)
         .init();
 
+    debug!("Log level set to DEBUG");
     let mut db = orm::get_database_pool(None).await.unwrap();
 
     match args.command {
-        Commands::ParseInputFilesManually(subargs) => {input_files::add_jobs_from_input_files(subargs)?; }
-        Commands::AddJob(subargs) => {jobs::add_job(&mut db.acquire().await?, subargs).await?;},
-        Commands::DeleteJob(subargs) => {jobs::delete_job(&mut db, subargs).await?},
-        Commands::SiteInfoJson(subargs) => siteinfo::site_info_json(&mut db.acquire().await?, &subargs).await?,
-        Commands::GenConfig(subargs) => generate_config_file(subargs)?
+        Commands::ParseInputFilesManually(subargs) => {
+            let mut conn = db.acquire().await?;
+            input_files::add_jobs_from_input_files(&mut conn, subargs, &config).await?; 
+        }
+
+        Commands::AddJob(subargs) => {
+            jobs::add_job(&mut db.acquire().await?, subargs).await?;
+        },
+
+        Commands::DeleteJob(subargs) => {jobs::delete_job(
+            &mut db, subargs).await?
+        },
+
+        Commands::SiteInfoJson(subargs) => {
+            siteinfo::site_info_json(&mut db.acquire().await?, &subargs).await?;
+        },
+
+        Commands::GenConfig(subargs) => {
+            generate_config_file(subargs)?;
+        }
     };
 
     Ok(())
