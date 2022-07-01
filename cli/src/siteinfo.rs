@@ -24,6 +24,7 @@ impl FromStr for JsonType {
 }
 
 #[derive(Debug, Args)]
+/// Return a JSON string of information about standard sites
 pub struct InfoJsonCli {
     /// Which type of JSON to return. "flat" will be a list with one entry per
     /// site time period. If the same site has multiple time periods (e.g. how

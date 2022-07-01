@@ -17,6 +17,7 @@ use std::path::PathBuf;
 //      - Proper backfilling (both forced and based on updated site dates)
 //      - Make tarballs
 use clap::{self, Parser, Subcommand, Args};
+use clap_verbosity_flag::{Verbosity,InfoLevel};
 use dotenv;
 use env_logger;
 use log::{self, debug};
@@ -31,8 +32,9 @@ mod siteinfo;
 struct Cli {
     #[clap(subcommand)]
     command: Commands,
-    #[clap(short='v', long="--verbose")]
-    verbose: bool
+
+    #[clap(flatten)]
+    verbose: Verbosity<InfoLevel>
 }
 
 #[derive(Debug, Subcommand)]
@@ -46,7 +48,9 @@ enum Commands {
 }
 
 #[derive(Debug, Args)]
+/// Generate a default configuration file from the command line
 struct GenConfigCli {
+    /// Path to write the default TOML file as.
     path: PathBuf
 }
 
@@ -64,11 +68,7 @@ async fn main() -> anyhow::Result<()> {
     let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
     let config = orm::config::load_config_file_or_default(config_file);
 
-    let log_level = if args.verbose {
-        log::LevelFilter::Debug
-    }else{
-        log::LevelFilter::Info
-    };
+    let log_level = args.verbose.log_level_filter();
 
     // Need to filter modules to avoid messages from sqlx. Not sure yet if log messages from submodules of
     // tccon_priors_orm will respect this. Note: it *needs* the name specified in Cargo.toml, not how we

@@ -8,7 +8,9 @@ use orm::jobs::{ModFmt, VmrFmt, MapFmt};
 
 
 #[derive(Debug, Args)]
+/// Parse input files specified on the command line [alias: pifm]
 pub struct ParseInputFilesManualCli {
+    /// Paths to input files to parse. 
     input_files: Vec<PathBuf>
 }
 
