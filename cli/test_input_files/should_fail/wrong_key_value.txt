@@ -1,0 +1,6 @@
+site_id=eg
+start=20080101
+end=20080102
+lat=50
+lon=-90
+email=oops@mistake.com

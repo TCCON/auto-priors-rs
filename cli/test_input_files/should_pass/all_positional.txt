@@ -1,0 +1,9 @@
+pa
+20220101
+20220131
+45.1
+-90
+test@test.net
+none
+none
+netcdf

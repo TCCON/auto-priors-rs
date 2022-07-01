@@ -20,6 +20,7 @@ use log;
 use tokio;
 
 mod jobs;
+mod input_files;
 mod siteinfo;
 
 #[derive(Debug, Parser)]
@@ -30,6 +31,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    #[clap(alias="pifm")]
+    ParseInputFilesManually(input_files::ParseInputFilesManualCli),
     AddJob(jobs::AddJobCli),
     DeleteJob(jobs::DeleteJobCli),
     SiteInfoJson(siteinfo::InfoJsonCli)
@@ -51,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
     let mut db = orm::get_database_pool(None).await.unwrap();
 
     match args.command {
+        Commands::ParseInputFilesManually(subargs) => {input_files::add_jobs_from_input_files(subargs)?; }
         Commands::AddJob(subargs) => {jobs::add_job(&mut db.acquire().await?, subargs).await?;},
         Commands::DeleteJob(subargs) => {jobs::delete_job(&mut db, subargs).await?},
         Commands::SiteInfoJson(subargs) => siteinfo::site_info_json(&mut db.acquire().await?, &subargs).await?

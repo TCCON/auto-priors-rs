@@ -1,0 +1,9 @@
+eh
+20080101
+20080102
+lat=0
+lon=0
+oops@mistake.com
+mod_fmt=netcdf
+vmr_fmt=nothing
+map_fmt=magic

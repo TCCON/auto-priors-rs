@@ -1,0 +1,6 @@
+site_id=kb
+start_date=20161101
+end_date=20161111
+lat=-1
+lon=1
+email=test@test.io
