@@ -5,6 +5,7 @@ use dotenv;
 use log;
 use sqlx;
 
+pub mod config;
 pub mod siteinfo;
 pub mod jobs;
 

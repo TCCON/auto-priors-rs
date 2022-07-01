@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 // TODOs:
 //  * Commands:
 //      - Status of jobs
@@ -14,9 +16,10 @@
 //      - Scan for failed standard site jobs
 //      - Proper backfilling (both forced and based on updated site dates)
 //      - Make tarballs
-use clap::{self, Parser, Subcommand};
+use clap::{self, Parser, Subcommand, Args};
 use env_logger;
 use log;
+use orm;
 use tokio;
 
 mod jobs;
@@ -35,7 +38,17 @@ enum Commands {
     ParseInputFilesManually(input_files::ParseInputFilesManualCli),
     AddJob(jobs::AddJobCli),
     DeleteJob(jobs::DeleteJobCli),
-    SiteInfoJson(siteinfo::InfoJsonCli)
+    SiteInfoJson(siteinfo::InfoJsonCli),
+    GenConfig(GenConfigCli)
+}
+
+#[derive(Debug, Args)]
+struct GenConfigCli {
+    path: PathBuf
+}
+
+fn generate_config_file(clargs: GenConfigCli) -> anyhow::Result<()> {
+    orm::config::generate_config_file(&clargs.path)
 }
 
 // Had to change rust-analyzer settings as described in https://github.com/rust-lang/rust-analyzer/issues/12450
@@ -57,7 +70,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::ParseInputFilesManually(subargs) => {input_files::add_jobs_from_input_files(subargs)?; }
         Commands::AddJob(subargs) => {jobs::add_job(&mut db.acquire().await?, subargs).await?;},
         Commands::DeleteJob(subargs) => {jobs::delete_job(&mut db, subargs).await?},
-        Commands::SiteInfoJson(subargs) => siteinfo::site_info_json(&mut db.acquire().await?, &subargs).await?
+        Commands::SiteInfoJson(subargs) => siteinfo::site_info_json(&mut db.acquire().await?, &subargs).await?,
+        Commands::GenConfig(subargs) => generate_config_file(subargs)?
     };
 
     Ok(())
