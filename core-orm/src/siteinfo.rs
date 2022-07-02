@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+//! Interface to the standard site information tables
+use std::{collections::HashMap, str::FromStr};
 
 use anyhow;
 use chrono::{NaiveDate, Duration};
@@ -7,28 +8,50 @@ use sqlx::{self, FromRow, Type};
 
 use super::MySqlPC;
 
+/// An enum describing the type of site
 #[derive(Debug, Type)]
 pub enum SiteType {
+    /// This site is neither TCCON nor an EM27. (`i8` value = `0`.)
     Unknown = 0,
+    /// This is a TCCON site. (`i8` value = `1`.)
     TCCON = 1,
+    /// This is a permanent EM27 site. (`i8` value = `2`.)
     EM27 = 2
 }
 
 impl From<String> for SiteType {
     fn from(s: String) -> Self {
-        match s.as_str() {
-            "TCCON" => Self::TCCON,
-            "EM27" => Self::EM27,
-            _ => Self::Unknown
+        return Self::from_str(&s).unwrap_or(Self::Unknown)
+    }
+}
+
+impl FromStr for SiteType {
+    type Err = anyhow::Error;
+    /// Convert a string to [`SiteType`]
+    /// 
+    /// Matches the strings "tccon" or "em27" (case insensitive).
+    /// Anything else returns `SiteType::Unknown`.
+    /// 
+    /// # Notes
+    /// This will never return an `Err`, so can be safely unwrapped.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "tccon" => Ok(Self::TCCON),
+            "em27" => Ok(Self::EM27),
+            _ => Ok(Self::Unknown)
         }
     }
 }
 
 
+/// A struct representing a standard (permanent) TCCON, EM27, or other site.
 #[derive(Debug)]
 pub struct StdSite {
+    /// **\[primary key\]** the primary key in the SQL StdSiteList table.
     pub id: i32,
+    /// The (generally) two-character site ID for this site
     pub site_id: String,
+    /// Whether this is a TCCON, EM27, or other site type.
     pub site_type: SiteType
 }
 
@@ -38,6 +61,10 @@ impl From<QStdSite> for StdSite {
     }
 }
 
+
+/// An internal query struct that represents the result of a SQL query on the StdSiteList table.
+/// 
+/// This should be converted to a [`StdSite`] instance for any public-facing functions.
 #[derive(Debug, FromRow)]
 struct QStdSite {
     id: i32,
@@ -45,19 +72,30 @@ struct QStdSite {
     site_type: String
 }
 
+/// A structure representing a single information row for a standard site
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct SiteInfo {
     #[serde(skip)]
     pub id: i32,
+    /// The two-character site ID. May be `None` if a row's site foreign key failed 
+    /// to match a site in the StdSiteList table.
     pub site_id: Option<String>,
     #[serde(skip)]
     site: i32,
+    /// The long name of this site.
     pub name: String,
+    /// The human-readable location of this site (e.g. "Park Falls, WI, USA")
     pub location: String,
+    /// The latitude of this site, south is negative.
     pub latitude: f32,
+    /// The longitude of this site, west is negative.
     pub longitude: f32,
+    /// The first date when this site was operational at this location.
     pub start_date: NaiveDate,
+    /// The last date (exclusive) when this site was operational at this location.
+    /// `None` indicates that the site remains operational here.
     pub end_date: Option<NaiveDate>,
+    /// A comment to describe any special considerations with this site.
     pub comment: String
 }
 

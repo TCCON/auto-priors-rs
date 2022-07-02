@@ -1,3 +1,13 @@
+//! Configurable options for the core object relational model and priors jobs
+//! 
+//! The functions [`load_config_file`] and [`load_env_config_file`] provide a
+//! simple mechanism to load the [`Config`] struct which holds the configuration
+//! data for the priors code. [`load_config_file_or_default`] provides an infallible
+//! option which returns a default configuration if no configuration file is available
+//! or there is a problem reading the configuration.
+//! 
+//! A default (mostly blank) configuration file can be created by calling [`generate_config_file`].
+//! 
 use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}};
 use anyhow::{self, Context};
 use hostname;
@@ -5,9 +15,14 @@ use serde::{Serialize, Deserialize};
 use toml;
 use url::Url;
 
+/// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
 
 
+/// Top level configuration structure.
+/// 
+/// [`ExecutionConfig`], [`DataConfig`], and [`AdminConfig`] objects comprise
+/// subsections.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config {
     pub execution: ExecutionConfig,
@@ -15,6 +30,7 @@ pub struct Config {
     pub admin: AdminConfig
 }
 
+/// Configuration section dealing with how jobs are run
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExecutionConfig {
     /// Maximum number of jobs to run simultaneously
@@ -64,6 +80,7 @@ impl Default for ExecutionConfig {
     }
 }
 
+/// Configuration section dealing with input data for jobs
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct DataConfig {
     /// The path to the GEOS FPIT data. This directory must contain the Nx and 
@@ -82,6 +99,7 @@ pub struct DataConfig {
     pub base_vmr_file: Option<PathBuf>
 }
 
+/// Configuration section dealing with error reporting and job limits
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AdminConfig {
     /// A list of email addresses to contact if an unexpected error occurs.
@@ -111,6 +129,13 @@ impl Default for AdminConfig {
 }
 
 
+/// Generate a default configuration .toml file at `path`
+/// 
+/// # Errors
+/// Returns an `Err` if:
+/// 
+/// * the default configuration could not be serialized
+/// * the file could not be created or written to at `path`
 pub fn generate_config_file<T>(path: T) -> anyhow::Result<()> 
 where T: AsRef<Path>
 {
@@ -128,6 +153,18 @@ where T: AsRef<Path>
 }
 
 
+/// Load an existing configuration .toml file from `path`
+/// 
+/// # Errors
+/// An `Err` is returned if:
+/// 
+/// * it could not open the file at `path`
+/// * it could not read the contents of `path`
+/// * the .toml file could not be decoded
+/// 
+/// # See also
+/// * [`load_env_config_file`]
+/// * [`load_config_file_or_default`]
 pub fn load_config_file<T>(path: T) -> anyhow::Result<Config> 
 where T: AsRef<Path>
 {
@@ -137,6 +174,59 @@ where T: AsRef<Path>
     Ok(toml::from_slice(&toml_str)?)
 }
 
+
+/// Load an existing configuration at the path pointed to by [`CFG_FILE_ENV_VAR`]
+/// 
+/// This is a convenience function that uses [`dotenv`] to augment existing environmental
+/// variables with any in a `.env` file, then gets the path to the configuration file
+/// from the environmental variable `$PRIOR_CONFIG_FILE`.
+/// 
+/// # Errors
+/// Returns an `Err` if:
+/// 
+/// * there was a problem getting the `$PRIOR_CONFIG_FILE` value
+/// * there was a problem reading the file (e.g. didn't exist or lacked read permissions)
+/// 
+/// # See also
+/// * [`load_config_file`]
+/// * [`load_config_file_or_default`]
+pub fn load_env_config_file() -> anyhow::Result<Config> {
+    dotenv::dotenv().ok();
+    let path = PathBuf::from(std::env::var(CFG_FILE_ENV_VAR)?);
+    return load_config_file(path);
+}
+
+/// Load an existing configuration file *or* provide defaults.
+/// 
+/// This is intended as a convenience function for either (a) testing or
+/// (b) cases where a configuration object is expected, but the precise 
+/// configuration is not essential. Since it silently falls back on the default
+/// if there is an error reading the configuration file, this is not the
+/// best function to use when it would be helpful to know if a default was
+/// used. In such a case, using [`load_config_file`] with `unwrap_or_else`
+/// might be better:
+/// 
+/// ```
+/// let config = load_config_file(path).unwrap_or_else(|| {
+///     warn!("Using default configuration due to error reading {path}");
+///     Config::default()
+/// })
+/// ```
+/// 
+/// # Parameters
+/// 
+/// * `path` - the path to the configuration file to read. If this is `None`,
+///   then a default configuration will be returned.
+/// 
+/// # Returns
+/// 
+/// * [`Config`] - a configuration object, either read from the .toml file or
+///   a default if the file does not exist or there is an error reading it.
+/// 
+/// # See also
+/// 
+/// * [`load_config_file`]
+/// * [`load_env_config_file`]
 pub fn load_config_file_or_default<T>(path: Option<T>) -> Config
 where T: AsRef<Path>
 {

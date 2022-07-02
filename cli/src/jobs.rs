@@ -150,7 +150,7 @@ pub async fn add_job(db: &mut orm::MySqlPC, clargs: AddJobCli) -> anyhow::Result
         args.map_fmt, 
         args.priority, 
         args.delete_time, 
-        args.save_tarball)
+        Some(args.save_tarball))
     .await?;
     println!("Added new job, ID = {id}");
     Ok(())

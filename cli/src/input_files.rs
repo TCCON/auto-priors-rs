@@ -348,7 +348,7 @@ pub async fn add_jobs_from_input_files(conn: &mut orm::MySqlPC, clargs: ParseInp
             Some(job.map_fmt),
             None,
             None,
-            orm::jobs::TarChoice::Yes
+            Some(orm::jobs::TarChoice::Yes)
         ).await?;
 
         info!("Added job {new_id} from file {}", infile.display());
