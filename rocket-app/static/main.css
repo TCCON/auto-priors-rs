@@ -1,0 +1,52 @@
+.std-site-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12pt;
+}
+
+.site-site-legend-element {
+    border: 2pt;
+}
+
+.std-site-legend-series {
+    padding: 4pt;
+}
+
+.std-site-table {
+    text-align: center;
+}
+
+.std-site-table td {
+    padding-left: 3pt;
+    padding-right: 3pt;
+}
+
+.std-site-nonop {
+    background-color: dodgerblue;
+    color: darkblue;
+}
+
+.std-site-pending {
+    background-color: navajowhite;
+    color: goldenrod;
+}
+
+.std-site-complete {
+    background-color: yellowgreen;
+    color: darkgreen;
+}
+
+.std-site-complete a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.std-site-missing {
+    background-color: orangered;
+    color: darkred;
+}
+
+.std-site-unknown {
+    background-color: mediumorchid;
+    color: indigo;
+}

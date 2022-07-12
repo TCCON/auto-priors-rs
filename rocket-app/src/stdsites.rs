@@ -11,10 +11,6 @@ use crate::utils;
 
 #[get("/stdsites")]
 pub async fn check_std_sites(mut db: Connection<PriorsDb>) -> Result<Template, String> {
-    fn date2str(d: &NaiveDate) -> String {
-        return d.format("%Y-%m-%d").to_string()
-    }
-
     let today = Utc::today().naive_utc();
     let start_date = (Utc::today() - Duration::days(14)).naive_utc();
     let dates = utils::date_range(start_date, today);
@@ -47,8 +43,6 @@ pub async fn check_std_sites(mut db: Connection<PriorsDb>) -> Result<Template, S
 
         inner_table.insert(&job.date, job.state);
     }
-
-    // dbg!(&table);
 
     return Ok(Template::render("std-site-table", context!{
         title: "Standard sites",

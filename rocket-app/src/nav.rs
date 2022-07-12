@@ -61,3 +61,30 @@ impl<'a> Function for NavBarUrls<'a> {
         Ok(tera::to_value(url)?)
     }
 }
+
+#[derive(Debug)]
+pub struct StaticUrls {
+    static_root: String
+}
+
+impl StaticUrls {
+    pub fn new(static_root: &str) -> Self {
+        let root = static_root.trim_end_matches(&[' ', '/']);
+        return Self { static_root: root.to_owned() }
+    }
+}
+
+impl Function for StaticUrls {
+    fn call(&self, args: &std::collections::HashMap<String, tera::Value>) -> tera::Result<tera::Value> {
+        let file_path = match args.get("file") {
+            Some(val) => match tera::from_value::<String>(val.clone()) {
+                Ok(p) => p,
+                Err(_) => return Err("Unable to convert the 'file' parameter into a string".into())
+            },
+            None => return Err("Must provide a 'file' parameter, e.g. file='main.css'".into())
+        };
+
+        let url = format!("{}/{}", self.static_root, file_path);
+        Ok(tera::to_value(url)?)
+    }
+}

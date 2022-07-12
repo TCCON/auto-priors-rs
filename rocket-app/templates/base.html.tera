@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>GGG2020 Priors Generation - {{ title }}</title>
+    <link rel="stylesheet" href="{{ static(file='main.css') | safe }}">
   </head>
   <body>
     <h1>{{ title }}</h1>

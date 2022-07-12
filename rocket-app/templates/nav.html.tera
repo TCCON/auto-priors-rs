@@ -1,1 +1,2 @@
-<a href="{{ nav_url_for(name='submit_job') }}">Submit a job</a> | <a href="{{ nav_url_for(name='check_jobs') }}">Check job status</a> | <a href="{{ nav_url_for(name='check_std_sites') }}">Standard sites availability</a>
+{# Pass through safe filter to avoid escaping slashes #}
+<a href="{{ nav_url_for(name='submit_job') | safe }}">Submit a job</a> | <a href="{{ nav_url_for(name='check_jobs') | safe }}">Check job status</a> | <a href="{{ nav_url_for(name='check_std_sites') | safe }}">Standard sites availability</a>
