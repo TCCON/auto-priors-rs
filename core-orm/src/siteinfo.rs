@@ -8,6 +8,7 @@ use sqlx::{self, FromRow, Type};
 use super::MySqlPC;
 
 #[derive(Debug, Type)]
+#[repr(i8)]
 pub enum SiteType {
     Unknown = 0,
     TCCON = 1,
@@ -32,9 +33,61 @@ pub struct StdSite {
     pub site_type: SiteType
 }
 
+// impl<'r> FromRow<'r, sqlx::mysql::MySqlRow> for StdSite {
+//     // Implementing for a concrete row type was recommended by https://stackoverflow.com/a/66713961
+//     // because trying to implement for any generic row is much more work.
+//     fn from_row(row: &'r sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
+//         let id = row.try_get("id")?;
+//         let site_id = row.try_get("site_id")?;
+//         let site_type: String = row.try_get("site_type")?;
+//         // let site_type = SiteType::from(site_type_str);
+
+//         Ok(StdSite{id, site_id, site_type})
+//     }
+// }
+
 impl From<QStdSite> for StdSite {
     fn from(obj: QStdSite) -> Self {
         StdSite { id: obj.id, site_id: obj.site_id, site_type: SiteType::from(obj.site_type) }
+    }
+}
+
+impl StdSite {
+    pub async fn primary_key_to_site_id(conn: &mut MySqlPC, site_prim_key: i32) -> anyhow::Result<String> {
+        let site = sqlx::query_as!(
+            QStdSite,
+            "SELECT * FROM StdSiteList WHERE id = ?",
+            site_prim_key
+        ).fetch_one(conn)
+        .await?;
+
+        return Ok(site.site_id)
+    }
+
+    /// Returns a list of currently defined site IDs in alphabetical order
+    /// 
+    /// # Parameters
+    /// * `conn` - connection to the MySQL database
+    /// * `site_type` - optionally, which site type to return. If `None`, all sites are returned regardless of type.
+    pub async fn get_site_ids(conn: &mut MySqlPC, site_type: Option<SiteType>) -> anyhow::Result<Vec<String>> {
+        let sites = if let Some(stype) = site_type {
+            sqlx::query_as!(
+                QStdSite,
+                "SELECT * FROM StdSiteList WHERE site_type = ? ORDER BY site_id",
+                stype
+            ).fetch_all(conn)
+            .await?
+        }else{
+            sqlx::query_as!(
+                QStdSite,
+                "SELECT * FROM StdSiteList ORDER BY site_id"
+            ).fetch_all(conn)
+            .await?
+        };
+        
+
+        let site_ids = sites.into_iter().map(|s| s.site_id).collect();
+        return Ok(site_ids)
     }
 }
 

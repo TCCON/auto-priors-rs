@@ -1,0 +1,24 @@
+
+{% extends "base" %}
+
+{% block content %}
+    <p>Here are the dates requested:</p>
+    
+    <table>
+        <thead>
+            <th></th>
+            {% for sid in sites%}
+            <th>{{ sid }}</th>
+            {% endfor %}
+        </thead>
+
+        {% for date in dates %}
+        <tr>
+            <td>{{ date }}</td>
+            {% for sid in sites %}
+            <td>{{ availability[sid][date] }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </table>
+{% endblock content %}

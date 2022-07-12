@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS GeosPaths (
     product VARCHAR(8) NOT NULL,
     levels VARCHAR(8) NOT NULL,
     data_type VARCHAR(8) NOT NULL
-);
+) DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS GeosFiles (
     file_id INT PRIMARY KEY AUTO_INCREMENT,
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS GeosFiles (
     filedate DATETIME NOT NULL,
     levels VARCHAR(8) NOT NULL,
     data_type VARCHAR(8) NOT NULL
-);
+) DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS Jobs (
     job_id INT PRIMARY KEY AUTO_INCREMENT,
@@ -35,13 +35,13 @@ CREATE TABLE IF NOT EXISTS Jobs (
     complete_time DATETIME,
     output_file TEXT,
     CONSTRAINT Eq_Id_Lat_Lon CHECK (JSON_LENGTH(site_id) = JSON_LENGTH(lat) AND JSON_LENGTH(site_id) = JSON_LENGTH(lon))
-);
+) DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS StdSiteList (
     id INT PRIMARY KEY AUTO_INCREMENT,
     site_id CHAR(2) NOT NULL UNIQUE,
     site_type ENUM('Unknown', 'TCCON', 'EM27') NOT NULL DEFAULT 'Unknown'
-);
+) DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS StdSiteInfo (
     id INT PRIMARY KEY AUTO_INCREMENT, 
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS StdSiteInfo (
     end_date DATE,
     comment TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (site) REFERENCES StdSiteList(id)
-);
+) DEFAULT CHARSET=utf8mb4;
 
 CREATE OR REPLACE VIEW v_StdSiteInfo
 AS
@@ -65,12 +65,12 @@ CREATE TABLE IF NOT EXISTS StdSiteJobs (
     id INT PRIMARY KEY AUTO_INCREMENT,
     site INT NOT NULL,
     date DATE NOT NULL,
-    state TINYINT DEFAULT -1,
+    state TINYINT NOT NULL DEFAULT -1,
     job INT,
     CONSTRAINT U_Site_Date UNIQUE (site, date),
     FOREIGN KEY (site) REFERENCES StdSiteList(id),
     FOREIGN KEY (job) REFERENCES Jobs(job_id)
-);
+) DEFAULT CHARSET=utf8mb4;
 
 CREATE OR REPLACE VIEW v_StdSiteJobs
 AS

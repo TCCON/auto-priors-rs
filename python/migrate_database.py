@@ -206,11 +206,16 @@ class StdSiteInfoSql(BaseSql):
     comment = db.Column(db.Text)
 
 
-def migrate(sqlite_db, sql_db, sql_user, sql_pw, sites_json=None):
+def migrate(sqlite_db, sql_db, sql_user, sql_pw, host='localhost', sites_json=None):
+    print('Copying')
+    print(f'sqlite:///{sqlite_db}')
+    print('to')
+    print(f'mysql://{sql_user}:********@{host}/{sql_db}?charset=utf8mb4')
+    # The utf8mb4 is required to handle all unicode characters, see https://docs.sqlalchemy.org/en/14/dialects/mysql.html#charset-selection
     sqlite_engine = db.create_engine(f'sqlite:///{sqlite_db}', future=True)
-    mysql_engine = db.create_engine(f'mysql://{sql_user}:{sql_pw}@localhost/{sql_db}', future=True)
-    # migrate_table(sqlite_engine, mysql_engine, GeosPathsSqlite, GeosPathsSql)
-    # migrate_table(sqlite_engine, mysql_engine, GeosFilesSqlite, GeosFilesSql)
+    mysql_engine = db.create_engine(f'mysql://{sql_user}:{sql_pw}@{host}/{sql_db}?charset=utf8mb4', future=True)
+    migrate_table(sqlite_engine, mysql_engine, GeosPathsSqlite, GeosPathsSql)
+    migrate_table(sqlite_engine, mysql_engine, GeosFilesSqlite, GeosFilesSql)
     migrate_table(sqlite_engine, mysql_engine, JobsSqlite, JobsSql)
     migrate_std_sites(sqlite_engine, mysql_engine)
     if sites_json:
@@ -301,10 +306,11 @@ def add_site_info(sql_engine, site_json):
 
 def main():
     p = ArgumentParser('Migrate an AutoModPython sqlite3 database to MySQL')
+    p.add_argument('--host', default='localhost', help='The host that the MySQL database resides on. Default is %(default)s.')
     p.add_argument('sqlite_db', help='Path to the sqlite3 file')
     p.add_argument('sql_db', help='Name of the MySQL database')
     p.add_argument('sql_user', help='MySQL username')
-    p.add_argument('sql_pw', help='MySQl password')
+    p.add_argument('sql_pw', help='MySQL password')
     p.add_argument('sites_json', nargs='?', help='Optional flat JSON of TCCON site locations')
 
     clargs = vars(p.parse_args())

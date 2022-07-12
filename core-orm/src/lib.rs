@@ -8,6 +8,7 @@ use sqlx;
 pub mod config;
 pub mod siteinfo;
 pub mod jobs;
+pub mod stdsitejobs;
 
 pub type MySqlPool = sqlx::pool::Pool<sqlx::MySql>;
 pub type MySqlPC = sqlx::pool::PoolConnection<sqlx::MySql>;
