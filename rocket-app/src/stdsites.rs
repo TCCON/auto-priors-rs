@@ -1,19 +1,17 @@
 use std::collections::HashMap;
-use chrono::NaiveDate;
 use chrono::{Utc,Duration};
 use log::warn;
 use rocket_db_pools::Connection;
 use rocket_dyn_templates::{Template,context};
-use orm::{siteinfo,stdsitejobs};
+use orm::{siteinfo,stdsitejobs,utils};
 
 use crate::PriorsDb;
-use crate::utils;
 
 #[get("/stdsites")]
 pub async fn check_std_sites(mut db: Connection<PriorsDb>) -> Result<Template, String> {
     let today = Utc::today().naive_utc();
     let start_date = (Utc::today() - Duration::days(14)).naive_utc();
-    let dates = utils::date_range(start_date, today);
+    let dates = utils::date_range(start_date, today + Duration::days(1));
 
     let site_ids = siteinfo::StdSite::get_site_ids(&mut *db, None)
         .await

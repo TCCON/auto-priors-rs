@@ -64,6 +64,17 @@ impl StdSite {
         return Ok(site.site_id)
     }
 
+    pub async fn site_id_to_primary_key(conn: &mut MySqlPC, site_id: &str) -> anyhow::Result<i32> {
+        let site = sqlx::query_as!(
+            QStdSite,
+            "SELECT * FROM StdSiteList WHERE site_id = ?",
+            site_id
+        ).fetch_one(conn)
+        .await?;
+
+        return Ok(site.id)
+    }
+
     /// Returns a list of currently defined site IDs in alphabetical order
     /// 
     /// # Parameters

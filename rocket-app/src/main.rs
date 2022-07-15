@@ -8,7 +8,6 @@ use rocket_dyn_templates::{Template,context};
 
 use orm::siteinfo;
 
-mod utils;
 mod nav;
 mod api;
 mod jobs;

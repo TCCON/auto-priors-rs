@@ -6,6 +6,8 @@ use log;
 use sqlx;
 
 pub mod config;
+pub mod utils;
+pub mod geos;
 pub mod siteinfo;
 pub mod jobs;
 pub mod stdsitejobs;

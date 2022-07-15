@@ -25,6 +25,7 @@ use tokio;
 mod jobs;
 mod input_files;
 mod siteinfo;
+mod stdsites;
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -38,6 +39,7 @@ enum Commands {
     ParseInputFilesManually(input_files::ParseInputFilesManualCli),
     AddJob(jobs::AddJobCli),
     DeleteJob(jobs::DeleteJobCli),
+    StdSites(stdsites::StdSiteJobCli),
     SiteInfoJson(siteinfo::InfoJsonCli),
     GenConfig(GenConfigCli)
 }
@@ -65,11 +67,14 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let mut db = orm::get_database_pool(None).await.unwrap();
+    // TODO: replace with actual config
+    let config = orm::config::Config::default();
 
     match args.command {
         Commands::ParseInputFilesManually(subargs) => {input_files::add_jobs_from_input_files(subargs)?; }
         Commands::AddJob(subargs) => {jobs::add_job(&mut db.acquire().await?, subargs).await?;},
         Commands::DeleteJob(subargs) => {jobs::delete_job(&mut db, subargs).await?},
+        Commands::StdSites(subargs) => stdsites::standard_site_driver(&mut db, subargs, &config).await?,
         Commands::SiteInfoJson(subargs) => siteinfo::site_info_json(&mut db.acquire().await?, &subargs).await?,
         Commands::GenConfig(subargs) => generate_config_file(subargs)?
     };
