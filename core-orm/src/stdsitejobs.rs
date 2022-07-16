@@ -5,7 +5,7 @@ use chrono::{NaiveDate, Duration};
 use futures::TryStreamExt;
 use log::{warn, info};
 use serde::Serialize;
-use sqlx::{self, FromRow, Type};
+use sqlx::{self, FromRow, Type, Acquire};
 
 use crate::MySqlConn;
 use crate::{utils,geos,jobs,siteinfo};
@@ -188,49 +188,48 @@ impl StdSiteJob {
 
         // Create a new job for the active sites, then add elements to the StdSiteJob table for both
         // the operation and non-operational sites.
-        // TODO: Fix this transaction (https://docs.rs/sqlx/latest/sqlx/struct.Transaction.html)
-        // so that if something bad happens, we leave the database in a consistent state.
-        // Can test by taking off the #[repr(i8)] from StdSiteJobState
         let latlon: Vec<Option<f32>> = (0..job_sites.len()).map(|_| None).collect();
 
-        // let transaction = conn.begin().await?;
-            let new_job_id = jobs::Job::add_job_from_args(
-                &mut *conn, 
-                job_sites.clone(),
+        let mut transaction = conn.begin().await?;
+        let trans_conn = transaction.acquire().await?;
+
+        let new_job_id = jobs::Job::add_job_from_args(
+            &mut *trans_conn, 
+            job_sites.clone(),
+            date,
+            date + Duration::days(1),
+            save_dir.to_owned(),
+            None,
+            latlon.clone(),
+            latlon,
+            Some(jobs::ModFmt::Text),
+            Some(jobs::VmrFmt::Text),
+            Some(jobs::MapFmt::None), // TODO: will need to be text for EM27s potentially
+            Some(10),
+            None,
+            Some(jobs::TarChoice::No)
+        ).await?;
+
+        for site in job_sites.iter() {
+            Self::add_std_site_job_row_from_args(
+                &mut *trans_conn,
+                site,
                 date,
-                date + Duration::days(1),
-                save_dir.to_owned(),
-                None,
-                latlon.clone(),
-                latlon,
-                Some(jobs::ModFmt::Text),
-                Some(jobs::VmrFmt::Text),
-                Some(jobs::MapFmt::None), // TODO: will need to be text for EM27s potentially
-                Some(10),
-                None,
-                Some(jobs::TarChoice::No)
+                StdSiteJobState::Pending,
+                Some(new_job_id)
             ).await?;
+        }
 
-            for site in job_sites.iter() {
-                Self::add_std_site_job_row_from_args(
-                    &mut *conn,
-                    site,
-                    date,
-                    StdSiteJobState::Pending,
-                    Some(new_job_id)
-                ).await?;
-            }
-
-            for site in nonop_sites.iter() {
-                Self::add_std_site_job_row_from_args(
-                    &mut *conn,
-                    site,
-                    date,
-                    StdSiteJobState::Nonop,
-                    Some(new_job_id)
-                ).await?;
-            }
-        // transaction.commit().await?;
+        for site in nonop_sites.iter() {
+            Self::add_std_site_job_row_from_args(
+                &mut *trans_conn,
+                site,
+                date,
+                StdSiteJobState::Nonop,
+                Some(new_job_id)
+            ).await?;
+        }
+        transaction.commit().await?;
         
         info!("Added job {new_job_id} for standard sites ({} active, {} nonoperational)", job_sites.len(), nonop_sites.len());
         Ok(Some(AddStdJobSummary{
