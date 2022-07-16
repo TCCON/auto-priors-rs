@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use chrono::{Utc,Duration};
+use chrono::{Utc,Duration, NaiveDate};
 use log::warn;
 use rocket_db_pools::Connection;
 use rocket_dyn_templates::{Template,context};
-use orm::{siteinfo,stdsitejobs,utils};
+use orm::{geos,siteinfo,stdsitejobs,utils};
 
 use crate::PriorsDb;
 
@@ -22,11 +22,20 @@ pub async fn check_std_sites(mut db: Connection<PriorsDb>) -> Result<Template, S
     ).await
     .expect("Standard site job database query failure!");
 
+    let last_geos_date = geos::GeosFile::get_last_complete_date(
+        &mut *db, geos::GeosLevels::Eta, geos::GeosProduct::Fpit, true).await
+        .expect("Geos file database query failure!")
+        .unwrap_or(NaiveDate::from_ymd(1970, 1, 1));
+
     let mut table = HashMap::new();
     for sid in site_ids.iter() {
         let mut inner_table = HashMap::new();
         for date in dates.iter() {
-            inner_table.insert(date, stdsitejobs::StdSiteJobState::Missing);
+            if date <= &last_geos_date {
+                inner_table.insert(date, stdsitejobs::StdSiteJobState::MissingGeosPresent);
+            } else {
+                inner_table.insert(date, stdsitejobs::StdSiteJobState::MissingGeosUnavailable);
+            }
         }
         table.insert(sid, inner_table);
     }

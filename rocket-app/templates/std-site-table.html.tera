@@ -6,7 +6,10 @@
 
     <div class="std-site-legend">
         <div class="site-site-legend-element">
-            <span class="std-site-missing std-site-legend-series">✖</span> Missing, job not yet queued
+            <span class="std-site-missing-no-geos std-site-legend-series">✖</span> Missing, waiting for GEOS FP-IT data
+        </div>
+        <div class="site-site-legend-element">
+            <span class="std-site-missing-geos-avail std-site-legend-series">🕑</span> Missing, GEOS FP-IT available, waiting for job to be queued
         </div>
         <div class="site-site-legend-element">
             <span class="std-site-nonop std-site-legend-series">⁓</span> Site was nonoperational, priors will not be generated
@@ -35,8 +38,10 @@
             <td>{{ date }}</td>
             {% for sid in sites %}
                 {% set state = availability[sid][date] %}
-                {% if state == "Missing" %}
-                    <td class="std-site-missing">✖</td>
+                {% if state == "MissingGeosUnavailable" %}
+                    <td class="std-site-missing-no-geos">✖</td>
+                {% elif state == "MissingGeosPresent" %}
+                    <td class="std-site-missing-geos-avail">🕑</td>
                 {% elif state == "Nonop" %}
                     <td class="std-site-nonop">⁓</td>
                 {% elif state == "Pending" %}

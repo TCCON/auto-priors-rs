@@ -16,8 +16,10 @@ use crate::{utils,geos,jobs,siteinfo};
 pub enum StdSiteJobState {
     /// Indicates an unexpected value for state
     Unknown = -99, 
-    /// Indicates this site/date combination is not present in the table
-    Missing = -2,
+    /// Indicates this site/date combination is not present in the table and the GEOS FP-IT data is not available
+    MissingGeosUnavailable = -3,
+    /// Indicates this site/date combination is not present in the table, but the GEOS FP-IT data needed to generate it has been downloaded.
+    MissingGeosPresent = -2,
     /// Indicates the site was not operational on this date and priors will never be generated for it
     Nonop = -1,
     /// Indicates that priors will need to be generated for this site

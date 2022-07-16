@@ -41,7 +41,11 @@
     text-decoration: none;
 }
 
-.std-site-missing {
+.std-site-missing-geos-avail {
+    background-color: rgb(212, 192, 6);
+}
+
+.std-site-missing-no-geos {
     background-color: orangered;
     color: darkred;
 }
