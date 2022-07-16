@@ -94,11 +94,11 @@ async fn main() -> anyhow::Result<()> {
         },
 
         Commands::DeleteJob(subargs) => {jobs::delete_job(
-            &mut db, subargs).await?
+            &mut db.acquire().await?, subargs).await?
         },
 
         Commands::StdSites(subargs) => {stdsites::standard_site_driver(
-            &mut db, subargs, &config).await?
+            &mut db.acquire().await?, subargs, &config).await?
         },
 
         Commands::SiteInfoJson(subargs) => {

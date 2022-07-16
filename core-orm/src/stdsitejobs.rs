@@ -5,7 +5,6 @@ use chrono::{NaiveDate, Duration};
 use futures::TryStreamExt;
 use log::{warn, info};
 use serde::Serialize;
-use sqlx::MySqlPool;
 use sqlx::{self, FromRow, Type};
 
 use crate::MySqlPC;
@@ -153,17 +152,17 @@ impl StdSiteJob {
     /// # Errors
     /// Returns an `Err` if any of the database queries fail. Should any of the queries to create
     /// the job or the new standard site job rows fail, all of the insert queries should be rolled back.
-    pub async fn add_new_std_jobs_for_date(pool: &mut MySqlPool, date: NaiveDate, save_dir: &Path) -> anyhow::Result<Option<AddStdJobSummary>> {
+    pub async fn add_new_std_jobs_for_date(conn: &mut MySqlPC, date: NaiveDate, save_dir: &Path) -> anyhow::Result<Option<AddStdJobSummary>> {
         // First check if this date already has any sites - if so, return None (this function is not intended for backfilling)
         let date_count = sqlx::query!("SELECT COUNT(*) as count FROM StdSiteJobs WHERE date = ?", date)
-            .fetch_one(&mut pool.acquire().await?)
+            .fetch_one(&mut *conn)
             .await?
             .count;
 
         if date_count > 0 { return Ok(None) }
 
         // Now figure out which sites need priors generated and which are not operational
-        let active_site_info = siteinfo::SiteInfo::get_site_info_for_date(&mut pool.acquire().await?, date, true)
+        let active_site_info = siteinfo::SiteInfo::get_site_info_for_date(&mut *conn, date, true)
             .await?;
 
         let mut active_sites = HashSet::new();
@@ -175,7 +174,7 @@ impl StdSiteJob {
             }
         }
 
-        let all_sites = siteinfo::StdSite::get_site_ids(&mut pool.acquire().await?, None)
+        let all_sites = siteinfo::StdSite::get_site_ids(&mut *conn, None)
             .await?;
         let mut job_sites = vec![];
         let mut nonop_sites = vec![];
@@ -194,9 +193,9 @@ impl StdSiteJob {
         // Can test by taking off the #[repr(i8)] from StdSiteJobState
         let latlon: Vec<Option<f32>> = (0..job_sites.len()).map(|_| None).collect();
 
-        let transaction = pool.begin().await?;
+        // let transaction = conn.begin().await?;
             let new_job_id = jobs::Job::add_job_from_args(
-                &mut pool.acquire().await?, 
+                &mut *conn, 
                 job_sites.clone(),
                 date,
                 date + Duration::days(1),
@@ -214,7 +213,7 @@ impl StdSiteJob {
 
             for site in job_sites.iter() {
                 Self::add_std_site_job_row_from_args(
-                    &mut pool.acquire().await?,
+                    &mut *conn,
                     site,
                     date,
                     StdSiteJobState::Pending,
@@ -224,14 +223,14 @@ impl StdSiteJob {
 
             for site in nonop_sites.iter() {
                 Self::add_std_site_job_row_from_args(
-                    &mut pool.acquire().await?,
+                    &mut *conn,
                     site,
                     date,
                     StdSiteJobState::Nonop,
                     Some(new_job_id)
                 ).await?;
             }
-        transaction.commit().await?;
+        // transaction.commit().await?;
         
         info!("Added job {new_job_id} for standard sites ({} active, {} nonoperational)", job_sites.len(), nonop_sites.len());
         Ok(Some(AddStdJobSummary{
@@ -256,10 +255,10 @@ impl StdSiteJob {
     /// * any of the database operations fail
     /// * there are no existing standard site jobs, so cannot determine the starting date
     /// * `date` is `None` and it cannot determine the last date with the full required suite of GEOS files
-    pub async fn add_new_std_jobs_up_to_date(pool: &mut MySqlPool, date: Option<NaiveDate>, save_dir: &Path) -> anyhow::Result<Vec<AddStdJobSummary>> {
+    pub async fn add_new_std_jobs_up_to_date(conn: &mut MySqlPC, date: Option<NaiveDate>, save_dir: &Path) -> anyhow::Result<Vec<AddStdJobSummary>> {
         let last_std_site_date = sqlx::query!(
             "SELECT MAX(date) as date FROM StdSiteJobs"
-        ).fetch_one(&mut pool.acquire().await?)
+        ).fetch_one(&mut *conn)
         .await?
         .date
         .ok_or(anyhow::Error::msg("Found no existing standard site jobs, cannot use the function add_new_std_jobs_up_to_date"))?;
@@ -268,7 +267,7 @@ impl StdSiteJob {
             d
         }else{
             geos::GeosFile::get_last_complete_date(
-                &mut pool.acquire().await?, 
+                &mut *conn, 
                 geos::GeosLevels::Eta,
                 geos::GeosProduct::Fpit,
                 true
@@ -278,7 +277,7 @@ impl StdSiteJob {
 
         let mut added = vec![];
         for date in utils::date_range(last_std_site_date + Duration::days(1), last_date + Duration::days(1)) {
-            if let Some(res) = Self::add_new_std_jobs_for_date(pool, date, save_dir).await? {
+            if let Some(res) = Self::add_new_std_jobs_for_date(conn, date, save_dir).await? {
                 added.push(res);
             }
         }

@@ -1,7 +1,6 @@
 #[macro_use] extern crate rocket;
 
 use rocket::fs::{FileServer,relative};
-use rocket::response::content::RawHtml;
 use rocket_db_pools::{Database, Connection};
 use rocket_db_pools::sqlx;
 use rocket_dyn_templates::{Template,context};

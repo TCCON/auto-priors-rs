@@ -156,7 +156,7 @@ pub async fn add_job(db: &mut orm::MySqlPC, clargs: AddJobCli) -> anyhow::Result
     Ok(())
 }
 
-pub async fn delete_job(db: &mut orm::MySqlPool, clargs: DeleteJobCli) -> anyhow::Result<()> {
+pub async fn delete_job(db: &mut orm::MySqlPC, clargs: DeleteJobCli) -> anyhow::Result<()> {
     let n_deleted = orm::jobs::Job::delete_job_with_id(db, clargs.id).await?;
     println!("Deleted {n_deleted} job(s)");
     Ok(())

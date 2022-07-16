@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json;
 use sqlx::{self, FromRow, Type};
 
-use crate::{MySqlPC, MySqlPool, siteinfo};
+use crate::{MySqlPC, siteinfo};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
@@ -763,12 +763,12 @@ impl Job {
     /// Unlike most job functions, this needs a pool of database connections, rather than a single
     /// connection. This is an internal implementation detail that can hopefully be addressed in the
     /// future to use a single connection, to be consistent with other job functions.
-    pub async fn delete_job_with_id(pool: &mut MySqlPool, id: i32) -> anyhow::Result<i64> {
+    pub async fn delete_job_with_id(conn: &mut MySqlPC, id: i32) -> anyhow::Result<i64> {
         // TODO: Switch to using a MySqlPC, when passing to fetch methods, use `&mut *conn` instead of `&mut pool.acquire().await?`
 
         // must rename COUNT(*) to a valid field name
         let pre_count = sqlx::query!("SELECT COUNT(*) as count FROM Jobs")
-            .fetch_one(&mut pool.acquire().await?)
+            .fetch_one(&mut *conn)
             .await?
             .count;
         
@@ -777,11 +777,11 @@ impl Job {
             "DELETE FROM Jobs WHERE job_id = ? AND state = ?",
             id,
             pending
-        ).execute(&mut pool.acquire().await?)
+        ).execute(&mut *conn)
         .await?;
 
         let post_count = sqlx::query!("SELECT COUNT(*) as count FROM Jobs")
-            .fetch_one(&mut pool.acquire().await?)
+            .fetch_one(&mut *conn)
             .await?
             .count;
 
