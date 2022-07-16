@@ -764,8 +764,7 @@ impl Job {
     /// connection. This is an internal implementation detail that can hopefully be addressed in the
     /// future to use a single connection, to be consistent with other job functions.
     pub async fn delete_job_with_id(pool: &mut MySqlPool, id: i32) -> anyhow::Result<i64> {
-        // TODO: Can we reuse a connection (MySqlPC) instead of the pool? Taking pool as &mut MySqlPc and 
-        // passing it to fetch_one would cause a moved error later.
+        // TODO: Switch to using a MySqlPC, when passing to fetch methods, use `&mut *conn` instead of `&mut pool.acquire().await?`
 
         // must rename COUNT(*) to a valid field name
         let pre_count = sqlx::query!("SELECT COUNT(*) as count FROM Jobs")

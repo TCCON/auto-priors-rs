@@ -27,6 +27,7 @@ use tokio;
 mod jobs;
 mod input_files;
 mod siteinfo;
+mod stdsites;
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -43,6 +44,7 @@ enum Commands {
     ParseInputFilesManually(input_files::ParseInputFilesManualCli),
     AddJob(jobs::AddJobCli),
     DeleteJob(jobs::DeleteJobCli),
+    StdSites(stdsites::StdSiteJobCli),
     SiteInfoJson(siteinfo::InfoJsonCli),
     GenConfig(GenConfigCli)
 }
@@ -93,6 +95,10 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::DeleteJob(subargs) => {jobs::delete_job(
             &mut db, subargs).await?
+        },
+
+        Commands::StdSites(subargs) => {stdsites::standard_site_driver(
+            &mut db, subargs, &config).await?
         },
 
         Commands::SiteInfoJson(subargs) => {

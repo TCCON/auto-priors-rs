@@ -1,0 +1,56 @@
+
+{% extends "base" %}
+
+{% block content %}
+    <p>Here are the dates requested:</p>
+
+    <div class="std-site-legend">
+        <div class="site-site-legend-element">
+            <span class="std-site-missing std-site-legend-series">✖</span> Missing, job not yet queued
+        </div>
+        <div class="site-site-legend-element">
+            <span class="std-site-nonop std-site-legend-series">⁓</span> Site was nonoperational, priors will not be generated
+        </div>
+        <div class="site-site-legend-element">
+            <span class="std-site-pending std-site-legend-series">⋯</span> Pending, job queued to generate priors
+        </div>
+        <div class="site-site-legend-element">
+            <span class="std-site-complete std-site-legend-series">✓</span> Complete, priors available for download
+        </div>
+        <div class="site-site-legend-element">
+            <span class="std-site-unknown std-site-legend-series">?</span> Unknown, usually means something is wrong
+        </div>
+    </div>
+    
+    <table class="std-site-table">
+        <thead>
+            <th></th>
+            {% for sid in sites%}
+            <th>{{ sid }}</th>
+            {% endfor %}
+        </thead>
+
+        {% for date in dates %}
+        <tr>
+            <td>{{ date }}</td>
+            {% for sid in sites %}
+                {% set state = availability[sid][date] %}
+                {% if state == "Missing" %}
+                    <td class="std-site-missing">✖</td>
+                {% elif state == "Nonop" %}
+                    <td class="std-site-nonop">⁓</td>
+                {% elif state == "Pending" %}
+                    <td class="std-site-pending">⋯</td>
+                {% elif state == "Complete" %}
+                    {% set ftpdate = date | replace(from='-', to='') %}
+                    <td class="std-site-complete">
+                        <a href="ftp://ccycle.gps.caltech.edu/ginput-std-sites/tarballs/{{ sid }}/{{ sid }}_ggg_inputs_{{ ftpdate }}.tgz">✓</a>
+                    </td>
+                {% else %}
+                    <td class="std-site-unknown">?</td>
+                {% endif %}
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </table>
+{% endblock content %}

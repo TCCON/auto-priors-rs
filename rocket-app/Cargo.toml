@@ -5,8 +5,13 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
+anyhow = "1.0"
 chrono = "0.4"
+env_logger = "0.9"
+log = "0.4"
 orm = {path = "../core-orm", package = "tccon_priors_orm"}
+serde = { version = "1.0", features = ["derive"] }
+tera = "1.10.0"
 
 # Could not use the contrib rocket_dyn_templates with a Git pinned copy of Rocket itself. My guess
 # is that the dyn_templates cargo crate was trying to connect to a different version of the main
