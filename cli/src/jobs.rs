@@ -135,7 +135,7 @@ impl TryFrom<AddJobCli> for AddJobArgs {
     }
 }
 
-pub async fn add_job(db: &mut orm::MySqlPC, clargs: AddJobCli) -> anyhow::Result<()> {
+pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli) -> anyhow::Result<()> {
     let args = AddJobArgs::try_from(clargs)?;
     let id = Job::add_job_from_args(db, 
         args.site_id,
@@ -156,7 +156,7 @@ pub async fn add_job(db: &mut orm::MySqlPC, clargs: AddJobCli) -> anyhow::Result
     Ok(())
 }
 
-pub async fn delete_job(db: &mut orm::MySqlPC, clargs: DeleteJobCli) -> anyhow::Result<()> {
+pub async fn delete_job(db: &mut orm::MySqlConn, clargs: DeleteJobCli) -> anyhow::Result<()> {
     let n_deleted = orm::jobs::Job::delete_job_with_id(db, clargs.id).await?;
     println!("Deleted {n_deleted} job(s)");
     Ok(())

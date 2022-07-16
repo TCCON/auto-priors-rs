@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json;
 use sqlx::{self, FromRow, Type};
 
-use crate::{MySqlPC, siteinfo};
+use crate::{MySqlConn, siteinfo};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
@@ -478,7 +478,7 @@ impl Job {
     /// 
     /// * no job with that ID was found.
     /// * the query could not be converted into the Rust `Job` type.
-    pub async fn get_job_with_id(conn: &mut MySqlPC, id: i32) -> anyhow::Result<Job> {
+    pub async fn get_job_with_id(conn: &mut MySqlConn, id: i32) -> anyhow::Result<Job> {
         let result = sqlx::query_as!(
                 QJob,
                 "SELECT * FROM Jobs WHERE job_id = ?",
@@ -665,7 +665,7 @@ impl Job {
     /// * converting the `save_dir` path to UTF-8 fails
     /// * the INSERT query fails (e.g. if any constraints are violated)
     pub async fn add_job_from_args(
-        conn: &mut MySqlPC,
+        conn: &mut MySqlConn,
         site_id: Vec<String>,
         start_date: NaiveDate,
         end_date: NaiveDate,
@@ -763,7 +763,7 @@ impl Job {
     /// Unlike most job functions, this needs a pool of database connections, rather than a single
     /// connection. This is an internal implementation detail that can hopefully be addressed in the
     /// future to use a single connection, to be consistent with other job functions.
-    pub async fn delete_job_with_id(conn: &mut MySqlPC, id: i32) -> anyhow::Result<i64> {
+    pub async fn delete_job_with_id(conn: &mut MySqlConn, id: i32) -> anyhow::Result<i64> {
         // TODO: Switch to using a MySqlPC, when passing to fetch methods, use `&mut *conn` instead of `&mut pool.acquire().await?`
 
         // must rename COUNT(*) to a valid field name

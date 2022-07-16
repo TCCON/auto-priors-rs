@@ -314,7 +314,7 @@ impl InputJobBuilder {
 }
 
 
-pub async fn add_jobs_from_input_files(conn: &mut orm::MySqlPC, clargs: ParseInputFilesManualCli, config: &orm::config::Config) -> anyhow::Result<()> {
+pub async fn add_jobs_from_input_files(conn: &mut orm::MySqlConn, clargs: ParseInputFilesManualCli, config: &orm::config::Config) -> anyhow::Result<()> {
     let input_files = clargs.input_files;
     let mut jobs = vec![];
     let mut successful_input_files = vec![];

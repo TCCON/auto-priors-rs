@@ -13,7 +13,7 @@ pub mod jobs;
 pub mod stdsitejobs;
 
 pub type MySqlPool = sqlx::pool::Pool<sqlx::MySql>;
-pub type MySqlPC = sqlx::pool::PoolConnection<sqlx::MySql>;
+pub type MySqlConn = sqlx::MySqlConnection;
 static DB_ENV_VARS: [&'static str; 2] = ["PRIORS_DATABASE_URL", "DATABASE_URL"];
 
 fn get_database_url(url_in: Option<String>) -> anyhow::Result<String> {

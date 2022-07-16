@@ -51,7 +51,7 @@ pub struct InfoJsonCli {
 }
 
 
-pub async fn site_info_json(db: &mut orm::MySqlPC, clargs: &InfoJsonCli) -> anyhow::Result<()> {
+pub async fn site_info_json(db: &mut orm::MySqlConn, clargs: &InfoJsonCli) -> anyhow::Result<()> {
     let infos = if clargs.date.is_some() {
         orm::siteinfo::SiteInfo::get_site_info_for_date(db, clargs.date.unwrap(), !clargs.inactive).await?
     }else {

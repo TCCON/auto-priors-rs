@@ -6,7 +6,7 @@ use chrono::{NaiveDate, Duration};
 use serde::Serialize;
 use sqlx::{self, FromRow, Type};
 
-use super::MySqlPC;
+use super::MySqlConn;
 
 /// An enum describing the type of site
 #[derive(Debug, Type)]
@@ -76,7 +76,7 @@ impl From<QStdSite> for StdSite {
 }
 
 impl StdSite {
-    pub async fn primary_key_to_site_id(conn: &mut MySqlPC, site_prim_key: i32) -> anyhow::Result<String> {
+    pub async fn primary_key_to_site_id(conn: &mut MySqlConn, site_prim_key: i32) -> anyhow::Result<String> {
         let site = sqlx::query_as!(
             QStdSite,
             "SELECT * FROM StdSiteList WHERE id = ?",
@@ -87,7 +87,7 @@ impl StdSite {
         return Ok(site.site_id)
     }
 
-    pub async fn site_id_to_primary_key(conn: &mut MySqlPC, site_id: &str) -> anyhow::Result<i32> {
+    pub async fn site_id_to_primary_key(conn: &mut MySqlConn, site_id: &str) -> anyhow::Result<i32> {
         let site = sqlx::query_as!(
             QStdSite,
             "SELECT * FROM StdSiteList WHERE site_id = ?",
@@ -103,7 +103,7 @@ impl StdSite {
     /// # Parameters
     /// * `conn` - connection to the MySQL database
     /// * `site_type` - optionally, which site type to return. If `None`, all sites are returned regardless of type.
-    pub async fn get_site_ids(conn: &mut MySqlPC, site_type: Option<SiteType>) -> anyhow::Result<Vec<String>> {
+    pub async fn get_site_ids(conn: &mut MySqlConn, site_type: Option<SiteType>) -> anyhow::Result<Vec<String>> {
         let sites = if let Some(stype) = site_type {
             sqlx::query_as!(
                 QStdSite,
@@ -167,7 +167,7 @@ impl SiteInfo {
     /// Return the standard site table entry associated with this site information.
     /// 
     /// If a standard site cannot be found, the returned result will be and `Err`.
-    pub async fn get_std_site(&self, pool: &mut MySqlPC) -> anyhow::Result<StdSite> {
+    pub async fn get_std_site(&self, pool: &mut MySqlConn) -> anyhow::Result<StdSite> {
         let result = sqlx::query_as!(
                 QStdSite,
                 "SELECT * FROM StdSiteList WHERE id = ?",
@@ -286,7 +286,7 @@ impl SiteInfo {
     /// 
     /// * `pool` - the MySQL pool or connection object to perform the query with
     /// * `site_id` - the two letter site ID of the site to query, e.g. "pa"
-    pub async fn get_most_recent_site_location(pool: &mut MySqlPC, site_id: &str) -> anyhow::Result<SiteInfo> {
+    pub async fn get_most_recent_site_location(pool: &mut MySqlConn, site_id: &str) -> anyhow::Result<SiteInfo> {
         let result = sqlx::query_as!(
                 SiteInfo, 
                 "SELECT * FROM v_StdSiteInfo WHERE site_id = ? ORDER BY start_date DESC LIMIT 1",
@@ -297,7 +297,7 @@ impl SiteInfo {
         Ok(result)
     }
 
-    pub async fn get_all_site_info(pool: &mut MySqlPC) -> anyhow::Result<Vec<SiteInfo>> {
+    pub async fn get_all_site_info(pool: &mut MySqlConn) -> anyhow::Result<Vec<SiteInfo>> {
         let result = sqlx::query_as!(
             SiteInfo,
             "SELECT * FROM v_StdSiteInfo"
@@ -322,7 +322,7 @@ impl SiteInfo {
     /// 
     /// Whether `active` is `true` or `false`, if a site has more than 1 instance of information that
     /// brackets the given `date`, the one with the most recent start date will be returned.
-    pub async fn get_site_info_for_date(conn: &mut MySqlPC, date: NaiveDate, active: bool) -> anyhow::Result<Vec<SiteInfo>> {
+    pub async fn get_site_info_for_date(conn: &mut MySqlConn, date: NaiveDate, active: bool) -> anyhow::Result<Vec<SiteInfo>> {
         if active {
             let result = sqlx::query_as!(
                 SiteInfo,
@@ -397,7 +397,7 @@ impl SiteInfo {
         }
     }
 
-    pub async fn verify_info_available_for_site(conn: &mut MySqlPC, site_id: &str) -> anyhow::Result<bool> {
+    pub async fn verify_info_available_for_site(conn: &mut MySqlConn, site_id: &str) -> anyhow::Result<bool> {
         let n_match = sqlx::query!("SELECT COUNT(*) as count FROM v_StdSiteInfo WHERE site_id = ?", site_id)
             .fetch_one(conn)
             .await?

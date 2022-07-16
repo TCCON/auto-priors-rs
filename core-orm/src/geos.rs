@@ -3,7 +3,7 @@ use std::{path::PathBuf, str::FromStr, fmt::Display};
 use chrono::{NaiveDateTime, NaiveDate};
 use sqlx::{self, Type, FromRow};
 
-use crate::MySqlPC;
+use crate::MySqlConn;
 
 #[derive(Debug, Type)]
 pub enum GeosProduct {
@@ -120,7 +120,7 @@ impl GeosFile {
     /// 
     /// # Errors
     /// Returns an `Err` if the database query fails for any reason.
-    pub async fn get_last_complete_date(conn: &mut MySqlPC, met_levels: GeosLevels, geos_product: GeosProduct, req_chm: bool) -> anyhow::Result<Option<NaiveDate>> {
+    pub async fn get_last_complete_date(conn: &mut MySqlConn, met_levels: GeosLevels, geos_product: GeosProduct, req_chm: bool) -> anyhow::Result<Option<NaiveDate>> {
         // We find the date that has a complete set of 8 3D met files, 2D met files, and (optionally)
         // 3D chemistry files by making subqueries for each file type where we count the number of 
         // files for each date and join the subqueries on their dates. We limit the result to where

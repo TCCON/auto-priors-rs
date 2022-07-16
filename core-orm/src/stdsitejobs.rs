@@ -7,7 +7,7 @@ use log::{warn, info};
 use serde::Serialize;
 use sqlx::{self, FromRow, Type};
 
-use crate::MySqlPC;
+use crate::MySqlConn;
 use crate::{utils,geos,jobs,siteinfo};
 
 
@@ -66,7 +66,7 @@ impl From<QStdSiteJob> for StdSiteJob {
 }
 
 impl StdSiteJob {
-    pub async fn add_std_site_job_row_from_args(conn: &mut MySqlPC, site_id: &str, date: NaiveDate, state: StdSiteJobState, job: Option<i32>) -> anyhow::Result<()> {
+    pub async fn add_std_site_job_row_from_args(conn: &mut MySqlConn, site_id: &str, date: NaiveDate, state: StdSiteJobState, job: Option<i32>) -> anyhow::Result<()> {
         let site_prim_key = siteinfo::StdSite::site_id_to_primary_key(conn, site_id).await?;
         sqlx::query!(
             "INSERT INTO StdSiteJobs (site, date, state, job) VALUES (?, ?, ?, ?)",
@@ -99,7 +99,7 @@ impl StdSiteJob {
     /// 
     /// # Errors
     /// Returns an `Err` if the database query operation fails at any point. 
-    pub async fn get_std_site_availability(conn: &mut MySqlPC, start_date: NaiveDate, end_date: Option<NaiveDate>, site_id: Option<&str>) -> anyhow::Result<Vec<StdSiteJob>>{
+    pub async fn get_std_site_availability(conn: &mut MySqlConn, start_date: NaiveDate, end_date: Option<NaiveDate>, site_id: Option<&str>) -> anyhow::Result<Vec<StdSiteJob>>{
         let end_date = if let Some(e) = end_date {
             e
         }else{
@@ -152,7 +152,7 @@ impl StdSiteJob {
     /// # Errors
     /// Returns an `Err` if any of the database queries fail. Should any of the queries to create
     /// the job or the new standard site job rows fail, all of the insert queries should be rolled back.
-    pub async fn add_new_std_jobs_for_date(conn: &mut MySqlPC, date: NaiveDate, save_dir: &Path) -> anyhow::Result<Option<AddStdJobSummary>> {
+    pub async fn add_new_std_jobs_for_date(conn: &mut MySqlConn, date: NaiveDate, save_dir: &Path) -> anyhow::Result<Option<AddStdJobSummary>> {
         // First check if this date already has any sites - if so, return None (this function is not intended for backfilling)
         let date_count = sqlx::query!("SELECT COUNT(*) as count FROM StdSiteJobs WHERE date = ?", date)
             .fetch_one(&mut *conn)
@@ -255,7 +255,7 @@ impl StdSiteJob {
     /// * any of the database operations fail
     /// * there are no existing standard site jobs, so cannot determine the starting date
     /// * `date` is `None` and it cannot determine the last date with the full required suite of GEOS files
-    pub async fn add_new_std_jobs_up_to_date(conn: &mut MySqlPC, date: Option<NaiveDate>, save_dir: &Path) -> anyhow::Result<Vec<AddStdJobSummary>> {
+    pub async fn add_new_std_jobs_up_to_date(conn: &mut MySqlConn, date: Option<NaiveDate>, save_dir: &Path) -> anyhow::Result<Vec<AddStdJobSummary>> {
         let last_std_site_date = sqlx::query!(
             "SELECT MAX(date) as date FROM StdSiteJobs"
         ).fetch_one(&mut *conn)

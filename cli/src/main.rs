@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     debug!("Log level set to DEBUG");
-    let mut db = orm::get_database_pool(None).await.unwrap();
+    let db = orm::get_database_pool(None).await.unwrap();
 
     match args.command {
         Commands::ParseInputFilesManually(subargs) => {
@@ -90,19 +90,23 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Commands::AddJob(subargs) => {
-            jobs::add_job(&mut db.acquire().await?, subargs).await?;
+            let mut conn = db.acquire().await?;
+            jobs::add_job(&mut conn, subargs).await?;
         },
 
-        Commands::DeleteJob(subargs) => {jobs::delete_job(
-            &mut db.acquire().await?, subargs).await?
+        Commands::DeleteJob(subargs) => {
+            let mut conn = db.acquire().await?;
+            jobs::delete_job(&mut conn, subargs).await?
         },
 
-        Commands::StdSites(subargs) => {stdsites::standard_site_driver(
-            &mut db.acquire().await?, subargs, &config).await?
+        Commands::StdSites(subargs) => {
+            let mut conn = db.acquire().await?;
+            stdsites::standard_site_driver(&mut conn, subargs, &config).await?
         },
 
         Commands::SiteInfoJson(subargs) => {
-            siteinfo::site_info_json(&mut db.acquire().await?, &subargs).await?;
+            let mut conn = db.acquire().await?;
+            siteinfo::site_info_json(&mut conn, &subargs).await?;
         },
 
         Commands::GenConfig(subargs) => {
