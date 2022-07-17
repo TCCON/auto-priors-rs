@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 chrono = "0.4"
 futures = "0.3"
+lazy_static = "1.4"
 pyo3 = { version = "0.16.5", features = ["extension-module"] }
 pyo3-chrono = "0.4.0"
 orm = {path = "../core-orm", package = "tccon_priors_orm"}

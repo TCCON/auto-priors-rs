@@ -828,6 +828,9 @@ impl Job {
                 site_id.len(), lat.len(), lon.len());
         }
 
+        // TODO: confirm that the job's date range does not cover multiple locations for any requested site,
+        // this is necessary for the Python interface, since it must fill in any lat/lons once for the whole job.
+
         // Also verify that any site_ids for which we do not have defined lat/lons in the inputs are
         // standard sites with at least one time period defined. At the same time, check that we don't 
         // have any lat/lon pairs where only one is None.
