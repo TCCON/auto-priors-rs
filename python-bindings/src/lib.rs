@@ -6,10 +6,80 @@ use orm;
 use orm::jobs::{Job, JobState, TarChoice, ModFmt, VmrFmt, MapFmt};
 use orm::siteinfo::SiteInfo;
 use pyo3_chrono::{NaiveDate,NaiveDateTime};
+use tokio::runtime::Runtime;
+
+#[derive(Debug)]
+struct TokioBridge {
+    conn: orm::MySqlPC,
+    rt: Runtime
+}
+
+impl TokioBridge {
+    fn connect() -> PyResult<Self> {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+
+        let conn = rt.block_on(Self::get_db_connection())?;
+        
+        return Ok(Self{conn, rt})
+    }
+
+    async fn get_db_connection() -> PyResult<orm::MySqlPC> {
+        let db = match executor::block_on(orm::get_database_pool(None)) {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = format!("Unable to connect to the ORM database: {}", e.to_string());
+                return Err(PyIOError::new_err(msg))
+            }
+        };
+    
+        let conn = match executor::block_on(db.acquire()) {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = format!("Unable to acquire a connection with the ORM database: {}", e.to_string());
+                return Err(PyIOError::new_err(msg))
+            }
+        };
+    
+        Ok(conn)
+    }
+
+    pub fn num_pending_jobs(&mut self) -> PyResult<u32> {
+        let jobs = match self.rt.block_on(Job::get_next_jobs(&mut *self.conn, None)) {
+            Ok(j) => j,
+            Err(e) => {
+                let msg = format!("Failed to retrieve the number of pending jobs: {}", e.to_string());
+                return Err(PyIOError::new_err(msg));
+            }
+        };
+        return Ok(jobs.len() as u32)
+    }
+
+    pub fn next_pending_jobs(&mut self, njobs: u32) -> PyResult<Vec<PyJob>> {
+        let orm_jobs = match self.rt.block_on( Job::get_next_jobs(&mut *self.conn, Some(njobs)) ) {
+            Ok(jobs) => jobs,
+            Err(e) => {
+                let msg = format!("Unable to get next jobs: {}", e.to_string());
+                return Err(PyIOError::new_err(msg));
+            }
+        };
+
+        println!("orm_jobs.len() = {}", orm_jobs.len());
+
+        let mut py_jobs = vec![];
+        for job in orm_jobs {
+            py_jobs.push(job.try_into()?);
+        }
+        println!("py_jobs.len() = {}", py_jobs.len());
+        return Ok(py_jobs);
+    }
+}
 
 
 #[pyclass]
 pub struct PyJob {
+    bridge: TokioBridge,
     job_id: i32,
     #[pyo3(get)]
     pub state: JobState,
@@ -52,8 +122,7 @@ impl PyJob {
     }
 
     pub fn set_completed(&mut self, output_file: PathBuf) -> PyResult<()> {
-        let mut conn = get_db_connection()?;
-        let (nrows, complete_time) = match executor::block_on(Job::set_completed_by_id(&mut *conn, self.job_id, &output_file, None)) {
+        let (nrows, complete_time) = match self.bridge.rt.block_on(Job::set_completed_by_id(&mut *self.bridge.conn, self.job_id, &output_file, None)) {
             Ok((n, t)) => (n, t),
             Err(e) => {
                 let msg = format!("Unable to set job {} state to completed: {}", self.job_id, e.to_string());
@@ -74,8 +143,7 @@ impl PyJob {
     }
 
     fn set_state(&mut self, state: JobState) -> PyResult<()> {
-        let mut conn = get_db_connection()?;
-        if let Err(e) = executor::block_on( Job::set_state_by_id(&mut *conn, self.job_id, state) ) {
+        if let Err(e) = self.bridge.rt.block_on( Job::set_state_by_id(&mut *self.bridge.conn, self.job_id, state) ) {
             let msg = format!("Unable to set job {} state to {state}: {}", self.job_id, e.to_string());
             return Err(PyIOError::new_err(msg))
         }
@@ -94,10 +162,10 @@ impl TryFrom<Job> for PyJob {
             None
         };
 
-        let mut conn = get_db_connection()?;
+        let mut bridge = TokioBridge::connect()?;
 
-        let (lats, lons) = match executor::block_on(SiteInfo::fill_null_latlons(
-                &mut conn, &job.site_id, &job.lat, &job.lon, job.start_date, Some(job.end_date)
+        let (lats, lons) = match bridge.rt.block_on(SiteInfo::fill_null_latlons(
+                &mut *bridge.conn, &job.site_id, &job.lat, &job.lon, job.start_date, Some(job.end_date)
             )) {
                 Ok((y,x)) => (y, x),
                 Err(e) => {
@@ -107,6 +175,7 @@ impl TryFrom<Job> for PyJob {
         };
 
         return Ok(Self { 
+            bridge: TokioBridge::connect()?,
             job_id: job.job_id,
             state: job.state,
             site_id: job.site_id,
@@ -129,45 +198,20 @@ impl TryFrom<Job> for PyJob {
 /// Formats the sum of two numbers as string.
 #[pyfunction]
 fn get_next_jobs(njobs: u32) -> PyResult<Vec<PyJob>> {
-    let mut conn = get_db_connection()?;
-    let orm_jobs = match executor::block_on( Job::get_next_jobs(&mut *conn, Some(njobs)) ) {
-        Ok(jobs) => jobs,
-        Err(e) => {
-            let msg = format!("Unable to get next jobs: {}", e.to_string());
-            return Err(PyIOError::new_err(msg));
-        }
-    };
+    let mut bridge = TokioBridge::connect()?;
+    return bridge.next_pending_jobs(njobs);
+}
 
-    let mut py_jobs = vec![];
-    for job in orm_jobs {
-        py_jobs.push(job.try_into()?);
-    }
-    return Ok(py_jobs);
+#[pyfunction]
+fn get_num_pending_jobs() -> PyResult<u32> {
+    let mut bridge = TokioBridge::connect()?;
+    return bridge.num_pending_jobs();
 }
 
 /// A Python module implemented in Rust.
 #[pymodule]
 fn py_ginput_bindings(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(get_num_pending_jobs, m)?)?;
     m.add_function(wrap_pyfunction!(get_next_jobs, m)?)?;
     Ok(())
-}
-
-fn get_db_connection() -> PyResult<orm::MySqlPC> {
-    let db = match executor::block_on(orm::get_database_pool(None)) {
-        Ok(v) => v,
-        Err(e) => {
-            let msg = format!("Unable to connect to the ORM database: {}", e.to_string());
-            return Err(PyIOError::new_err(msg))
-        }
-    };
-
-    let conn = match executor::block_on(db.acquire()) {
-        Ok(c) => c,
-        Err(e) => {
-            let msg = format!("Unable to acquire a connection with the ORM database: {}", e.to_string());
-            return Err(PyIOError::new_err(msg))
-        }
-    };
-
-    Ok(conn)
 }

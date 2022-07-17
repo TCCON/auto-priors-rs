@@ -1624,6 +1624,7 @@ dependencies = [
  "pyo3",
  "pyo3-chrono",
  "tccon_priors_orm",
+ "tokio",
 ]
 
 [[package]]

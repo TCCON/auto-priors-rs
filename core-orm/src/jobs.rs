@@ -21,6 +21,7 @@ fn str_to_json_arr<'a, T: Deserialize<'a>> (s: &'a str) -> anyhow::Result<Vec<T>
 
 /// An enum representing possible states for a priors job
 #[derive(Debug, Type, Clone, Copy)]
+#[repr(i8)]
 pub enum JobState {
     /// **\[default\]** This job is queued but has not begun to execute. `i8` value = `0`.
     Pending = 0,
@@ -608,8 +609,8 @@ impl Job {
             sqlx::query_as!(
                 QJob,
                 "SELECT * FROM Jobs WHERE state = ? ORDER BY priority desc, submit_time LIMIT ?",
-                njobs,
-                JobState::Pending
+                JobState::Pending,
+                njobs
             ).fetch_all(conn)
             .await?
         }else{
