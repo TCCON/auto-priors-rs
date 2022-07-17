@@ -3,6 +3,7 @@ members = [
     "core-orm",
     "rocket-app",
     "cli",
+    "python-bindings"
 ]
 
 exclude = ["deps/Rocket"]

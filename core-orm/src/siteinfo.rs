@@ -6,6 +6,8 @@ use chrono::{NaiveDate, Duration};
 use serde::Serialize;
 use sqlx::{self, FromRow, Type};
 
+use crate::utils;
+
 use super::MySqlConn;
 
 /// An enum describing the type of site
@@ -397,6 +399,33 @@ impl SiteInfo {
         }
     }
 
+    pub async fn get_one_site_location_for_date_range(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<SiteInfo> {
+        let site_infos = sqlx::query_as!(
+            SiteInfo,
+            "SELECT * FROM v_StdSiteInfo WHERE site_id = ?",
+            site_id
+        ).fetch_all(conn)
+        .await?;
+
+        let mut matching_info = None;
+        for info in site_infos.into_iter() {
+            if utils::date_ranges_overlap(start_date, end_date, info.start_date, info.end_date) {
+                if matching_info.is_none() { 
+                    matching_info = Some(info); 
+                }
+                else {
+                    anyhow::bail!("Multiple locations defined for site {site_id} between {start_date} and {end_date:?}");
+                }
+            }
+        }
+
+        if matching_info.is_none() {
+            anyhow::bail!("No location defined for site {site_id} between {start_date} and {end_date:?}");
+        }else{
+            return Ok(matching_info.unwrap())
+        }
+    }
+
     pub async fn verify_info_available_for_site(conn: &mut MySqlConn, site_id: &str) -> anyhow::Result<bool> {
         let n_match = sqlx::query!("SELECT COUNT(*) as count FROM v_StdSiteInfo WHERE site_id = ?", site_id)
             .fetch_one(conn)
@@ -404,6 +433,70 @@ impl SiteInfo {
             .count;
 
         return Ok(n_match > 0);
+    }
+
+    pub async fn fill_null_latlons<T: AsRef<str>>(conn: &mut MySqlConn, site_ids: &[T], lats: &[Option<f32>], lons: &[Option<f32>], start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<(Vec<f32>, Vec<f32>)> {
+        if lats.len() != site_ids.len() || lons.len() != site_ids.len() {
+            anyhow::bail!("site_ids, lats, and lons must be the same length; got {}, {}, and {}, respectively",
+                          site_ids.len(), lats.len(), lons.len());
+        }
+
+        let mut out_lats = vec![];
+        let mut out_lons = vec![];
+
+        for (idx, sid) in site_ids.iter().enumerate() {
+            let y = lats[idx];
+            let x = lons[idx];
+            if x.is_some() != y.is_some() {
+                anyhow::bail!("The lat and lon at index {idx} are not both `None` or both `Some`");
+            }
+
+            if x.is_none() {
+                let info = Self::get_one_site_location_for_date_range(&mut *conn, sid.as_ref(), start_date, end_date).await?;
+                out_lats.push(info.latitude);
+                out_lons.push(info.longitude);
+            }else{
+                out_lats.push(y.unwrap());
+                out_lons.push(x.unwrap());
+            }
+        }
+
+        return Ok((out_lats, out_lons))
+    }
+
+    /// Return how many locations are defined for a given site ID in a date range.
+    /// 
+    /// # Parameters
+    /// * `conn` - connection to the MySQL database
+    /// * `site_id` - the two-letter site ID for which we are checking locations
+    /// * `start_date` - the beginning of the date range to check.
+    /// * `end_date` - the end of the date range to check. This can be `None` to indicate
+    ///   an open-ended date range. If this is `Some(date)`, then it is exclusive - that is,
+    ///   if a site location's start date is the same as this end date, that is *not* considered
+    ///   an overlap.
+    /// 
+    /// # Returns
+    /// The number of locations defined for the site with `site_id` in the given date range. If
+    /// `site_id` is not a known site ID, the result will be 0.
+    /// 
+    /// # Errors
+    /// Returns an `Err` if the database query fails. 
+    pub async fn check_number_locations_in_date_range(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<u32> {
+        let infos = sqlx::query_as!(
+            SiteInfo,
+            "SELECT * FROM v_StdSiteInfo WHERE site_id = ?",
+            site_id
+        ).fetch_all(conn)
+        .await?;
+
+        let mut n = 0;
+        for info in infos {
+            if utils::date_ranges_overlap(start_date, end_date, info.start_date, info.end_date) {
+                n += 1;
+            }
+        }
+        
+        return Ok(n)
     }
 }
 

@@ -1,10 +1,11 @@
 //! The main ORM interface to the jobs queue.
 //! 
 //! 
-use std::{path::PathBuf, str::FromStr, fmt::Display};
+use std::{path::{PathBuf, Path}, str::FromStr, fmt::Display};
 
 use anyhow;
 use chrono::{NaiveDate, NaiveDateTime};
+use pyo3::{FromPyObject,IntoPy,exceptions::PyTypeError, PyObject};
 use serde::Deserialize;
 use serde_json;
 use sqlx::{self, FromRow, Type};
@@ -87,6 +88,26 @@ impl TryFrom<i8> for JobState {
     }
 }
 
+impl<'source> FromPyObject<'source> for JobState {
+    fn extract(ob: &'source pyo3::PyAny) -> pyo3::PyResult<Self> {
+        let pyval: i8 = ob.extract()?;
+        match JobState::try_from(pyval) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                let err = PyTypeError::new_err(e.to_string());
+                return Err(err)
+            }
+        }
+    }
+}
+
+impl IntoPy<PyObject> for JobState {
+    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
+        let int_val: i8 = self.into();
+        return int_val.into_py(py);
+    }
+}
+
 
 /// An enum representing the possible options for creating a tarball of job output
 #[derive(Debug, Type, Clone, Copy)]
@@ -148,8 +169,28 @@ impl TryFrom<i8> for TarChoice {
     }
 }
 
+impl<'source> FromPyObject<'source> for TarChoice {
+    fn extract(ob: &'source pyo3::PyAny) -> pyo3::PyResult<Self> {
+        let py_val: i8 = ob.extract()?;
+        match TarChoice::try_from(py_val) {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                let err = PyTypeError::new_err(e.to_string());
+                return Err(err)
+            }
+        }
+    }
+}
+
+impl IntoPy<PyObject> for TarChoice {
+    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
+        let int_val: i8 = self.into();
+        return int_val.into_py(py)
+    }
+}
+
 /// An enum representing the possible output file types for the model (`.mod`) files.
-#[derive(Debug, Type)]
+#[derive(Debug, Type, Clone, Copy)]
 pub enum ModFmt {
     /// Do not create `.mod` files. String representation = `"None"`.
     None,
@@ -193,8 +234,28 @@ impl FromStr for ModFmt {
     }
 }
 
+impl<'source> FromPyObject<'source> for ModFmt {
+    fn extract(ob: &'source pyo3::PyAny) -> pyo3::PyResult<Self> {
+        let py_val: &str = ob.extract()?;
+        match ModFmt::from_str(py_val) {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                let err = PyTypeError::new_err(e.to_string());
+                return Err(err)
+            }
+        }
+    }
+}
+
+impl IntoPy<PyObject> for ModFmt {
+    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
+        let str_val = self.to_string();
+        return str_val.into_py(py);
+    }
+}
+
 /// An enum representing the possible output file types for the `.vmr` files.
-#[derive(Debug, Type)]
+#[derive(Debug, Type, Clone, Copy)]
 pub enum VmrFmt {
     /// Do not create `.vmr` files. String representation = `"None"`.
     None,
@@ -239,8 +300,28 @@ impl FromStr for VmrFmt {
     }
 }
 
+impl<'source> FromPyObject<'source> for VmrFmt {
+    fn extract(ob: &'source pyo3::PyAny) -> pyo3::PyResult<Self> {
+        let py_val: &str = ob.extract()?;
+        match VmrFmt::from_str(py_val) {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                let err = PyTypeError::new_err(e.to_string());
+                return Err(err)
+            }
+        }
+    }
+}
+
+impl IntoPy<PyObject> for VmrFmt {
+    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
+        let str_val = self.to_string();
+        return str_val.into_py(py);
+    }
+}
+
 /// An enum representing the possible output file types for the model a priori (`.map`) files.
-#[derive(Debug, Type)]
+#[derive(Debug, Type, Clone, Copy)]
 pub enum MapFmt {
     /// Do not create `.map` files. String representation = `"None"`.
     None,
@@ -286,6 +367,26 @@ impl FromStr for MapFmt {
             "netcdf" => Ok(Self::NetCDF),
             _ => Err(anyhow::anyhow!("Unknown value for MapFmt: {s}"))
         }
+    }
+}
+
+impl<'source> FromPyObject<'source> for MapFmt {
+    fn extract(ob: &'source pyo3::PyAny) -> pyo3::PyResult<Self> {
+        let py_val: &str = ob.extract()?;
+        match MapFmt::from_str(py_val) {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                let err = PyTypeError::new_err(e.to_string());
+                return Err(err)
+            }
+        }
+    }
+}
+
+impl IntoPy<PyObject> for MapFmt {
+    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
+        let str_val = self.to_string();
+        return str_val.into_py(py);
     }
 }
 
@@ -365,7 +466,7 @@ impl TryFrom<Job> for QJob {
 
 /// The public interface to the Jobs MySQL table.
 pub struct Job {
-    /// **\[primary key]** The unique integer ID of this job
+    /// **\[primary key\]** The unique integer ID of this job
     pub job_id: i32,
 
     /// State of the job, i.e. pending, running, etc.
@@ -487,6 +588,45 @@ impl Job {
             .await?;
     
         return Ok(Job::try_from(result)?)
+    }
+
+    /// Return a vector of the jobs that should be run next
+    /// 
+    /// # Parametesr
+    /// * `conn` - connection to the MySQL database
+    /// * `njobs` - maximum number of jobs to list. If `None`, then all pending jobs are returned.
+    /// 
+    /// # Returns
+    /// A vector of [`Job`] instances in order first from highest to lowest priority, then in order
+    /// of submission time.
+    /// 
+    /// # Errors
+    /// Returns an `Err` if the database query fails, or parsing any of the job information into a job
+    /// structure fails.
+    pub async fn get_next_jobs(conn: &mut MySqlConn, njobs: Option<u32>) -> anyhow::Result<Vec<Job>> {
+        let qjobs = if let Some(njobs) = njobs {
+            sqlx::query_as!(
+                QJob,
+                "SELECT * FROM Jobs WHERE state = ? ORDER BY priority desc, submit_time LIMIT ?",
+                njobs,
+                JobState::Pending
+            ).fetch_all(conn)
+            .await?
+        }else{
+            sqlx::query_as!(
+                QJob,
+                "SELECT * FROM Jobs WHERE state = ? ORDER BY priority desc, submit_time",
+                JobState::Pending
+            ).fetch_all(conn)
+            .await?
+        };
+
+        let mut jobs = vec![];
+        for qjob in qjobs.into_iter() {
+            jobs.push(qjob.try_into()?);
+        }
+
+        return Ok(jobs)
     }
 
     /// Convert a user-inputted string of site IDs into a proper vector of site IDs
@@ -764,8 +904,6 @@ impl Job {
     /// connection. This is an internal implementation detail that can hopefully be addressed in the
     /// future to use a single connection, to be consistent with other job functions.
     pub async fn delete_job_with_id(conn: &mut MySqlConn, id: i32) -> anyhow::Result<i64> {
-        // TODO: Switch to using a MySqlPC, when passing to fetch methods, use `&mut *conn` instead of `&mut pool.acquire().await?`
-
         // must rename COUNT(*) to a valid field name
         let pre_count = sqlx::query!("SELECT COUNT(*) as count FROM Jobs")
             .fetch_one(&mut *conn)
@@ -787,4 +925,92 @@ impl Job {
 
         return Ok(pre_count - post_count)
     }
+
+    /// Set the state of a job by its `job_id`
+    /// 
+    /// Note that the method [`Job::set_completed_by_id`] is preferred when
+    /// setting the state to [`JobState::Complete`], as that method ensures
+    /// that the completion time and output file are updated correctly as well.
+    /// 
+    /// # Parameters
+    /// * `conn` - connection to the MySQL database
+    /// * `job_id` - the ID of the job to update
+    /// * `state` - the state to set the job to.
+    /// 
+    /// # Returns
+    /// Will return the number of rows in the `Jobs` table that were updated. This can be
+    /// useful to check if the given `job_id` did match a job. 
+    /// 
+    /// # Errors
+    /// Returns an `Err` if the SQL query to update the state failed.
+    pub async fn set_state_by_id(conn: &mut MySqlConn, job_id: i32, state: JobState) -> anyhow::Result<u64> {
+        let nrows = sqlx::query!(
+            "UPDATE Jobs SET state = ? WHERE job_id = ?",
+            state,
+            job_id
+        ).execute(conn)
+        .await?
+        .rows_affected();
+
+        Ok(nrows)
+    }
+
+    /// Update the state for this job instance.
+    /// 
+    /// Calls [`Job::set_state_by_id`] to update the database, then updates the state of this instance.
+    /// See [`Job::set_state_by_id`] for information on parameters.
+    /// 
+    /// Note that [`Job::set_completed`] is preferred when
+    /// setting the state to [`JobState::Complete`], as that method ensures
+    /// that the completion time and output file are updated correctly as well.
+    pub async fn set_state(&mut self, conn: &mut MySqlConn, state: JobState) -> anyhow::Result<u64> {
+        let n = Self::set_state_by_id(conn, self.job_id, state).await?;
+        self.state = state;
+        return Ok(n)
+    }
+
+    /// Set a job's state to [`JobState::Complete`] and update the output file and completion time.
+    /// 
+    /// # Parameters
+    /// * `conn` - connection to the MySQL database
+    /// * `job_id` - the ID of the job to update
+    /// * `output_path` - location of the output data. This should be the tarball file if one was made,
+    ///   or the directory created if the output was not compressed into a tarball.
+    /// * `complete_time` - time when the job finished. If `None`, then the current local time will be
+    ///   used, but you may pass your own time if it must be in a different time zone or there is a
+    ///   lag between the actual completion of the job and calling this method.
+    pub async fn set_completed_by_id(conn: &mut MySqlConn, job_id: i32, output_path: &Path, complete_time: Option<NaiveDateTime>) -> anyhow::Result<(u64, NaiveDateTime)> {
+
+        let complete_time = if let Some(time) = complete_time {
+            time
+        }else{
+            chrono::Local::now().naive_local()
+        };
+
+        let nrows = sqlx::query!(
+            "UPDATE Jobs SET state = ?, output_file = ?, complete_time = ? WHERE job_id = ?",
+            JobState::Complete,
+            output_path.to_str().ok_or(anyhow::anyhow!("Could not convert output_file to UTF string"))?,
+            complete_time,
+            job_id
+        ).execute(conn)
+        .await?
+        .rows_affected();
+
+        return Ok((nrows, complete_time))
+    }
+
+    /// Update the state, output file, and completion time for this job instance.
+    /// 
+    /// Calls [`Job::set_completed_by_id`] to update the database, then sets the
+    /// state, output file, and completion time on this instance to the updated
+    /// values. See [`Job::set_completed_by_id`] for parameter information.
+    pub async fn set_completed(&mut self, conn: &mut MySqlConn, output_path: &Path, complete_time: Option<NaiveDateTime>) -> anyhow::Result<(u64, NaiveDateTime)> {
+        let (n, t) = Self::set_completed_by_id(conn, self.job_id, output_path, complete_time).await?;
+        self.state = JobState::Complete;
+        self.output_file = Some(output_path.to_owned());
+        self.complete_time = Some(t);
+        return Ok((n, t))
+    }
+
 }
