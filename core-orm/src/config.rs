@@ -59,6 +59,12 @@ pub struct ExecutionConfig {
 
     /// Run directory for standard site jobs.
     pub std_sites_output_base: PathBuf,
+
+    /// Frequency in seconds for the job service to check for pending jobs
+    pub start_jobs_freq: f32,
+
+    /// Run a simulation, do not execute ginput, but generate mock output files for testing
+    pub simulate: bool,
 }
 
 impl Default for ExecutionConfig {
@@ -75,7 +81,9 @@ impl Default for ExecutionConfig {
             download_root: Default::default(), 
             output_path: Default::default(), 
             std_sites_tar_output: Default::default(), 
-            std_sites_output_base: Default::default() 
+            std_sites_output_base: Default::default(),
+            start_jobs_freq: 60.0,
+            simulate: false
         }
     }
 }
@@ -175,6 +183,12 @@ where T: AsRef<Path>
 }
 
 
+pub fn get_env_config_path() -> anyhow::Result<PathBuf> {
+    dotenv::dotenv().ok();
+    let key = std::env::var(CFG_FILE_ENV_VAR)?;
+    return Ok(PathBuf::from(key))
+}
+
 /// Load an existing configuration at the path pointed to by [`CFG_FILE_ENV_VAR`]
 /// 
 /// This is a convenience function that uses [`dotenv`] to augment existing environmental
@@ -191,8 +205,7 @@ where T: AsRef<Path>
 /// * [`load_config_file`]
 /// * [`load_config_file_or_default`]
 pub fn load_env_config_file() -> anyhow::Result<Config> {
-    dotenv::dotenv().ok();
-    let path = PathBuf::from(std::env::var(CFG_FILE_ENV_VAR)?);
+    let path = get_env_config_path()?;
     return load_config_file(path);
 }
 

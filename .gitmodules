@@ -1,3 +1,6 @@
 [submodule "deps/Rocket"]
 	path = deps/Rocket
 	url = https://github.com/SergioBenitez/Rocket.git
+[submodule "python/ginput-service"]
+	path = python/ginput-service
+	url = git@github.com:WennbergLab/auto-mod-python.git

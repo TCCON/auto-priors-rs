@@ -56,7 +56,8 @@ impl TokioBridge {
 
 #[pyclass]
 pub struct PyJob {
-    job_id: i32,
+    #[pyo3(get)]
+    pub job_id: i32,
     #[pyo3(get)]
     pub state: JobState,
     #[pyo3(get)]
@@ -263,6 +264,24 @@ fn get_num_pending_jobs() -> PyResult<u32> {
     return Ok(jobs.len() as u32)
 }
 
+#[pyfunction]
+pub fn get_config_path() -> PyResult<PathBuf> {
+    let path = match orm::config::get_env_config_path() {
+        Ok(p) => p,
+        Err(e) => {
+            let msg = format!("Unable to get the path to the configuration file: {}", e.to_string());
+            return Err(PyIOError::new_err(msg))
+        }
+    };
+
+    if !path.exists() {
+        let msg = format!("Configuration file ({}) does not exist", path.display());
+        return Err(PyIOError::new_err(msg))
+    }
+
+    return Ok(path)
+}
+
 /// Take ownership of the static [`TokioBridge`] instance
 /// 
 /// Because the core ORM uses a Tokio runtime (needed for the Rocket app),
@@ -319,5 +338,7 @@ fn acquire_runtime() -> PyResult<MutexGuard<'static, TokioBridge>> {
 fn py_ginput_bindings(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_num_pending_jobs, m)?)?;
     m.add_function(wrap_pyfunction!(get_next_jobs, m)?)?;
+    m.add_function(wrap_pyfunction!(get_config_path, m)?)?;
+    m.add_class::<PyJob>()?;
     Ok(())
 }
