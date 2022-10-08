@@ -3,5 +3,6 @@
         "core",
         "tokio",
         "tokio-macros"
-    ]
+    ],
+    "restructuredtext.preview.docutils.disabled": true
 }

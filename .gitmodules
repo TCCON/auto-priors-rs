@@ -4,3 +4,6 @@
 [submodule "python/ginput-service"]
 	path = python/ginput-service
 	url = git@github.com:WennbergLab/auto-mod-python.git
+[submodule "python/ginput"]
+	path = python/ginput
+	url = git@github.com:WennbergLab/py-ginput-devel.git
