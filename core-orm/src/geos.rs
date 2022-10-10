@@ -1,14 +1,31 @@
 use std::{path::PathBuf, str::FromStr, fmt::Display};
 
 use chrono::{NaiveDateTime, NaiveDate};
+use serde::{Deserialize, Serialize};
 use sqlx::{self, Type, FromRow};
 
 use crate::MySqlConn;
 
-#[derive(Debug, Type)]
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub enum GeosProduct {
     Fp,
     Fpit
+}
+
+impl Into<String> for GeosProduct {
+    fn into(self) -> String {
+        format!("{}", self)
+    }
+}
+
+
+impl TryFrom<String> for GeosProduct {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::from_str(value.as_str())
+    }
 }
 
 impl FromStr for GeosProduct {
@@ -34,11 +51,36 @@ impl Display for GeosProduct {
     }
 }
 
-#[derive(Debug, Type)]
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub enum GeosLevels {
     Pres,
     Surf,
     Eta
+}
+
+impl GeosLevels {
+    pub fn standard_subdir(&self) -> PathBuf {
+        match self {
+            Self::Pres => PathBuf::from("Np"),
+            Self::Surf => PathBuf::from("Nx"),
+            Self::Eta => PathBuf::from("Nv")
+        }
+    }
+}
+
+impl Into<String> for GeosLevels {
+    fn into(self) -> String {
+        format!("{}", self)
+    }
+}
+
+impl TryFrom<String> for GeosLevels {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::from_str(value.as_str())
+    }
 }
 
 impl FromStr for GeosLevels {
@@ -66,10 +108,25 @@ impl Display for GeosLevels {
     }
 }
 
-#[derive(Debug, Type)]
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub enum GeosDataType {
     Met,
     Chm
+}
+
+impl Into<String> for GeosDataType {
+    fn into(self) -> String {
+        format!("{}", self)
+    }
+}
+
+impl TryFrom<String> for GeosDataType {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::from_str(value.as_str())
+    }
 }
 
 impl FromStr for GeosDataType {

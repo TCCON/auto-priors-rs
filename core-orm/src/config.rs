@@ -8,12 +8,15 @@
 //! 
 //! A default (mostly blank) configuration file can be created by calling [`generate_config_file`].
 //! 
-use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}};
+use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, str::FromStr, collections::HashMap};
 use anyhow::{self, Context};
 use hostname;
+use log::debug;
 use serde::{Serialize, Deserialize};
 use toml;
 use url::Url;
+
+use crate::geos;
 
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
@@ -64,6 +67,7 @@ pub struct ExecutionConfig {
     pub start_jobs_freq: f32,
 
     /// Run a simulation, do not execute ginput, but generate mock output files for testing
+    #[serde(default)]
     pub simulate: bool,
 }
 
@@ -98,6 +102,13 @@ pub struct DataConfig {
     /// The path to the GEOS FPIT chemistry files. Must contain an Nv subdirectory. 
     pub chem_path: PathBuf,
 
+    /// A map of arrays of configurations that specify how to download reanalysis files.
+    /// Each config in the array represents a file that needs to be downloaded for ginput
+    /// to run. The keys to the map must be strings that will be passed as arguments to
+    /// the downloader to specify which file type to download. See [`DownloadConfig`] for 
+    /// details on the array elements.
+    pub download: HashMap<String, Vec<DownloadConfig>>,
+
     /// The path to an integral.gnd file that specifies an altitude grid. If omitted, 
     /// or an empty string, then the priors are produced on the native GEOS grid.
     pub zgrid_file: Option<PathBuf>,
@@ -106,6 +117,31 @@ pub struct DataConfig {
     /// gases. If omitted or an empty string, the secondary gases are not included.
     pub base_vmr_file: Option<PathBuf>
 }
+
+/// Configuration for how to download input reanalysis files for ginput
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DownloadConfig {
+    /// Whether this set of files is meteorology or chemistry
+    pub data_type: geos::GeosDataType,
+
+    /// What set of vertical levels these files represent.
+    pub levels: geos::GeosLevels,
+
+    /// A URL pattern that can be passed to wget to download the desired file.
+    /// Use [Chrono format strings](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
+    /// (e.g. "%Y", "%d") to insert date/time elements into the URL.
+    pub url_pattern: String,
+
+    /// The number of minutes between subsequent reanalysis files, e.g. for files every three hours,
+    /// set this to 180. Note that the current implementation assumes that there will always be a
+    /// file for midnight, so values greater than 24 * 60 = 1440 are not supported.
+    pub file_freq_min: i64,
+
+    /// The subdirectory in the met or chemistry data directory to save the files to. If not given,
+    /// the correct subdirectory is chosen based on the levels value.
+    pub subdir: Option<PathBuf>,
+}
+
 
 /// Configuration section dealing with error reporting and job limits
 #[derive(Debug, Serialize, Deserialize)]
@@ -243,16 +279,21 @@ pub fn load_env_config_file() -> anyhow::Result<Config> {
 /// 
 /// * [`load_config_file`]
 /// * [`load_env_config_file`]
-pub fn load_config_file_or_default<T>(path: Option<T>) -> Config
+pub fn load_config_file_or_default<T>(path: Option<T>) -> anyhow::Result<Config>
 where T: AsRef<Path>
 {
     if let Some(p) = path {
         if p.as_ref().exists() {
-            return load_config_file(p).unwrap_or_default()
+            debug!("Reading config file from {}", p.as_ref().display());
+            return load_config_file(p.as_ref()).with_context(|| {
+                format!("Error loading configuration file {}", p.as_ref().display())
+            })
         }else{
-            return Config::default()
+            debug!("Given config file ({}) does not exist, using default", p.as_ref().display());
+            return Ok(Config::default())
         }
     }else{
-        return Config::default()
+        debug!("No config file path given, using default");
+        return Ok(Config::default())
     }
 }

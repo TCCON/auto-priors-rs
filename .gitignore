@@ -1,3 +1,9 @@
 /target
 *.pyc
 .env
+Rocket.toml
+TestConfig.toml
+.vscode/dryrun.log
+.vscode/targets.log
+*.sql
+.vscode/configurationCache.log

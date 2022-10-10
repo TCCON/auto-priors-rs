@@ -7,15 +7,13 @@ use std::path::PathBuf;
 //  * Update GEOS file database
 //  * Download new GEOS files
 //  * Check for missing GEOS files
-//  * Read job input files
-//  * Add job
 //  * Delete expired output files
 //  * Reset running jobs to pending (in case of crash)
 //  * Standard sites:
-//      - Add jobs for missing standard sites
 //      - Scan for failed standard site jobs
 //      - Proper backfilling (both forced and based on updated site dates)
 //      - Make tarballs
+//      - Create a new standard site/update an existing one?
 use clap::{self, Parser, Subcommand, Args};
 use clap_verbosity_flag::{Verbosity,InfoLevel};
 use dotenv;
@@ -24,6 +22,7 @@ use log::{self, debug};
 use orm;
 use tokio;
 
+mod met_download;
 mod jobs;
 mod input_files;
 mod siteinfo;
@@ -40,6 +39,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    #[clap(alias="drbd")]
+    DownloadReanalysisByDates(met_download::DownloadDatesCli),
     #[clap(alias="pifm")]
     ParseInputFilesManually(input_files::ParseInputFilesManualCli),
     AddJob(jobs::AddJobCli),
@@ -66,10 +67,6 @@ fn generate_config_file(clargs: GenConfigCli) -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv()?;
     let args = Cli::parse();
-
-    let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
-    let config = orm::config::load_config_file_or_default(config_file);
-
     let log_level = args.verbose.log_level_filter();
 
     // Need to filter modules to avoid messages from sqlx. Not sure yet if log messages from submodules of
@@ -81,13 +78,19 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     debug!("Log level set to DEBUG");
+    let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
+    let config = orm::config::load_config_file_or_default(config_file)?;
     let db = orm::get_database_pool(None).await.unwrap();
 
     match args.command {
+        Commands::DownloadReanalysisByDates(subargs) => {
+            met_download::download_files_for_dates_cli(subargs, &config)?;
+        },
+
         Commands::ParseInputFilesManually(subargs) => {
             let mut conn = db.acquire().await?;
             input_files::add_jobs_from_input_files(&mut conn, subargs, &config).await?; 
-        }
+        },
 
         Commands::AddJob(subargs) => {
             let mut conn = db.acquire().await?;
