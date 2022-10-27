@@ -8,7 +8,7 @@
 //! 
 //! A default (mostly blank) configuration file can be created by calling [`generate_config_file`].
 //! 
-use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, str::FromStr, collections::HashMap};
+use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, collections::HashMap};
 use anyhow::{self, Context};
 use hostname;
 use log::debug;
@@ -121,6 +121,9 @@ pub struct DataConfig {
 /// Configuration for how to download input reanalysis files for ginput
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DownloadConfig {
+    /// What stream this is from (FP or FP-IT, currently)
+    pub product: geos::GeosProduct,
+
     /// Whether this set of files is meteorology or chemistry
     pub data_type: geos::GeosDataType,
 

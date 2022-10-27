@@ -1,11 +1,110 @@
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::process::Command;
 
 use anyhow::Context;
 use clap::{self, Args};
 use chrono::{NaiveDate, Duration};
+use log::warn;
 use orm;
 
+fn check_start_end_date(start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<NaiveDate> {
+    if let Some(ed) = end_date {
+        if ed <= start_date {
+            return Err(anyhow::Error::msg("end_date must be at least one day after the start_date"))
+        }else{
+            return Ok(ed)
+        }
+
+    }else{
+        return Ok(start_date + Duration::days(1))
+    };
+}
+
+/// Check whether the required model files are present for a range of dates.
+/// 
+/// This will print one line per date to stdout. Each line will have the date
+/// (in YYYY-MM-DD format), a colon, then the status "missing" (no model files
+/// available for that day), "incomplete" (some model files available for that 
+/// day, but at least one is missing), "complete" (the expected number of model
+/// files is available for that day), or "UNKNOWN" (an error occurred while 
+/// querying for that day).
+#[derive(Debug, Args)]
+pub struct CheckDatesCli {
+    /// The first date to check, in YYYY-MM-DD format
+    pub start_date: NaiveDate,
+    /// The day AFTER the last date to check, if omitted, only START_DATE is checked
+    pub end_date: Option<NaiveDate>,
+    /// Which GEOS product stream to look for.
+    #[clap(short = 'p', long, default_value = "fpit")]
+    pub geos_product: orm::geos::GeosProduct,
+    /// Which set of vertical levels to look for the 3D met fields on - "eta" = hybrid model levels, "pres" = fixed pressure levels
+    #[clap(short = 'l', long, default_value = "eta")]
+    pub met_levels: orm::geos::GeosLevels,
+    /// Pass this to only require the 2D and 3D met files be present for a day to be complete. By default, the chemistry files must also be present.
+    #[clap(short = 'c', long)]
+    pub no_req_chm: bool
+}
+
+
+pub async fn check_files_for_dates_cli(conn: &mut orm::MySqlConn, clargs: CheckDatesCli) -> anyhow::Result<()> {
+    
+    let files_found = check_files_for_dates(
+        conn,
+        clargs.start_date,
+        clargs.end_date,
+        clargs.geos_product,
+        clargs.met_levels,
+        !clargs.no_req_chm).await?;
+
+    // Print the results out in chronological order
+    let mut dates: Vec<&NaiveDate> = files_found.keys().collect();
+    dates.sort_unstable();
+    for date in dates {
+        if let Some(v) = files_found.get(date) {
+            // Since we're iterating over the keys of the map, we should always be inside here
+            let s = if let Some(state) = v {
+                state.as_ref()
+            }else{
+                "UNKNOWN (errored during check)"
+            };
+
+            println!("{date}: {s}");
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn check_files_for_dates(
+    conn: &mut orm::MySqlConn,
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>,
+    geos_product: orm::geos::GeosProduct,
+    met_levels: orm::geos::GeosLevels,
+    req_chm: bool) -> anyhow::Result<HashMap<NaiveDate, Option<orm::geos::GeosDayState>>> 
+{
+    // Verify input dates are valid
+    let end_date = check_start_end_date(start_date, end_date)?;
+
+    // For each date, try to check if the necessary files are present. If we get an error, log it,
+    // but keep going.
+    let mut files_map = HashMap::new();
+    let mut curr_date = start_date;
+    while curr_date < end_date {
+        let files_found = match orm::geos::GeosFile::is_date_complete(conn, curr_date, met_levels, geos_product, req_chm).await {
+            Ok(state) => Some(state),
+            Err(e) => {
+                warn!("Error checking met files for date {curr_date}: {e}");
+                None
+            }
+        };
+        files_map.insert(curr_date, files_found);
+        curr_date += Duration::days(1);
+    }
+    
+    Ok(files_map)
+}
 
 #[derive(Debug, Args)]
 pub struct DownloadDatesCli {
@@ -35,15 +134,7 @@ pub fn download_files_for_dates(
     dry_run: bool) -> Result<(), anyhow::Error> 
 {
     // First check that the dates are valid
-    let end_date = if let Some(ed) = end_date {
-        if ed <= start_date {
-            return Err(anyhow::Error::msg("end_date must be at least one day after the start_date"))
-        }
-
-        ed
-    }else{
-        start_date + Duration::days(1)
-    };
+    let end_date = check_start_end_date(start_date, end_date)?;
 
     // Then check that the requested met was defined in the configuration
     let met_cfg = if let Some(c) = config.data.download.get(met_key) {

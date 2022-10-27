@@ -39,6 +39,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    CheckMet(met_download::CheckDatesCli),
     #[clap(alias="drbd")]
     DownloadReanalysisByDates(met_download::DownloadDatesCli),
     #[clap(alias="pifm")]
@@ -83,6 +84,11 @@ async fn main() -> anyhow::Result<()> {
     let db = orm::get_database_pool(None).await.unwrap();
 
     match args.command {
+        Commands::CheckMet(subargs) => {
+            let mut conn = db.acquire().await?;
+            met_download::check_files_for_dates_cli(&mut conn, subargs).await?;
+        },
+
         Commands::DownloadReanalysisByDates(subargs) => {
             met_download::download_files_for_dates_cli(subargs, &config)?;
         },

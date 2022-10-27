@@ -6,6 +6,24 @@ use sqlx::{self, Type, FromRow};
 
 use crate::MySqlConn;
 
+const REQ_FILES_PER_DAY: i64 = 8;
+
+pub enum GeosDayState {
+    Complete,
+    Incomplete,
+    Missing
+}
+
+impl AsRef<str> for GeosDayState {
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::Complete => "complete",
+            Self::Incomplete => "incomplete",
+            Self::Missing => "missing"
+        }
+    }
+}
+
 #[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub enum GeosProduct {
@@ -207,16 +225,63 @@ impl GeosFile {
                    GROUP BY DATE(filedate)
                ) AS chm3d
                ON met3d.date = chm3d.date
-               WHERE met3d.count = 8 AND met2d.count = 8 AND chm3d.count >= ?"#,
+               WHERE met3d.count = ? AND met2d.count = ? AND chm3d.count >= ?"#,
             met_levels.to_string(),
             &product_string,
             &product_string,
             &product_string,
-            if req_chm { 8 } else { 0 }
+            REQ_FILES_PER_DAY,
+            REQ_FILES_PER_DAY,
+            if req_chm { REQ_FILES_PER_DAY } else { 0 }
         ).fetch_one(conn)
         .await?
         .max_date;
 
         return Ok(max_date)
+    }
+
+    pub async fn is_date_complete(conn: &mut MySqlConn, date: NaiveDate, met_levels: GeosLevels, geos_product: GeosProduct, req_chm: bool) -> anyhow::Result<GeosDayState> {
+        let mut n_files = 0;
+        n_files += sqlx::query!(
+            r#"SELECT COUNT(filedate) as count FROM GeosFiles
+               WHERE DATE(filedate) = ? AND levels = ? AND data_type = "met" AND product = ? "#,
+            date,
+            met_levels.to_string(),
+            geos_product.to_string()
+        ).fetch_one(&mut *conn)
+        .await?
+        .count;
+
+        n_files += sqlx::query!(
+            r#"SELECT COUNT(filedate) as count FROM GeosFiles
+               WHERE DATE(filedate) = ? AND levels = "surf" AND data_type = "met" AND product = ? "#,
+            date,
+            geos_product.to_string()
+        ).fetch_one(&mut *conn)
+        .await?
+        .count;
+
+        n_files += if req_chm {
+            sqlx::query!(
+                r#"SELECT COUNT(filedate) as count FROM GeosFiles
+                   WHERE DATE(filedate) = ? AND levels = "eta" AND data_type = "chm" AND product = ? "#,
+                date,
+                geos_product.to_string()
+            ).fetch_one(conn)
+            .await?
+            .count
+        }else{
+            0
+        };
+
+        let n_req = if req_chm { 3 * REQ_FILES_PER_DAY } else { 2 * REQ_FILES_PER_DAY };
+
+        if n_files == 0 {
+            return Ok(GeosDayState::Missing)
+        }else if n_files < n_req {
+            return Ok(GeosDayState::Incomplete)
+        }else{
+            return Ok(GeosDayState::Complete)
+        }
     }
 }
