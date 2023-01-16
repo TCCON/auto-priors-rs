@@ -5,8 +5,9 @@ use std::process::Command;
 use anyhow::Context;
 use clap::{self, Args};
 use chrono::{NaiveDate, Duration};
-use log::warn;
-use orm;
+use log::{warn, info};
+use orm::{self, geos::GeosDayState};
+
 
 fn check_start_end_date(start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<NaiveDate> {
     if let Some(ed) = end_date {
@@ -106,6 +107,7 @@ pub async fn check_files_for_dates(
     Ok(files_map)
 }
 
+/// Download meteorological reanalysis files for a range of dates [alias: drbd]
 #[derive(Debug, Args)]
 pub struct DownloadDatesCli {
     pub met_key: String,
@@ -126,6 +128,83 @@ pub fn download_files_for_dates_cli(clargs: DownloadDatesCli, config: &orm::conf
     )
 }
 
+/// Download missing files for a given meteorological reanalysis [alias: dmr]
+#[derive(Debug, Args)]
+pub struct DownloadMissingCli {
+    pub met_key: String,
+    #[clap(short = 's', long="start-date")]
+    pub start_date: Option<NaiveDate>,
+    #[clap(short = 'e', long="end-date")]
+    pub end_date: Option<NaiveDate>,
+    #[clap(short = 'd', long="dry-run")]
+    pub dry_run: bool
+}
+
+pub async fn download_missing_files_cli(conn: &mut orm::MySqlConn, clargs: DownloadMissingCli, config: &orm::config::Config) -> Result<(), anyhow::Error> {
+    download_missing_files(
+        conn,
+        &clargs.met_key,
+        clargs.start_date,
+        clargs.end_date,
+        config,
+        clargs.dry_run
+    ).await
+}
+
+pub async fn download_missing_files(
+    conn: &mut orm::MySqlConn,
+    met_key: &str,
+    start_date: Option<NaiveDate>,
+    end_date: Option<NaiveDate>,
+    config: &orm::config::Config,
+    dry_run: bool) -> Result<(), anyhow::Error> 
+{
+    let cfgs = config.get_met_configs(met_key)?;
+    let start_date = if let Some(start) = start_date {
+        start
+    }else{
+        // If no start date, use the first day we don't have met data for. If no data previously downloaded, use the
+        // start date defined for the meteorology. If no meteorology datasets defined, return an error.
+        let x = orm::geos::GeosFile::get_last_complete_date_for_config_set(conn, cfgs).await?;
+        let y = if let Some(d) = x {
+            Some(d)
+        }else{
+            config.get_met_start_date(met_key)?
+        };
+
+        y.ok_or_else(|| anyhow::Error::msg(format!(
+            "Could not infer start date: no existing met data for key '{met_key}' and no configured met dataset to determine the default start from"
+        )))?
+    };
+
+    let end_date = if let Some(end) = end_date {
+        end
+    }else {
+        // Assume we use today
+        chrono::offset::Utc::now().naive_utc().date()
+    };
+
+    // Now the main function: loop through each date and met type, download that met type if needed
+    let mut curr_date = start_date;
+    while curr_date < end_date {
+        for cfg in cfgs {
+            match orm::geos::GeosFile::is_date_complete_for_config(conn, curr_date, cfg).await? {
+                GeosDayState::Complete => {
+                    info!("{curr_date} already downloaded for {cfg}, not redownloading")
+                },
+                GeosDayState::Incomplete | GeosDayState::Missing => {
+                    info!("{curr_date} must be downloaded for {cfg}");
+                    download_one_file_one_date(curr_date, cfg, &config.data, dry_run)?;
+                }
+            }
+        }
+
+        curr_date += Duration::days(1);
+    }
+
+    Ok(())
+}
+
 pub fn download_files_for_dates(
     met_key: &str, 
     start_date: NaiveDate, 
@@ -137,11 +216,7 @@ pub fn download_files_for_dates(
     let end_date = check_start_end_date(start_date, end_date)?;
 
     // Then check that the requested met was defined in the configuration
-    let met_cfg = if let Some(c) = config.data.download.get(met_key) {
-        c
-    }else{
-        return Err(anyhow::Error::msg(format!("The requested reanalysis '{met_key}' was not in the configuration")));
-    };
+    let met_cfg = config.get_met_configs(met_key)?;
 
     let mut curr_date = start_date;
     while curr_date < end_date {

@@ -1,4 +1,4 @@
-use clap::{self, Parser, Subcommand, Args};
+use clap::{self, Subcommand, Args};
 use orm::{stdsitejobs,MySqlConn};
 
 #[derive(Debug, Args)]

@@ -8,8 +8,9 @@
 //! 
 //! A default (mostly blank) configuration file can be created by calling [`generate_config_file`].
 //! 
-use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, collections::HashMap};
+use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, collections::HashMap, fmt::Display};
 use anyhow::{self, Context};
+use chrono::NaiveDate;
 use hostname;
 use log::debug;
 use serde::{Serialize, Deserialize};
@@ -31,6 +32,25 @@ pub struct Config {
     pub execution: ExecutionConfig,
     pub data: DataConfig,
     pub admin: AdminConfig
+}
+
+impl Config {
+    pub fn get_met_configs(&self, met_key: &str) -> anyhow::Result<&[DownloadConfig]> {
+        self.data.download.get(met_key)
+        .and_then(|cfgs| Some(cfgs.as_slice()))
+        .ok_or_else(|| anyhow::Error::msg(format!("No meteorology with with '{met_key}' found.")))
+    }
+
+    pub fn get_met_start_date(&self, met_key: &str) -> anyhow::Result<Option<NaiveDate>> {
+        let met_cfgs = self.get_met_configs(met_key)?;
+
+        if met_cfgs.len() == 0 {
+            Ok(None)
+        }else {
+            let x = met_cfgs.iter().map(|c| c.earliest_date);
+            Ok(x.min())
+        }
+    }
 }
 
 /// Configuration section dealing with how jobs are run
@@ -140,9 +160,18 @@ pub struct DownloadConfig {
     /// file for midnight, so values greater than 24 * 60 = 1440 are not supported.
     pub file_freq_min: i64,
 
+    /// The earliest date for which this met data is available for download
+    pub earliest_date: NaiveDate,
+
     /// The subdirectory in the met or chemistry data directory to save the files to. If not given,
     /// the correct subdirectory is chosen based on the levels value.
     pub subdir: Option<PathBuf>,
+}
+
+impl Display for DownloadConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "product = {}, type = {}, levels = {}", self.product, self.data_type, self.levels)
+    }
 }
 
 
