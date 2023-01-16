@@ -44,6 +44,7 @@ enum Commands {
     DownloadReanalysisByDates(met_download::DownloadDatesCli),
     #[clap(alias="dmr")]
     DownloadMissingReanalysis(met_download::DownloadMissingCli),
+    RescanMet(met_download::RescanMetCli),
     #[clap(alias="pifm")]
     ParseInputFilesManually(input_files::ParseInputFilesManualCli),
     AddJob(jobs::AddJobCli),
@@ -92,12 +93,18 @@ async fn main() -> anyhow::Result<()> {
         },
 
         Commands::DownloadReanalysisByDates(subargs) => {
-            met_download::download_files_for_dates_cli(subargs, &config)?;
+            let mut conn = db.acquire().await?;
+            met_download::download_files_for_dates_cli(&mut conn, subargs, &config).await?;
         },
 
         Commands::DownloadMissingReanalysis(subargs) => {
             let mut conn = db.acquire().await?;
             met_download::download_missing_files_cli(&mut conn, subargs, &config).await?;
+        }
+
+        Commands::RescanMet(subargs) => {
+            let mut conn = db.acquire().await?;
+            met_download::rescan_met_files_cli(&mut conn, subargs, &config).await?;
         }
 
         Commands::ParseInputFilesManually(subargs) => {

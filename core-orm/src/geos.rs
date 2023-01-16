@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr, fmt::Display};
+use std::{path::{PathBuf, Path}, str::FromStr, fmt::Display};
 
 use chrono::{NaiveDateTime, NaiveDate};
 use log::{warn, debug, trace};
@@ -407,5 +407,103 @@ impl GeosFile {
         }else{
             return Ok(GeosDayState::Complete)
         }
+    }
+
+    /// Add a new GEOS file to the database
+    /// 
+    /// The file must exist at the path given; if not, returns an error.
+    /// 
+    /// # Inputs
+    /// * `conn` - connection to the database
+    /// * `file` - path to the file being added. Must be an absolute path, recommend always using 
+    ///   [`config::DownloadConfig::get_save_dir`] to get the canonical save directory path.
+    /// * `datetime` - the datetime of the data in the file.
+    /// * `download_cfg` - the configuration section that specififies how to download these files,
+    ///   used to get the product, levels, data type, etc. 
+    /// 
+    /// # Returns
+    /// Returns an `Err` if the file does not exist or the insert in the database fails. 
+    /// 
+    /// # Panics
+    /// Panics if `file` is not an absolute path.
+    /// 
+    /// # See also
+    /// [`GeosFile::add_geos_file_infer_date`] if the file date must be retrieved from the file name.
+    pub async fn add_geos_file(conn: &mut MySqlConn, file: &Path, datetime: NaiveDateTime, download_cfg: &config::DownloadConfig) -> anyhow::Result<()> {
+        if !file.exists() {
+            return Err(anyhow::Error::msg(format!("Not adding nonexistant met file to database: {}", file.display())));
+        }else if !file.is_absolute() {
+            // I decided to make this a panic rather than a recoverable error because this should be something
+            // in the program design, not a runtime issue.
+            panic!("Given file path ({}) must be absolute", file.display());
+        }
+
+        sqlx::query!(
+            "INSERT INTO GeosFiles (file_path, filedate, product, levels, data_type) VALUES (?, ?, ?, ?, ?)",
+            file.to_str().ok_or_else(|| anyhow::Error::msg(format!("Unable to convert path to UTF-8 string: {}", file.display())))?,
+            datetime,
+            download_cfg.product,
+            download_cfg.levels,
+            download_cfg.data_type
+        ).execute(conn)
+        .await?;
+        
+        Ok(())
+    }
+
+    /// Get the date of a file from its file name. File name must contain at least up to minutes.
+    /// 
+    /// Returns the file datetime, or an `Err` if it could not get the chrono format for the file names
+    /// or if the parsing of the file name fails.
+    fn date_from_filename(file: &Path, download_cfg: &config::DownloadConfig) -> anyhow::Result<NaiveDateTime> {
+        let basename = file.file_name()
+            .ok_or_else(|| anyhow::Error::msg(format!("No base name for file {}", file.display())))?
+            .to_string_lossy();
+
+        let date_fmt = download_cfg.get_basename_pattern()?;
+        trace!("Trying to get time from {basename} with format {date_fmt}");
+        // There is a limitation in v0.4 of chrono that it cannot parse strings that don't at least go up to minutes
+        // An issue exists on this topic (https://github.com/chronotope/chrono/issues/191) but there doesn't seem to
+        // have been much movement since 2019.
+        Ok(NaiveDateTime::parse_from_str(&basename, date_fmt)?)
+    }
+
+    /// Similar to [`GeosFile::add_geos_file`], but infers the date & time from the file name.
+    /// 
+    /// Note that the file's basename must match the time format pattern in the download config, and
+    /// must contain time components at least up to minutes. All other behavior follows
+    /// [`GeosFile::add_geos_file`] including panics - `file` must be an absolute path.
+    pub async fn add_geos_file_infer_date(conn: &mut MySqlConn, file: &Path, download_cfg: &config::DownloadConfig) -> anyhow::Result<()> {
+        let datetime = Self::date_from_filename(file, download_cfg)?;
+        Self::add_geos_file(conn, file, datetime, download_cfg).await
+    }
+
+    /// Check whether a given file is already in the database based on what data it has
+    /// 
+    /// This checks if a row already exists in the database that has the file datetime, product,
+    /// levels, and data type specified in the `file` and `download_cfg`. It does *not* check the
+    /// filename itself, with the intent that this avoids issues of different paths pointing to the
+    /// same file (e.g. due to symlinks).
+    /// 
+    /// # Returns
+    /// A boolean, true if the file is already in the database. It returns an `Err` if the file datetime
+    /// couldn't be inferred from the file name (either because the file name and time format pattern didn't
+    /// match or the file name/pattern didn't have all the needed time components) or if the database query 
+    /// fails.
+    pub async fn file_exists_by_type(conn: &mut MySqlConn, file: &Path, file_cfg: &config::DownloadConfig) -> anyhow::Result<bool> {
+        let datetime = Self::date_from_filename(file, file_cfg)?;
+
+        let n = sqlx::query!(
+            r#"SELECT COUNT(*) as count FROM GeosFiles
+               WHERE filedate = ? AND product = ? AND levels = ? and data_type = ?"#,
+            datetime,
+            file_cfg.product,
+            file_cfg.levels,
+            file_cfg.data_type
+        ).fetch_one(conn)
+        .await?
+        .count;
+
+        Ok(n > 0)
     }
 }

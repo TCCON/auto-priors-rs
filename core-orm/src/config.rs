@@ -10,7 +10,7 @@
 //! 
 use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, collections::HashMap, fmt::Display};
 use anyhow::{self, Context};
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveDateTime, Duration};
 use hostname;
 use log::debug;
 use serde::{Serialize, Deserialize};
@@ -35,22 +35,35 @@ pub struct Config {
 }
 
 impl Config {
+    /// Get the slice of download configuration needed for a given met type
+    /// 
+    /// Returns an `Err` if the given met_key is not present in the config.
     pub fn get_met_configs(&self, met_key: &str) -> anyhow::Result<&[DownloadConfig]> {
         self.data.download.get(met_key)
         .and_then(|cfgs| Some(cfgs.as_slice()))
         .ok_or_else(|| anyhow::Error::msg(format!("No meteorology with with '{met_key}' found.")))
     }
 
+    /// Get the earliest start date for all the file types of a given met configuration
+    /// 
+    /// When a met type has multiple files (e.g. 3D assimilation, 2D assimilation, and 3D chemistry for GEOS),
+    /// it is possible that different file types start at different times, so the each file has an earliest
+    /// date it is available for in the config. This returns the minimum among all of those for the given
+    /// `met_key`, or `None` if `met_key` exists but has no files defined.
+    /// 
+    /// Will also return an `Err` is `met_key` is not in the config.
     pub fn get_met_start_date(&self, met_key: &str) -> anyhow::Result<Option<NaiveDate>> {
         let met_cfgs = self.get_met_configs(met_key)?;
 
         if met_cfgs.len() == 0 {
+            // This is redundant (Iterator::min() returns None if the iterator is empty) but I find this clearer
             Ok(None)
         }else {
             let x = met_cfgs.iter().map(|c| c.earliest_date);
             Ok(x.min())
         }
     }
+    
 }
 
 /// Configuration section dealing with how jobs are run
@@ -155,6 +168,16 @@ pub struct DownloadConfig {
     /// (e.g. "%Y", "%d") to insert date/time elements into the URL.
     pub url_pattern: String,
 
+    /// The expected pattern for the downloaded file names.
+    /// Use [Chrono format strings](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
+    /// (e.g. "%Y", "%d") to insert date/time elements into the name. The default is to assume that 
+    /// the last part of the URL in `url_pattern` will become the basename, use this to override that
+    /// if that assumption is not true.
+    /// 
+    /// NOTE: in order for this program to properly parse the date & time from the filename for the database,
+    /// the pattern MUST include year, month, day, hour, and minute.
+    pub basename_pattern: Option<String>,
+
     /// The number of minutes between subsequent reanalysis files, e.g. for files every three hours,
     /// set this to 180. Note that the current implementation assumes that there will always be a
     /// file for midnight, so values greater than 24 * 60 = 1440 are not supported.
@@ -171,6 +194,93 @@ pub struct DownloadConfig {
 impl Display for DownloadConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "product = {}, type = {}, levels = {}", self.product, self.data_type, self.levels)
+    }
+}
+
+impl DownloadConfig {
+    /// Get the pattern for file names of this type of file, with no leading path.
+    /// 
+    /// If the configuration has a value for the `basename_pattern` specified, that is
+    /// returned. Otherwise, the URL pattern is split on the last "/" and everything after
+    /// that slash is used as the pattern.
+    /// 
+    /// Can return an `Err` if it could not identify a part after the final slash in the URL.
+    pub fn get_basename_pattern(&self) -> anyhow::Result<&str> {
+        if let Some(pat) = &self.basename_pattern {
+            return Ok(&pat)
+        }else{
+            // let full_url = url::Url::parse(&self.url_pattern)?
+            //     .path_segments()
+            //     .ok_or_else(|| anyhow::Error::msg(format!("Could not find the file base name from URL pattern {}", self.url_pattern)))?
+            //     .last()
+            //     .ok_or_else(|| anyhow::Error::msg(format!("Could not find the file base name from URL pattern {}", self.url_pattern)))?;
+            // Ok(full_url)
+
+            // Preferring this over the URL library because the latter makes it difficult to
+            // return a &str.
+            self.url_pattern
+                .split('/')
+                .last()
+                .ok_or_else(|| anyhow::Error::msg(format!("Could not find the file base name from URL pattern {}", self.url_pattern)))
+        }
+    }
+
+    /// Get the directory in which files of this type should be saved.
+    /// 
+    /// This uses the root directory for the appropriate data type (e.g. met or chem)
+    /// then adds a subdirectory for the levels type. 
+    /// 
+    /// # Returns
+    /// The canonical path to the save directory. Returns an `Err` if the path could not
+    /// be canonicalized (e.g. the path does not exist or an intermediate component is
+    /// not a directory).
+    pub fn get_save_dir(&self, data_cfg: &DataConfig) -> anyhow::Result<PathBuf> {
+        let root_save_dir = match self.data_type {
+            geos::GeosDataType::Met => data_cfg.geos_path.as_path(),
+            geos::GeosDataType::Chm => data_cfg.chem_path.as_path(),
+        };
+        
+        let subdir = if let Some(sd) = &self.subdir {
+            sd.clone()
+        }else{
+            self.levels.standard_subdir()
+        };
+        
+        root_save_dir.join(subdir)
+            .canonicalize()
+            .with_context(|| format!("Failed to canonicalized the reanalysis save directory path '{}'", root_save_dir.display()))
+    }
+
+    /// Provide a vector of datetimes when this file type is expected to exist on a given date
+    pub fn times_on_day(&self, date: NaiveDate) -> Vec<NaiveDateTime> {
+        let end = date.and_hms(0, 0, 0) + Duration::days(1);
+        let mut file_time = date.and_hms(0, 0, 0);
+        let file_time_del = Duration::minutes(self.file_freq_min);
+        
+        let mut times = vec![];
+        while file_time < end {
+            times.push(file_time);
+            file_time += file_time_del;
+        }
+        
+        times
+    }
+
+    /// Provide a vector of the files of this type expected to exist on a given date.
+    /// 
+    /// The returned paths point to files for the times given by [`DownloadConfig::times_on_day`]
+    /// in the path gievn by [`DownloadConfig::get_save_dir`].
+    /// 
+    /// Returns an `Err` if it cannot get the save directory or the filename pattern.
+    pub fn expected_files_on_day(&self, date: NaiveDate, data_cfg: &DataConfig) -> anyhow::Result<Vec<PathBuf>> {
+        let save_dir = self.get_save_dir(data_cfg)?;
+        let basename_pat = self.get_basename_pattern()?;
+        let mut files = vec![];
+        for time in self.times_on_day(date) {
+            let file_name = time.format(basename_pat).to_string();
+            files.push(save_dir.join(file_name));
+        }
+        Ok(files)
     }
 }
 
