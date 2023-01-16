@@ -7,3 +7,4 @@ TestConfig.toml
 .vscode/targets.log
 *.sql
 .vscode/configurationCache.log
+connect_to_sql.sh

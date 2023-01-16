@@ -169,6 +169,7 @@ pub async fn download_missing_files(
         let y = if let Some(d) = x {
             Some(d)
         }else{
+            info!("Found no complete days, starting from the beginning of the meteorology");
             config.get_met_start_date(met_key)?
         };
 

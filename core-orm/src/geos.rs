@@ -1,7 +1,7 @@
 use std::{path::PathBuf, str::FromStr, fmt::Display};
 
 use chrono::{NaiveDateTime, NaiveDate};
-use log::warn;
+use log::{warn, debug, trace};
 use serde::{Deserialize, Serialize};
 use sqlx::{self, Type, FromRow};
 
@@ -182,6 +182,10 @@ pub struct GeosFile {
 }
 
 impl GeosFile {
+    /// Returns the number of met files expected per day, based on the configuration
+    /// 
+    /// Will error if the frequency specified in the configuration does not divide evenly
+    /// into a day (e.g. if the files are provided every 300 minutes)
     fn num_expected_daily_files(cfg: &config::DownloadConfig) -> anyhow::Result<i64> {
         if 1440 % cfg.file_freq_min != 0 {
             let remainder = 1440 % cfg.file_freq_min;
@@ -189,12 +193,22 @@ impl GeosFile {
             return Err(anyhow::Error::msg(msg))
         }
 
-        Ok(1400 / cfg.file_freq_min)
+        Ok(1440 / cfg.file_freq_min)
     }
 
+    /// Given a configuration for downloading reanalysis data, find the last date for which that data was downloaded
+    /// 
+    /// This is most useful for figuring out  data needs downloaded. To figure out if all the different data sets
+    /// (different levels, variables, etc.) needed to actually run the priors for a day are available, use
+    /// [`get_last_complete_date_for_config_set`]
+    /// 
+    /// # Returns
+    /// The last date for which that data was downloaded. Returns `None` if that data has never been downloaded.
+    /// Returns an `Err` if querying the database fails.
     pub async fn get_last_complete_date_for_config(conn: &mut MySqlConn, cfg: &config::DownloadConfig) -> anyhow::Result<Option<NaiveDate>> {
         let n_expected = Self::num_expected_daily_files(cfg)?;
 
+        trace!("Querying most recent complete date ({n_expected} files) for {}, {}, {}", cfg.levels, cfg.data_type, cfg.product);
         let this_max_date = sqlx::query!(
             r#"SELECT MAX(tbl.date) as max_date
                 FROM (
@@ -215,11 +229,29 @@ impl GeosFile {
         Ok(this_max_date)
     }
 
+    /// Given a list of reanalysis download configurations, find the last date where all the data sets were downloaded.
+    /// 
+    /// This is meant for finding the last date that the priors can be generated for. To figure out the last date a
+    /// specific reanalysis data set was downloaded for, use [`get_last_complete_date_for_config`]
+    /// 
+    /// # Returns
+    /// The most recent date for which all the datasets specified by `cfgs` are complete. There can be several cases:
+    /// 
+    ///     1. If none of those datasets have any data downloaded, returns `None` 
+    ///     2. If some (but not all) of those datasets have data downloaded, still returns `None` but prints a warning
+    ///     3. If all those datasets have data downloaded, but the end dates differ, returns the earliest end date and
+    ///        prints a warning.
+    ///     4. If all those datasets have data downloaded through the same date, returns that date.
+    /// 
+    /// This will return an `Err` if the database query fails.
     pub async fn get_last_complete_date_for_config_set(conn: &mut MySqlConn, cfgs: &[config::DownloadConfig]) -> anyhow::Result<Option<NaiveDate>> {
         let mut dates = vec![];
         for cfg in cfgs {
             if let Some(d) = Self::get_last_complete_date_for_config(conn, cfg).await? {
+                debug!("Last complete day for {cfg} was {d}");
                 dates.push(d);
+            }else{
+                debug!("No complete days found for {cfg}");
             }
         }
 
@@ -260,6 +292,7 @@ impl GeosFile {
     /// 
     /// # Errors
     /// Returns an `Err` if the database query fails for any reason.
+    #[deprecated(since = "d9d77ed", note="Replace with `get_last_complete_date_for_config_set`")]
     pub async fn get_last_complete_date(conn: &mut MySqlConn, met_levels: GeosLevels, geos_product: GeosProduct, req_chm: bool) -> anyhow::Result<Option<NaiveDate>> {
         // We find the date that has a complete set of 8 3D met files, 2D met files, and (optionally)
         // 3D chemistry files by making subqueries for each file type where we count the number of 
@@ -305,6 +338,9 @@ impl GeosFile {
         return Ok(max_date)
     }
 
+    /// Returns whether a given date is complete, incomplete, or wholly missing for a given reanalysis download configuration
+    /// 
+    /// Will return an `Err` if the database query fails.
     pub async fn is_date_complete_for_config(conn: &mut MySqlConn, date: NaiveDate, cfg: &config::DownloadConfig) -> anyhow::Result<GeosDayState> {
         let n_expected = Self::num_expected_daily_files(cfg)?;
         let n_found = sqlx::query!(
@@ -327,6 +363,7 @@ impl GeosFile {
         }
     }
 
+    #[deprecated(since="d9d77ed", note="Replace with `is_date_complete_for_config`")]
     pub async fn is_date_complete(conn: &mut MySqlConn, date: NaiveDate, met_levels: GeosLevels, geos_product: GeosProduct, req_chm: bool) -> anyhow::Result<GeosDayState> {
         let mut n_files = 0;
         n_files += sqlx::query!(
