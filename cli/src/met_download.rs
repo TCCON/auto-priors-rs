@@ -8,6 +8,8 @@ use chrono::{NaiveDate, Duration};
 use log::{warn, info, debug};
 use orm::{self, geos::GeosDayState};
 
+use crate::utils;
+
 
 /// Check that a user-provided end date is after the start date OR set the default end date
 fn check_start_end_date(start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<NaiveDate> {
@@ -242,13 +244,20 @@ pub struct DownloadDatesCli {
 }
 
 
-pub async fn download_files_for_dates_cli(conn: &mut orm::MySqlConn, clargs: DownloadDatesCli, config: &orm::config::Config) -> Result<(), anyhow::Error> {
+pub async fn download_files_for_dates_cli(
+    conn: &mut orm::MySqlConn, 
+    clargs: DownloadDatesCli, 
+    config: &orm::config::Config,
+    downloader: impl utils::Downloader + Clone,
+) -> Result<(), anyhow::Error> 
+{
     download_files_for_dates(
         conn,
         &clargs.met_key, 
         clargs.start_date, 
         clargs.end_date, 
-        config, 
+        config,
+        downloader,
         clargs.dry_run
     ).await
 }
@@ -277,13 +286,19 @@ pub struct DownloadMissingCli {
     pub dry_run: bool
 }
 
-pub async fn download_missing_files_cli(conn: &mut orm::MySqlConn, clargs: DownloadMissingCli, config: &orm::config::Config) -> Result<(), anyhow::Error> {
+pub async fn download_missing_files_cli(
+    conn: &mut orm::MySqlConn, 
+    clargs: DownloadMissingCli,
+    config: &orm::config::Config, 
+    downloader: impl utils::Downloader + Clone
+) -> Result<(), anyhow::Error> {
     download_missing_files(
         conn,
         &clargs.met_key,
         clargs.start_date,
         clargs.end_date,
         config,
+        downloader,
         clargs.dry_run
     ).await
 }
@@ -294,6 +309,7 @@ pub async fn download_missing_files(
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
     config: &orm::config::Config,
+    downloader: impl utils::Downloader + Clone,
     dry_run: bool) -> Result<(), anyhow::Error> 
 {
     let cfgs = config.get_met_configs(met_key)?;
@@ -309,7 +325,7 @@ pub async fn download_missing_files(
                 },
                 GeosDayState::Incomplete | GeosDayState::Missing => {
                     info!("{curr_date} must be downloaded for {cfg}");
-                    download_one_file_one_date(conn, curr_date, cfg, &config.data, dry_run).await?;
+                    download_one_file_one_date(conn, curr_date, cfg, &config.data, downloader.clone(), dry_run).await?;
                 }
             }
         }
@@ -409,6 +425,7 @@ pub async fn download_files_for_dates(
     start_date: NaiveDate, 
     end_date: Option<NaiveDate>, 
     config: &orm::config::Config,
+    downloader: impl utils::Downloader + Clone,
     dry_run: bool) -> Result<(), anyhow::Error> 
 {
     // First check that the dates are valid
@@ -424,7 +441,8 @@ pub async fn download_files_for_dates(
                 conn,
                 curr_date, 
                 file_cfg, 
-                &config.data, 
+                &config.data,
+                downloader.clone(),
                 dry_run
             ).await?;
         }
@@ -441,6 +459,7 @@ async fn download_one_file_one_date(
     date: NaiveDate, 
     file_cfg: &orm::config::DownloadConfig, 
     data_cfg: &orm::config::DataConfig, 
+    downloader: impl utils::Downloader,
     dry_run: bool) -> Result<(), anyhow::Error>
     
 {

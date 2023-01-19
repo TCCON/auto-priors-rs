@@ -22,6 +22,7 @@ use log::{self, debug};
 use orm;
 use tokio;
 
+mod utils;
 mod met_download;
 mod jobs;
 mod input_files;
@@ -86,6 +87,11 @@ async fn main() -> anyhow::Result<()> {
     let config = orm::config::load_config_file_or_default(config_file)?;
     let db = orm::get_database_pool(None).await.unwrap();
 
+    // The download functions require a downloader object mainly to support mocking in tests; however, in
+    // principle we could also build alternate downloaders to support systems where wget isn't available
+    // for whatever reason.
+    let wget_dl = utils::WgetDownloader::new();
+
     match args.command {
         Commands::CheckMet(subargs) => {
             let mut conn = db.acquire().await?;
@@ -94,12 +100,12 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::DownloadReanalysisByDates(subargs) => {
             let mut conn = db.acquire().await?;
-            met_download::download_files_for_dates_cli(&mut conn, subargs, &config).await?;
+            met_download::download_files_for_dates_cli(&mut conn, subargs, &config, wget_dl).await?;
         },
 
         Commands::DownloadMissingReanalysis(subargs) => {
             let mut conn = db.acquire().await?;
-            met_download::download_missing_files_cli(&mut conn, subargs, &config).await?;
+            met_download::download_missing_files_cli(&mut conn, subargs, &config, wget_dl).await?;
         }
 
         Commands::RescanMet(subargs) => {
