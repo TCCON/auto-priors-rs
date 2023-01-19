@@ -487,3 +487,7 @@ async fn download_one_file_one_date(
 
     Ok(())
 }
+
+pub fn test_me() -> i32 {
+    42
+}

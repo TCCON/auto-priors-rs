@@ -22,3 +22,9 @@ features = ["mysql", "runtime-tokio-rustls", "chrono"]
 # Using the same version as Rocket to *hopefully* avoid weird issues
 version = "1.6.1"
 features = ["full"]
+
+[[bin]]
+name = "tccon_priors_cli"
+path = "src/main.rs"
+
+[lib]
