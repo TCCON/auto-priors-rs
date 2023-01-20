@@ -22,12 +22,12 @@ use log::{self, debug};
 use orm;
 use tokio;
 
-mod utils;
-mod met_download;
-mod jobs;
-mod input_files;
-mod siteinfo;
-mod stdsites;
+use tccon_priors_cli::utils;
+use tccon_priors_cli::met_download;
+use tccon_priors_cli::jobs;
+use tccon_priors_cli::input_files;
+use tccon_priors_cli::siteinfo;
+use tccon_priors_cli::stdsites;
 
 #[derive(Debug, Parser)]
 struct Cli {
