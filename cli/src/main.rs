@@ -20,6 +20,7 @@ use dotenv;
 use env_logger;
 use log::{self, debug};
 use orm;
+use orm::MySqlConn;
 use tokio;
 
 use tccon_priors_cli::utils;
@@ -40,6 +41,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    MigrateDb(MigrateCli),
+    UnmigrateDb(UnmigrateCli),
     CheckMet(met_download::CheckDatesCli),
     #[clap(alias="drbd")]
     DownloadReanalysisByDates(met_download::DownloadDatesCli),
@@ -56,6 +59,21 @@ enum Commands {
 }
 
 #[derive(Debug, Args)]
+pub struct MigrateCli {
+    /// Set this flag to skip the interactive verification
+    #[clap(short = 'y', long = "yes")]
+    yes: bool
+}
+
+#[derive(Debug, Args)]
+pub struct UnmigrateCli {
+    /// Set this flag to skip the interactive verification
+    yes: bool,
+    /// Use this to determine which is the earliest migration to revert to
+    target: Option<i64>
+}
+
+#[derive(Debug, Args)]
 /// Generate a default configuration file from the command line
 struct GenConfigCli {
     /// Path to write the default TOML file as.
@@ -64,6 +82,44 @@ struct GenConfigCli {
 
 fn generate_config_file(clargs: GenConfigCli) -> anyhow::Result<()> {
     orm::config::generate_config_file(&clargs.path)
+}
+
+async fn run_migrations(conn: &mut MySqlConn, db_url: &str, yes: bool) -> anyhow::Result<()> {
+    // Only print the name of the database (assuming it's the part after the last slash)
+    // so as not to expose passwords if they are in the URL.
+    let db_name = db_url.split('/').last().unwrap_or("UNKNOWN (could not determine database name from url)");
+    
+    if !yes {
+        println!("Apply any pending migrations to {db_name}?");
+        let ans = tccon_priors_cli::get_user_input("[y/N]: ")?;
+
+        if ans.to_ascii_lowercase() != "y" {
+            println!("Aborting migrations");
+            return Ok(())
+        }
+    }
+
+    println!("Applying any pending migrations to {db_name}");
+    orm::apply_migrations(conn).await
+}
+
+async fn undo_migrations(conn: &mut MySqlConn, db_url: &str, yes: bool, target: Option<i64>) -> anyhow::Result<()> {
+    // Only print the name of the database (assuming it's the part after the last slash)
+    // so as not to expose passwords if they are in the URL.
+    let db_name = db_url.split('/').last().unwrap_or("UNKNOWN (could not determine database name from url)");
+    
+    if !yes {
+        println!("Undo migrations in {db_name}?");
+        let ans = tccon_priors_cli::get_user_input("[y/N]: ")?;
+
+        if ans.to_ascii_lowercase() != "y" {
+            println!("Aborting migration undo");
+            return Ok(())
+        }
+    }
+
+    println!("Undoing migrations in {db_name}");
+    orm::unapply_migrations(conn, target.unwrap_or(0)).await
 }
 
 // Had to change rust-analyzer settings as described in https://github.com/rust-lang/rust-analyzer/issues/12450
@@ -85,7 +141,8 @@ async fn main() -> anyhow::Result<()> {
     debug!("Log level set to DEBUG");
     let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
     let config = orm::config::load_config_file_or_default(config_file)?;
-    let db = orm::get_database_pool(None).await.unwrap();
+    let db_url = orm::get_database_url(None)?;
+    let db = orm::get_database_pool(Some(db_url.clone())).await.unwrap();
 
     // The download functions require a downloader object mainly to support mocking in tests; however, in
     // principle we could also build alternate downloaders to support systems where wget isn't available
@@ -93,6 +150,16 @@ async fn main() -> anyhow::Result<()> {
     let wget_dl = utils::WgetDownloader::new();
 
     match args.command {
+        Commands::MigrateDb(subargs) => {
+            let mut conn = db.acquire().await?;
+            run_migrations(&mut conn, &db_url, subargs.yes).await?;
+        }
+
+        Commands::UnmigrateDb(subargs) => {
+            let mut conn = db.acquire().await?;
+            undo_migrations(&mut conn, &db_url, subargs.yes, subargs.target).await?;
+        }
+
         Commands::CheckMet(subargs) => {
             let mut conn = db.acquire().await?;
             met_download::check_files_for_dates_cli(&mut conn, subargs).await?;

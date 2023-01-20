@@ -4,6 +4,7 @@ use anyhow::{self, Context};
 use dotenv;
 use log;
 use sqlx;
+use sqlx::migrate::Migrator;
 
 pub mod config;
 pub mod utils;
@@ -17,7 +18,17 @@ pub type MySqlPC = sqlx::pool::PoolConnection<sqlx::MySql>;
 pub type MySqlConn = sqlx::MySqlConnection;
 static DB_ENV_VARS: [&'static str; 2] = ["PRIORS_DATABASE_URL", "DATABASE_URL"];
 
-fn get_database_url(url_in: Option<String>) -> anyhow::Result<String> {
+static MIGRATOR: Migrator = sqlx::migrate!();
+
+pub async fn apply_migrations(conn: &mut MySqlConn) -> anyhow::Result<()> {
+    Ok(MIGRATOR.run(conn).await?)
+}
+
+pub async fn unapply_migrations(conn: &mut MySqlConn, target: i64) -> anyhow::Result<()> {
+    Ok(MIGRATOR.undo(conn, target).await?)
+}
+
+pub fn get_database_url(url_in: Option<String>) -> anyhow::Result<String> {
     if let Some(url) = url_in {
         return Ok(url)
     }
