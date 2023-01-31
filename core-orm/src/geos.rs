@@ -9,6 +9,7 @@ use crate::{MySqlConn, config};
 
 const REQ_FILES_PER_DAY: i64 = 8;
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum GeosDayState {
     Complete,
     Incomplete,

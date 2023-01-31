@@ -1,0 +1,100 @@
+use std::env;
+use anyhow::Context;
+use orm;
+
+static TEST_DB_ENV_VARS: [&'static str; 2] = ["PRIORS_TEST_DATABASE_URL", "TEST_DATABASE_URL"];
+
+pub fn get_test_db_url() -> anyhow::Result<String> {
+    // First, try the regular environmental variables
+    for key in TEST_DB_ENV_VARS {
+        if let Ok(val) = env::var(key) {
+            log::info!("Using database URL {val} from the environmental variable {key}");
+            return Ok(val)
+        }
+    }
+
+    // If we can't find the URL in existing environmental variables, try using dotenv.
+    let env_path = dotenv::dotenv().context("No database URL defined in existing environmental variables, and no .env file found.")?;
+    for key in TEST_DB_ENV_VARS {
+        if let Ok(val) = dotenv::var(key) {
+            let epd = env_path.display();
+            log::info!("Using database URL {val} from the variable {key} in {epd}");
+            return Ok(val)
+        }
+    }
+
+    return Err(anyhow::anyhow!("Unable to find database URL."))
+}
+
+pub async fn open_test_database(reset_db: bool) -> anyhow::Result<sqlx::MySqlPool> {
+    
+    let db_url = get_test_db_url()?;
+    println!("db_url = {db_url}");
+    let pool = orm::get_database_pool(Some(db_url)).await?;
+
+    if reset_db {
+        let mut conn = pool.acquire().await?;
+        orm::unapply_migrations(&mut conn, 0).await?;
+        orm::apply_migrations(&mut conn).await?;
+    }
+
+    Ok(pool)
+}
+
+/// Execute a multi-statement SQL file on the database behind a connections.
+/// 
+/// This macro takes two inputs: a literal string path to the SQL file to read
+/// from and a connection to the database to execute on. The connection must be
+/// able to be passed to the `execute` method from [`sqlx`] as `&mut conn`.
+/// 
+/// The path given as the first argument should follow the [`include_str!`] rules
+/// for relative paths, i.e. it will be interpreted relative to the file in which
+/// it is written. The contents of the file are read and split on semicolons, and
+/// each element of the split passed as a statement to [`sqlx::query`] so long as
+/// the statement is not all whitespace. This prevents passing empty commands
+/// to the database, which usually causes an error.
+/// 
+/// # Panics
+/// Any errors in SQL will cause a panic. The panic message will include the original
+/// SQL message plus which statement (not line number) in the file caused it. The
+/// statement index will be 1-based.
+#[macro_export]
+macro_rules! multiline_sql {
+    ($path:literal, $conn:ident) => {
+        let read_sql = include_str!($path);
+        for (i, statement) in read_sql.split(';').enumerate() {
+            if !statement.trim().is_empty() {
+                sqlx::query(statement.trim()).execute(&mut $conn).await.with_context(|| format!("Error in or around statement {}", i+1)).unwrap();
+            }
+        }
+    };
+}
+
+/// Execute a file containing multiple SQL statements to initialize the test database.
+/// 
+/// This does exactly the same thing as [`multiline_sql!`], except that this opens a
+/// connection to the test database itself (resetting it in the process, i.e. passes
+/// `true` to [`open_test_database`]). The connection acquired will be returned from
+/// this macro.
+/// 
+/// See [`multiline_sql!`] for information on how the SQL from the file is passed to
+/// the database. If you need control over how the connection to the database is
+/// 
+/// # Panics
+/// In addition to the 
+#[macro_export]
+macro_rules! multiline_sql_init {
+    ($path:literal) => {
+        {
+            let pool = common::open_test_database(true).await.expect("Failed to open test database");
+            let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+            multiline_sql!($path, conn);
+            conn
+        }
+    };
+}
+
+// Per https://stackoverflow.com/a/31749071 this is necessary to
+// use macros across modules
+pub(crate) use multiline_sql;
+pub(crate) use multiline_sql_init;
