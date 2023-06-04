@@ -1,0 +1,47 @@
+[execution]
+max_ntasks = 2
+max_numpy_threads = 2
+hours_to_keep = 168 
+download_server = 'ftp://example/'
+download_root = ''
+output_path = ''
+std_sites_tar_output = ''
+std_sites_output_base = ''
+start_jobs_freq = 5.0
+simulation = true
+
+[data]
+geos_path = ''
+chem_path = ''
+zgrid_file = ''
+base_vmr_file = ''
+
+[[data.download.geosfpit]]
+product = "fpit"
+data_type = "met"
+levels = "eta"
+url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NVASM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4"
+file_freq_min = 180 
+earliest_date = "2000-01-01"
+
+[[data.download.geosfpit]]
+product = "fpit"
+data_type = "met"
+levels = "surf"
+url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NXASM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.%Y%m%d_%H%M.V01.nc4"
+file_freq_min = 180 
+earliest_date = "2000-01-01"
+
+[[data.download.geosfpit]]
+product = "fpit"
+data_type = "chm"
+levels = "eta"
+url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NVCHM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4"
+file_freq_min = 180 
+earliest_date = "2000-01-01"
+
+[admin]
+admin_emails = []
+soft_job_limit = 100 
+hard_job_limit = 100 
+acknowledgement_message = 'Hi there!'

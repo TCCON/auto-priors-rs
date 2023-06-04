@@ -13,6 +13,8 @@ env_logger = "0.9"
 log = "0.4"
 tokio-test = "0.4.2"
 orm = {path = "../core-orm", package = "tccon_priors_orm"}
+# Should probably be dev deps
+toml = "0.5"
 serial_test = "1.0.0"
 
 [dependencies.sqlx]
@@ -24,6 +26,8 @@ features = ["mysql", "runtime-tokio-rustls", "chrono"]
 # Using the same version as Rocket to *hopefully* avoid weird issues
 version = "1.6.1"
 features = ["full"]
+
+
 
 [[bin]]
 name = "tccon_priors_cli"

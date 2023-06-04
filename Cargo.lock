@@ -2340,6 +2340,7 @@ dependencies = [
  "tccon_priors_orm",
  "tokio",
  "tokio-test",
+ "toml",
 ]
 
 [[package]]

@@ -1,10 +1,24 @@
 use std::env;
+use std::io::Write;
+use std::path::PathBuf;
 use anyhow::Context;
 use orm;
+use tccon_priors_cli::utils::Downloader;
 
 static TEST_DB_ENV_VARS: [&'static str; 2] = ["PRIORS_TEST_DATABASE_URL", "TEST_DATABASE_URL"];
 
-pub fn get_test_db_url() -> anyhow::Result<String> {
+pub(crate) fn make_dummy_config(download_root: PathBuf) -> anyhow::Result<orm::config::Config> {
+    let s = include_str!("test_config.toml");
+    let mut cfg: orm::config::Config = toml::from_slice(s.as_bytes())?;
+
+    cfg.execution.download_root = download_root.clone();
+    cfg.data.geos_path = download_root.clone();
+    cfg.data.chem_path = download_root.clone();
+
+    Ok(cfg)
+}
+
+pub(crate) fn get_test_db_url() -> anyhow::Result<String> {
     // First, try the regular environmental variables
     for key in TEST_DB_ENV_VARS {
         if let Ok(val) = env::var(key) {
@@ -26,7 +40,7 @@ pub fn get_test_db_url() -> anyhow::Result<String> {
     return Err(anyhow::anyhow!("Unable to find database URL."))
 }
 
-pub async fn open_test_database(reset_db: bool) -> anyhow::Result<sqlx::MySqlPool> {
+pub(crate) async fn open_test_database(reset_db: bool) -> anyhow::Result<sqlx::MySqlPool> {
     
     let db_url = get_test_db_url()?;
     println!("db_url = {db_url}");
@@ -98,3 +112,34 @@ macro_rules! multiline_sql_init {
 // use macros across modules
 pub(crate) use multiline_sql;
 pub(crate) use multiline_sql_init;
+
+pub(crate) struct TestDownloader {
+    files: Vec<String>
+}
+
+impl TestDownloader {
+    pub(crate) fn new() -> Self {
+        Self { files: vec![] }
+    }
+}
+
+impl Downloader for TestDownloader {
+    fn add_file_to_download(&mut self, url: String) -> anyhow::Result<()> {
+        self.files.push(url);
+        Ok(())
+    }
+
+    fn download_files(&mut self, save_dir: &std::path::Path) -> anyhow::Result<()> {
+        for url in self.files.iter() {
+            let basename = url.split('/').last()
+                .ok_or_else(|| anyhow::Error::msg(format!("Could not determine basename of URL {url}")))?;
+            let new_file = save_dir.join(basename);
+            let mut h = std::fs::File::create(&new_file)
+                .with_context(|| format!("Error occurred while trying to create dummy file {}", new_file.display()))?;
+            write!(h, "Dummy file created for tccon-priors-cli testing")
+            .with_context(|| format!("Error occurred while trying to write to dummy file {}", new_file.display()))?;
+        }
+
+        Ok(())
+    }
+}
