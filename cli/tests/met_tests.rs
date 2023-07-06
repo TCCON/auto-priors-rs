@@ -1,7 +1,9 @@
+use std::path::PathBuf;
+
 use anyhow::Context;
 use chrono::NaiveDate;
 use serial_test::serial;
-use orm::geos::{GeosDayState,GeosProduct,GeosLevels};
+use orm::geos::GeosDayState;
 use tccon_priors_cli::met_download::check_files_for_dates;
 mod common;
 
@@ -15,14 +17,14 @@ mod common;
 #[serial]
 async fn test_check_met() {
     let mut conn = common::multiline_sql_init!("sql/check_met.sql");
+    let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let stat_map = check_files_for_dates(
-        &mut conn, 
+        &mut conn,
+        &config,
+        common::TEST_MET_KEY,
         NaiveDate::from_ymd(2020, 1, 1), 
         Some(NaiveDate::from_ymd(2020, 1, 2)),
-        GeosProduct::Fpit,
-        GeosLevels::Eta,
-        true
     ).await.unwrap();
 
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 1, 1)).unwrap().unwrap();
@@ -32,11 +34,10 @@ async fn test_check_met() {
 
     let stat_map = check_files_for_dates(
         &mut conn, 
+        &config,
+        common::TEST_MET_KEY,
         NaiveDate::from_ymd(2020, 2, 1), 
         Some(NaiveDate::from_ymd(2020, 2, 4)),
-        GeosProduct::Fpit,
-        GeosLevels::Eta,
-        true
     ).await.unwrap();
 
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 2, 1)).unwrap().unwrap();
@@ -51,11 +52,10 @@ async fn test_check_met() {
     // Should also be marked as incomplete - missing all of one type of file
     let stat_map = check_files_for_dates(
         &mut conn, 
+        &config,
+        common::TEST_MET_KEY,
         NaiveDate::from_ymd(2020, 3, 1), 
         Some(NaiveDate::from_ymd(2020, 3, 4)),
-        GeosProduct::Fpit,
-        GeosLevels::Eta,
-        true
     ).await.unwrap();
 
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 3, 1)).unwrap().unwrap();
@@ -70,11 +70,10 @@ async fn test_check_met() {
     // This day isn't in the database at all, should be marked as missing
     let stat_map = check_files_for_dates(
         &mut conn, 
+        &config,
+        common::TEST_MET_KEY,
         NaiveDate::from_ymd(2020, 4, 1), 
         Some(NaiveDate::from_ymd(2020, 4, 2)),
-        GeosProduct::Fpit,
-        GeosLevels::Eta,
-        true
     ).await.unwrap();
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 4, 1)).unwrap().unwrap();
     assert_eq!(stat, GeosDayState::Missing, "Day missing all files not marked Missing");

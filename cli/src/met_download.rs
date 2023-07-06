@@ -93,19 +93,14 @@ async fn get_start_end_dates(
 /// querying for that day).
 #[derive(Debug, Args)]
 pub struct CheckDatesCli {
+    /// The key identifying the section in the configuration file to use
+    /// for the set of met files required. In a configuration file with
+    /// sections "[[data.download.geosfpit]]", the key would be "geosfpit".
+    pub met_key: String,
     /// The first date to check, in YYYY-MM-DD format
     pub start_date: NaiveDate,
     /// The day AFTER the last date to check, if omitted, only START_DATE is checked
     pub end_date: Option<NaiveDate>,
-    /// Which GEOS product stream to look for.
-    #[clap(short = 'p', long, default_value = "fpit")]
-    pub geos_product: orm::geos::GeosProduct,
-    /// Which set of vertical levels to look for the 3D met fields on - "eta" = hybrid model levels, "pres" = fixed pressure levels
-    #[clap(short = 'l', long, default_value = "eta")]
-    pub met_levels: orm::geos::GeosLevels,
-    /// Pass this to only require the 2D and 3D met files be present for a day to be complete. By default, the chemistry files must also be present.
-    #[clap(short = 'c', long)]
-    pub no_req_chm: bool
 }
 
 pub enum CheckFileStatus {
@@ -147,15 +142,14 @@ impl Termination for CheckFileStatus {
 /// for each date in the range.
 /// 
 /// See [`check_files_for_dates`] for a function to use within the Rust code.
-pub async fn check_files_for_dates_cli(conn: &mut orm::MySqlConn, clargs: CheckDatesCli) -> anyhow::Result<CheckFileStatus> {
+pub async fn check_files_for_dates_cli(conn: &mut orm::MySqlConn, clargs: CheckDatesCli, cfg: &orm::config::Config) -> anyhow::Result<CheckFileStatus> {
     
     let files_found = check_files_for_dates(
         conn,
+        cfg,
+        &clargs.met_key,
         clargs.start_date,
-        clargs.end_date,
-        clargs.geos_product,
-        clargs.met_levels,
-        !clargs.no_req_chm).await?;
+        clargs.end_date).await?;
 
     // Print the results out in chronological order
     let mut any_missing = false;
@@ -199,21 +193,24 @@ pub async fn check_files_for_dates_cli(conn: &mut orm::MySqlConn, clargs: CheckD
 /// while trying to check that date. Returns an `Err` if the end date is not after the start date.
 pub async fn check_files_for_dates(
     conn: &mut orm::MySqlConn,
+    cfg: &orm::config::Config,
+    met_key: &str,
     start_date: NaiveDate,
-    end_date: Option<NaiveDate>,
-    geos_product: orm::geos::GeosProduct,
-    met_levels: orm::geos::GeosLevels,
-    req_chm: bool) -> anyhow::Result<HashMap<NaiveDate, Option<orm::geos::GeosDayState>>> 
+    end_date: Option<NaiveDate>
+) -> anyhow::Result<HashMap<NaiveDate, Option<orm::geos::GeosDayState>>> 
 {
     // Verify input dates are valid
     let end_date = check_start_end_date(start_date, end_date)?;
+
+    // Go ahead and get the set of files expected to be downloaded according to the config
+    let dl_configs = cfg.get_met_configs(met_key)?;
 
     // For each date, try to check if the necessary files are present. If we get an error, log it,
     // but keep going.
     let mut files_map = HashMap::new();
     let mut curr_date = start_date;
     while curr_date < end_date {
-        let files_found = match orm::geos::GeosFile::is_date_complete(conn, curr_date, met_levels, geos_product, req_chm).await {
+        let files_found = match orm::geos::GeosFile::is_date_complete_for_config_set(conn, curr_date, dl_configs).await {
             Ok(state) => Some(state),
             Err(e) => {
                 warn!("Error checking met files for date {curr_date}: {e}");

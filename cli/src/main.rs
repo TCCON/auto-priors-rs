@@ -162,7 +162,7 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::CheckMet(subargs) => {
             let mut conn = db.acquire().await?;
-            met_download::check_files_for_dates_cli(&mut conn, subargs).await?;
+            met_download::check_files_for_dates_cli(&mut conn, subargs, &config).await?;
         },
 
         Commands::DownloadReanalysisByDates(subargs) => {

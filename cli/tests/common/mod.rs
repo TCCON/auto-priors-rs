@@ -6,6 +6,7 @@ use orm;
 use tccon_priors_cli::utils::Downloader;
 
 static TEST_DB_ENV_VARS: [&'static str; 2] = ["PRIORS_TEST_DATABASE_URL", "TEST_DATABASE_URL"];
+pub const TEST_MET_KEY: &'static str = "geosfpit";
 
 pub(crate) fn make_dummy_config(download_root: PathBuf) -> anyhow::Result<orm::config::Config> {
     let s = include_str!("test_config.toml");

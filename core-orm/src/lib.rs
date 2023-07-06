@@ -8,6 +8,7 @@ use sqlx::migrate::Migrator;
 
 pub mod config;
 pub mod utils;
+pub mod defaultopts;
 pub mod geos;
 pub mod siteinfo;
 pub mod jobs;

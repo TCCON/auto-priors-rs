@@ -9,6 +9,8 @@ use crate::PriorsDb;
 
 #[get("/stdsites")]
 pub async fn check_std_sites(mut db: Connection<PriorsDb>) -> Result<Template, String> {
+    let cfg = orm::config::load_config_file_or_default::<std::path::PathBuf>(None) // TODO: maybe the configuration should be a resource?
+        .expect("Could not load default configuration file");
     let today = Utc::today().naive_utc();
     let start_date = (Utc::today() - Duration::days(14)).naive_utc();
     let dates = utils::date_range(start_date, today + Duration::days(1));
@@ -22,8 +24,8 @@ pub async fn check_std_sites(mut db: Connection<PriorsDb>) -> Result<Template, S
     ).await
     .expect("Standard site job database query failure!");
 
-    let last_geos_date = geos::GeosFile::get_last_complete_date(
-        &mut *db, geos::GeosLevels::Eta, geos::GeosProduct::Fpit, true).await
+    let last_geos_date = geos::GeosFile::get_last_complete_date_for_default_mets(
+        &mut *db, &cfg).await
         .expect("Geos file database query failure!")
         .unwrap_or(NaiveDate::from_ymd(1970, 1, 1));
 

@@ -7,7 +7,7 @@ use log::{warn, info};
 use serde::Serialize;
 use sqlx::{self, FromRow, Type, Acquire};
 
-use crate::MySqlConn;
+use crate::{MySqlConn, config};
 use crate::{utils,geos,jobs,siteinfo};
 
 
@@ -256,7 +256,7 @@ impl StdSiteJob {
     /// * any of the database operations fail
     /// * there are no existing standard site jobs, so cannot determine the starting date
     /// * `date` is `None` and it cannot determine the last date with the full required suite of GEOS files
-    pub async fn add_new_std_jobs_up_to_date(conn: &mut MySqlConn, date: Option<NaiveDate>, save_dir: &Path) -> anyhow::Result<Vec<AddStdJobSummary>> {
+    pub async fn add_new_std_jobs_up_to_date(conn: &mut MySqlConn, cfg: &config::Config, date: Option<NaiveDate>, save_dir: &Path) -> anyhow::Result<Vec<AddStdJobSummary>> {
         let last_std_site_date = sqlx::query!(
             "SELECT MAX(date) as date FROM StdSiteJobs"
         ).fetch_one(&mut *conn)
@@ -267,11 +267,11 @@ impl StdSiteJob {
         let last_date = if let Some(d) = date {
             d
         }else{
-            geos::GeosFile::get_last_complete_date(
+            // let default_opts = defaultopts::DefaultOptions::get_defaults_for_date(conn, date).await?;
+
+            geos::GeosFile::get_last_complete_date_for_default_mets(
                 &mut *conn, 
-                geos::GeosLevels::Eta,
-                geos::GeosProduct::Fpit,
-                true
+                cfg
             ).await?
             .ok_or(anyhow::Error::msg("Could not determine most recent date with all required GEOS files, cannot use the function add_new_std_jobs_up_to_date"))?
         };

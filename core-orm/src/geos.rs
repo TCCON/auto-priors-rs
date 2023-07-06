@@ -5,7 +5,7 @@ use log::{warn, debug, trace};
 use serde::{Deserialize, Serialize};
 use sqlx::{self, Type, FromRow};
 
-use crate::{MySqlConn, config};
+use crate::{MySqlConn, config, defaultopts};
 
 const REQ_FILES_PER_DAY: i64 = 8;
 
@@ -279,6 +279,30 @@ impl GeosFile {
         Ok(Some(earliest_date))
     }
 
+    /// Get the most recent date for which the meteorology files expected based on the default options are all available.
+    /// 
+    /// Because different time periods may use different meteorology, figuring out the most recent day for which we can generate
+    /// priors requires knowing which met files to check for. This function uses the defined default options to check for the most
+    /// recent day with all the needed met files.
+    /// 
+    /// # Returns
+    /// - `Ok(Some(date))` if it finds a date with all the needed met files
+    /// - `Ok(None)` if no dates have all the needed met files
+    /// - `Err` if any database queries fail or any of the default option sets defined in the configuration overlap in time.
+    pub async fn get_last_complete_date_for_default_mets(conn: &mut MySqlConn, cfg: &config::Config) -> anyhow::Result<Option<NaiveDate>> {
+        let option_sets = defaultopts::DefaultOptions::get_all_defaults_check_overlap(conn).await?;
+        // Since these are date-ordered and do not overlap, we know we can start from the last set and check for complete met data
+        for options in option_sets.iter().rev() {
+            let met_key = &options.met;
+            let met_configs = cfg.get_met_configs(met_key)?;
+            if let Some(last_date) = Self::get_last_complete_date_for_config_set(conn, met_configs).await? {
+                return Ok(Some(last_date))
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Get the most recent date that has a complete set of GEOS files
     /// 
     /// # Parameters
@@ -339,7 +363,11 @@ impl GeosFile {
         return Ok(max_date)
     }
 
-    /// Returns whether a given date is complete, incomplete, or wholly missing for a given reanalysis download configuration
+    /// Returns whether a given date is complete, incomplete, or wholly missing for a given reanalysis download configuration.
+    /// 
+    /// Note that this only checks a single set of files, e.g. the 2D met files for GEOS FP-IT or GEOS IT. Assume that a met
+    /// dataset may require multiple files for a day to be ready for priors generation. For GEOS for example, we need the 
+    /// 2D assimilated met, 3D assimilated met, and 3D chemistry files. To check that, use [`GeosFile::is_date_complete_for_config_set`].
     /// 
     /// Will return an `Err` if the database query fails.
     pub async fn is_date_complete_for_config(conn: &mut MySqlConn, date: NaiveDate, cfg: &config::DownloadConfig) -> anyhow::Result<GeosDayState> {
@@ -364,7 +392,33 @@ impl GeosFile {
         }
     }
 
-    #[deprecated(since="d9d77ed", note="Replace with `is_date_complete_for_config`")]
+    /// Returns whether a given date has all of the met files needed for a given set of configurations.
+    /// 
+    /// This method should be preferred over [`GeosFile::is_date_complete_for_config`] if you just need to know whether we have all
+    /// the met files of a certain type needed to generate priors for a given day. 
+    /// 
+    /// # Returns
+    /// 
+    /// If there is an error connecting to the database, this returns an `Err`. Otherwise, this returns `GeosDayState::Complete` if 
+    /// all the necessary met files are in the database, `GeosDayState::Missing` if none of the met files are present, and 
+    /// `GeosDayState::Incomplete` otherwise (even if only one of several file sets is incomplete).
+    pub async fn is_date_complete_for_config_set(conn: &mut MySqlConn, date: NaiveDate, cfgs: &[config::DownloadConfig]) -> anyhow::Result<GeosDayState> {
+        let mut states = vec![];
+        for cfg in cfgs {
+            let this_state = Self::is_date_complete_for_config(conn, date, cfg).await?;
+            states.push(this_state);
+        }
+
+        if states.iter().all(|&s| s == GeosDayState::Complete) {
+            Ok(GeosDayState::Complete)
+        } else if states.iter().all(|&s| s == GeosDayState::Missing) {
+            Ok(GeosDayState::Missing)
+        } else {
+            Ok(GeosDayState::Incomplete)
+        }
+    }
+
+    #[deprecated(since="d9d77ed", note="Replace with `is_date_complete_for_config_set`")]
     pub async fn is_date_complete(conn: &mut MySqlConn, date: NaiveDate, met_levels: GeosLevels, geos_product: GeosProduct, req_chm: bool) -> anyhow::Result<GeosDayState> {
         let mut n_files = 0;
         n_files += sqlx::query!(
