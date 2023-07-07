@@ -101,19 +101,6 @@ CREATE TABLE IF NOT EXISTS `StdSiteJobs` (
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
--- Table structure for `StdOptionsByDate`
---
-
-CREATE TABLE IF NOT EXISTS `StdOptionsByDate` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `start_date` date,
-  `end_date` date,
-  `ginput` varchar(64) NOT NULL,
-  `met` varchar(64) NOT NULL,
-  PRIMARY KEY (`id`)
-) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
---
 -- Table structure for view `v_StdSiteInfo`
 --
 

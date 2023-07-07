@@ -5,7 +5,7 @@ use log::{warn, debug, trace};
 use serde::{Deserialize, Serialize};
 use sqlx::{self, Type, FromRow};
 
-use crate::{MySqlConn, config, defaultopts};
+use crate::{MySqlConn, config};
 
 const REQ_FILES_PER_DAY: i64 = 8;
 
@@ -290,7 +290,7 @@ impl GeosFile {
     /// - `Ok(None)` if no dates have all the needed met files
     /// - `Err` if any database queries fail or any of the default option sets defined in the configuration overlap in time.
     pub async fn get_last_complete_date_for_default_mets(conn: &mut MySqlConn, cfg: &config::Config) -> anyhow::Result<Option<NaiveDate>> {
-        let option_sets = defaultopts::DefaultOptions::get_all_defaults_check_overlap(conn).await?;
+        let option_sets = cfg.get_all_defaults_check_overlap()?;
         // Since these are date-ordered and do not overlap, we know we can start from the last set and check for complete met data
         for options in option_sets.iter().rev() {
             let met_key = &options.met;

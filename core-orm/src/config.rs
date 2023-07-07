@@ -12,12 +12,13 @@ use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, collections::HashM
 use anyhow::{self, Context};
 use chrono::{NaiveDate, NaiveDateTime, Duration};
 use hostname;
+use itertools::Itertools;
 use log::debug;
 use serde::{Serialize, Deserialize};
 use toml;
 use url::Url;
 
-use crate::geos;
+use crate::{geos, error::DefaultOptsQueryError};
 
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
@@ -25,12 +26,13 @@ pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
 
 /// Top level configuration structure.
 /// 
-/// [`ExecutionConfig`], [`DataConfig`], and [`AdminConfig`] objects comprise
-/// subsections.
+/// [`ExecutionConfig`], [`DataConfig`], [`AdminConfig`], and a `Vec` of 
+/// [`DefaultOptions`] objects comprise subsections.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config {
     pub execution: ExecutionConfig,
     pub data: DataConfig,
+    pub default_options: Vec<DefaultOptions>,
     pub admin: AdminConfig
 }
 
@@ -64,6 +66,70 @@ impl Config {
         }
     }
     
+
+    /// Get the sequence of [`DefaultOptions`] in time order.
+    pub fn get_all_defaults(&self) -> Vec<&DefaultOptions> {
+        let mut all_options: Vec<&DefaultOptions> = self.default_options.iter()
+            .collect();
+
+        // Order by start date, treating None as the earliest possible 
+        all_options.sort_by(|a, b| {
+            match (a.start_date, b.start_date) {
+                (None, None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(d1), Some(d2)) => d1.cmp(&d2),
+            }
+        });
+
+        all_options
+    }
+
+    /// Get the sequence of [`DefaultOptions`] in time order and check that none overlap in time. 
+    /// 
+    /// Returns an `Err` (with a [`DefaultOptsQueryError::MatchesOverlap`] inner value) if any two
+    /// sets of default options do overlap in time.
+    pub fn get_all_defaults_check_overlap(&self) -> Result<Vec<&DefaultOptions>, DefaultOptsQueryError> {
+        let all_options = self.get_all_defaults();
+        for pair in all_options.iter().combinations(2) {
+            if pair[0].overlaps(pair[1]) {
+                return Err(DefaultOptsQueryError::MatchesOverlap(pair[0].to_string(), pair[1].to_string()))
+            }
+        }
+        Ok(all_options)
+    }
+
+
+    /// Get the [`DefaultOptions`] instance for a given date.
+    /// 
+    /// Returns a `Err` if 0 or >1 option set matches the date. The inner value will be a
+    /// [`DefaultOptsQueryError::NoMatches`] for 0 and [`DefaultOptsQueryError::MultipleMatches`]
+    /// for >1.
+    pub fn get_defaults_for_date(&self, date: NaiveDate) -> Result<&DefaultOptions, DefaultOptsQueryError> {
+        let all_options = self.default_options.as_slice();
+
+        // Filter down to the rows which apply to this date. If >1 or 0, that is an error.
+        let all_options: Vec<&DefaultOptions> = all_options.into_iter()
+            .filter(|o| {
+                match (o.start_date, o.end_date) {
+                    (None, None) => true,
+                    (None, Some(end)) => date < end,
+                    (Some(start), None) => date >= start,
+                    (Some(start), Some(end)) => start <= date && date < end,
+                }
+            }).collect();
+
+        if all_options.len() == 1 {
+            Ok(all_options[0])
+        } else if all_options.is_empty() {
+            Err(DefaultOptsQueryError::NoMatches(date))
+        } else {
+            let matches = all_options.iter()
+                .map(|o| o.to_string())
+                .collect_vec();
+            Err(DefaultOptsQueryError::MultipleMatches { date, matches })
+        }
+    }
 }
 
 /// Configuration section dealing with how jobs are run
@@ -99,6 +165,9 @@ pub struct ExecutionConfig {
     /// Frequency in seconds for the job service to check for pending jobs
     pub start_jobs_freq: f32,
 
+    /// Map of available ginput versions to use.
+    pub ginput: HashMap<String, GinputConfig>,
+
     /// Run a simulation, do not execute ginput, but generate mock output files for testing
     #[serde(default)]
     pub simulate: bool,
@@ -120,9 +189,18 @@ impl Default for ExecutionConfig {
             std_sites_tar_output: Default::default(), 
             std_sites_output_base: Default::default(),
             start_jobs_freq: 60.0,
+            ginput: HashMap::new(),
             simulate: false
         }
     }
+}
+
+/// Configuration describing an available version of ginput that the automation can call.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum GinputConfig {
+    /// A ginput installation to be called via its `run_ginput.py` entry point. Requires
+    /// one option, `entry_point_path`, which is the path to the `run_ginput.py` file.
+    Script{entry_point_path: String}
 }
 
 /// Configuration section dealing with input data for jobs
@@ -311,6 +389,61 @@ impl Default for AdminConfig {
             hard_job_limit: 100,
             acknowledgement_message: Default::default() 
         }
+    }
+}
+
+
+/// Configuration for default choices of Ginput version, meteorology files, etc. for different time periods.
+/// 
+/// The time range is determined by `start_date` and `end_date`. If both are given, the this applies to all
+/// dates `start_date <= date < end_date`. If `start_date` is `None`, then this applies to all dates up to
+/// (but not including) the end date, and vice versa if `end_date` is `None`. If both are `None` this applies
+/// to all dates.
+/// 
+/// `ginput` and `met` must be valid keys for the `.execution.ginput` and `.data.download` maps, respectively.
+/// These specify which installation of ginput and which set of met data to use for that time period.
+/// 
+/// Note that if you access the vector of these directly there is no guarantee that they are time-ordered or
+/// non-overlapping. Use the methods [`Config::get_all_defaults`] and [`Config::get_all_defaults_check_overlap`]
+/// for that.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DefaultOptions {
+    pub start_date: Option<NaiveDate>,
+    pub end_date: Option<NaiveDate>,
+    pub ginput: String,
+    pub met: String,
+}
+
+
+impl DefaultOptions {
+    // Test whether this `DefaultOptions` instance overlaps another in time
+    fn overlaps(&self, other: &Self) -> bool {
+        match (self.start_date, self.end_date, other.start_date, other.end_date) {
+            (None, None, _, _) => true,
+            (_, _, None, None) => true,
+            (None, Some(_), None, Some(_)) => true,
+            (None, Some(a2), Some(b1), None) => a2 > b1,
+            (None, Some(a2), Some(b1), Some(_)) => a2 > b1,
+            (Some(a1), None, None, Some(b2)) => a1 < b2,
+            (Some(_), None, Some(_), None) => true,
+            (Some(a1), None, Some(_), Some(b2)) => a1 < b2,
+            (Some(a1), Some(_), None, Some(b2)) => a1 > b2,
+            (Some(_), Some(a2), Some(b1), None) => a2 < b1,
+            (Some(a1), Some(a2), Some(b1), Some(b2)) => {
+                if a2 < b1 || b2 < a1 { false } else { true }
+            },
+        }
+    }
+}
+
+impl Display for DefaultOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{} to {}: ginput = {}, met = {}]", 
+            self.start_date.map(|d| d.to_string()).unwrap_or_else(|| "None".to_owned()),
+            self.end_date.map(|d| d.to_string()).unwrap_or_else(|| "None".to_owned()),
+            self.ginput,
+            self.met
+        )
     }
 }
 

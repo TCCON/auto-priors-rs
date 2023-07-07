@@ -6,9 +6,9 @@ use log;
 use sqlx;
 use sqlx::migrate::Migrator;
 
+pub mod error;
 pub mod config;
 pub mod utils;
-pub mod defaultopts;
 pub mod geos;
 pub mod siteinfo;
 pub mod jobs;

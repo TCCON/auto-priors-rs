@@ -40,6 +40,42 @@ url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NVCHM.5
 file_freq_min = 180 
 earliest_date = "2000-01-01"
 
+
+[[data.download.geosit]]
+product = "fpit"
+data_type = "met"
+levels = "eta"
+url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_ASM_I3_L_V72.5.29.4/%Y/%j/.hidden/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
+file_freq_min = 180 
+earliest_date = "2000-01-01"
+
+[[data.download.geosit]]
+product = "fpit"
+data_type = "met"
+levels = "surf"
+url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_ASM_I1_L_SLV.5.29.4/%T/%j/.hidden/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
+file_freq_min = 180 
+earliest_date = "2000-01-01"
+
+[[data.download.geosit]]
+product = "fpit"
+data_type = "chm"
+levels = "eta"
+url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_CHM_I3_L_V72.5.29.4/%Y/%j/.hidden/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
+file_freq_min = 180 
+earliest_date = "2000-01-01"
+
+
+[[default_options]]
+end_date = "2023-09-01"
+ginput = "v1.0.6"
+met = "geosfpit"
+
+[[default_options]]
+start_date = "2023-09-01"
+ginput = "v1.0.6"
+met = "geosit"
+
 [admin]
 admin_emails = []
 soft_job_limit = 100 
