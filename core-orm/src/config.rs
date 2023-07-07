@@ -197,6 +197,7 @@ impl Default for ExecutionConfig {
 
 /// Configuration describing an available version of ginput that the automation can call.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum GinputConfig {
     /// A ginput installation to be called via its `run_ginput.py` entry point. Requires
     /// one option, `entry_point_path`, which is the path to the `run_ginput.py` file.

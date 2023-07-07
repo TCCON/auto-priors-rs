@@ -5,7 +5,6 @@ use std::{path::{PathBuf, Path}, str::FromStr, fmt::Display};
 
 use anyhow;
 use chrono::{NaiveDate, NaiveDateTime};
-use pyo3::{FromPyObject,IntoPy,exceptions::PyTypeError, PyObject};
 use serde::Deserialize;
 use serde_json;
 use sqlx::{self, FromRow, Type};
@@ -89,26 +88,6 @@ impl TryFrom<i8> for JobState {
     }
 }
 
-impl<'source> FromPyObject<'source> for JobState {
-    fn extract(ob: &'source pyo3::PyAny) -> pyo3::PyResult<Self> {
-        let pyval: i8 = ob.extract()?;
-        match JobState::try_from(pyval) {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                let err = PyTypeError::new_err(e.to_string());
-                return Err(err)
-            }
-        }
-    }
-}
-
-impl IntoPy<PyObject> for JobState {
-    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
-        let int_val: i8 = self.into();
-        return int_val.into_py(py);
-    }
-}
-
 
 /// An enum representing the possible options for creating a tarball of job output
 #[derive(Debug, Type, Clone, Copy)]
@@ -170,26 +149,6 @@ impl TryFrom<i8> for TarChoice {
     }
 }
 
-impl<'source> FromPyObject<'source> for TarChoice {
-    fn extract(ob: &'source pyo3::PyAny) -> pyo3::PyResult<Self> {
-        let py_val: i8 = ob.extract()?;
-        match TarChoice::try_from(py_val) {
-            Ok(v) => return Ok(v),
-            Err(e) => {
-                let err = PyTypeError::new_err(e.to_string());
-                return Err(err)
-            }
-        }
-    }
-}
-
-impl IntoPy<PyObject> for TarChoice {
-    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
-        let int_val: i8 = self.into();
-        return int_val.into_py(py)
-    }
-}
-
 /// An enum representing the possible output file types for the model (`.mod`) files.
 #[derive(Debug, Type, Clone, Copy)]
 pub enum ModFmt {
@@ -235,25 +194,6 @@ impl FromStr for ModFmt {
     }
 }
 
-impl<'source> FromPyObject<'source> for ModFmt {
-    fn extract(ob: &'source pyo3::PyAny) -> pyo3::PyResult<Self> {
-        let py_val: &str = ob.extract()?;
-        match ModFmt::from_str(py_val) {
-            Ok(v) => return Ok(v),
-            Err(e) => {
-                let err = PyTypeError::new_err(e.to_string());
-                return Err(err)
-            }
-        }
-    }
-}
-
-impl IntoPy<PyObject> for ModFmt {
-    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
-        let str_val = self.to_string();
-        return str_val.into_py(py);
-    }
-}
 
 /// An enum representing the possible output file types for the `.vmr` files.
 #[derive(Debug, Type, Clone, Copy)]
@@ -301,25 +241,6 @@ impl FromStr for VmrFmt {
     }
 }
 
-impl<'source> FromPyObject<'source> for VmrFmt {
-    fn extract(ob: &'source pyo3::PyAny) -> pyo3::PyResult<Self> {
-        let py_val: &str = ob.extract()?;
-        match VmrFmt::from_str(py_val) {
-            Ok(v) => return Ok(v),
-            Err(e) => {
-                let err = PyTypeError::new_err(e.to_string());
-                return Err(err)
-            }
-        }
-    }
-}
-
-impl IntoPy<PyObject> for VmrFmt {
-    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
-        let str_val = self.to_string();
-        return str_val.into_py(py);
-    }
-}
 
 /// An enum representing the possible output file types for the model a priori (`.map`) files.
 #[derive(Debug, Type, Clone, Copy)]
@@ -371,25 +292,6 @@ impl FromStr for MapFmt {
     }
 }
 
-impl<'source> FromPyObject<'source> for MapFmt {
-    fn extract(ob: &'source pyo3::PyAny) -> pyo3::PyResult<Self> {
-        let py_val: &str = ob.extract()?;
-        match MapFmt::from_str(py_val) {
-            Ok(v) => return Ok(v),
-            Err(e) => {
-                let err = PyTypeError::new_err(e.to_string());
-                return Err(err)
-            }
-        }
-    }
-}
-
-impl IntoPy<PyObject> for MapFmt {
-    fn into_py(self, py: pyo3::Python<'_>) -> PyObject {
-        let str_val = self.to_string();
-        return str_val.into_py(py);
-    }
-}
 
 /// An intermediate job representation that maps directly to the MySQL table.
 /// 

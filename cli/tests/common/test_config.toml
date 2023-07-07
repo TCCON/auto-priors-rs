@@ -10,6 +10,9 @@ std_sites_output_base = ''
 start_jobs_freq = 5.0
 simulation = true
 
+[execution.ginput.v1p0p6]
+entry_point_path = "./run_ginput.py"
+
 [data]
 geos_path = ''
 chem_path = ''

@@ -238,11 +238,11 @@ impl GeosFile {
     /// # Returns
     /// The most recent date for which all the datasets specified by `cfgs` are complete. There can be several cases:
     /// 
-    ///     1. If none of those datasets have any data downloaded, returns `None` 
-    ///     2. If some (but not all) of those datasets have data downloaded, still returns `None` but prints a warning
-    ///     3. If all those datasets have data downloaded, but the end dates differ, returns the earliest end date and
-    ///        prints a warning.
-    ///     4. If all those datasets have data downloaded through the same date, returns that date.
+    /// 1. If none of those datasets have any data downloaded, returns `None` 
+    /// 2. If some (but not all) of those datasets have data downloaded, still returns `None` but prints a warning
+    /// 3. If all those datasets have data downloaded, but the end dates differ, returns the earliest end date and
+    ///    prints a warning.
+    /// 4. If all those datasets have data downloaded through the same date, returns that date.
     /// 
     /// This will return an `Err` if the database query fails.
     pub async fn get_last_complete_date_for_config_set(conn: &mut MySqlConn, cfgs: &[config::DownloadConfig]) -> anyhow::Result<Option<NaiveDate>> {
