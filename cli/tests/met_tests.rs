@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use chrono::NaiveDate;
 use serial_test::serial;
-use orm::geos::GeosDayState;
+use orm::met::MetDayState;
 use tccon_priors_cli::met_download::check_files_for_dates;
 mod common;
 
@@ -28,7 +28,7 @@ async fn test_check_met() {
     ).await.unwrap();
 
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 1, 1)).unwrap().unwrap();
-    assert_eq!(stat, GeosDayState::Complete, "Day expected to be complete was not");
+    assert_eq!(stat, MetDayState::Complete, "Day expected to be complete was not");
 
     // Should be marked as incomplete because they are each missing one of one type of file
 
@@ -41,13 +41,13 @@ async fn test_check_met() {
     ).await.unwrap();
 
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 2, 1)).unwrap().unwrap();
-    assert_eq!(stat, GeosDayState::Incomplete, "Day missing one surface met file was not marked Incomplete");
+    assert_eq!(stat, MetDayState::Incomplete, "Day missing one surface met file was not marked Incomplete");
 
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 2, 2)).unwrap().unwrap();
-    assert_eq!(stat, GeosDayState::Incomplete, "Day missing one eta met file was not marked Incomplete");
+    assert_eq!(stat, MetDayState::Incomplete, "Day missing one eta met file was not marked Incomplete");
 
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 2, 3)).unwrap().unwrap();
-    assert_eq!(stat, GeosDayState::Incomplete, "Day missing one eta chem file not marked Incomplete");
+    assert_eq!(stat, MetDayState::Incomplete, "Day missing one eta chem file not marked Incomplete");
 
     // Should also be marked as incomplete - missing all of one type of file
     let stat_map = check_files_for_dates(
@@ -59,13 +59,13 @@ async fn test_check_met() {
     ).await.unwrap();
 
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 3, 1)).unwrap().unwrap();
-    assert_eq!(stat, GeosDayState::Incomplete, "Day missing all surface met files not marked Incomplete");
+    assert_eq!(stat, MetDayState::Incomplete, "Day missing all surface met files not marked Incomplete");
 
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 3, 2)).unwrap().unwrap();
-    assert_eq!(stat, GeosDayState::Incomplete, "Day missing all eta met files not marked Incomplete");
+    assert_eq!(stat, MetDayState::Incomplete, "Day missing all eta met files not marked Incomplete");
 
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 3, 3)).unwrap().unwrap();
-    assert_eq!(stat, GeosDayState::Incomplete, "Day missing all eta chem files not marked Incomplete");
+    assert_eq!(stat, MetDayState::Incomplete, "Day missing all eta chem files not marked Incomplete");
 
     // This day isn't in the database at all, should be marked as missing
     let stat_map = check_files_for_dates(
@@ -76,5 +76,5 @@ async fn test_check_met() {
         Some(NaiveDate::from_ymd(2020, 4, 2)),
     ).await.unwrap();
     let stat = stat_map.get(&NaiveDate::from_ymd(2020, 4, 1)).unwrap().unwrap();
-    assert_eq!(stat, GeosDayState::Missing, "Day missing all files not marked Missing");
+    assert_eq!(stat, MetDayState::Missing, "Day missing all files not marked Missing");
 }

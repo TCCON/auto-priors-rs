@@ -18,7 +18,7 @@ use serde::{Serialize, Deserialize};
 use toml;
 use url::Url;
 
-use crate::{geos, error::DefaultOptsQueryError};
+use crate::{met, error::DefaultOptsQueryError};
 
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
@@ -234,13 +234,13 @@ pub struct DataConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DownloadConfig {
     /// What stream this is from (FP or FP-IT, currently)
-    pub product: geos::GeosProduct,
+    pub product: met::MetProduct,
 
     /// Whether this set of files is meteorology or chemistry
-    pub data_type: geos::GeosDataType,
+    pub data_type: met::MetDataType,
 
     /// What set of vertical levels these files represent.
-    pub levels: geos::GeosLevels,
+    pub levels: met::MetLevels,
 
     /// A URL pattern that can be passed to wget to download the desired file.
     /// Use [Chrono format strings](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
@@ -315,8 +315,8 @@ impl DownloadConfig {
     /// not a directory).
     pub fn get_save_dir(&self, data_cfg: &DataConfig) -> anyhow::Result<PathBuf> {
         let root_save_dir = match self.data_type {
-            geos::GeosDataType::Met => data_cfg.geos_path.as_path(),
-            geos::GeosDataType::Chm => data_cfg.chem_path.as_path(),
+            met::MetDataType::Met => data_cfg.geos_path.as_path(),
+            met::MetDataType::Chm => data_cfg.chem_path.as_path(),
         };
         
         let subdir = if let Some(sd) = &self.subdir {
@@ -419,6 +419,8 @@ pub struct DefaultOptions {
 impl DefaultOptions {
     // Test whether this `DefaultOptions` instance overlaps another in time
     fn overlaps(&self, other: &Self) -> bool {
+        // Can't use the utils::date_range_overlap function because that doesn't handle optional dates
+        // TODO: make this a util function?
         match (self.start_date, self.end_date, other.start_date, other.end_date) {
             (None, None, _, _) => true,
             (_, _, None, None) => true,

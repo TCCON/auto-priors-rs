@@ -10,13 +10,13 @@ use crate::{MySqlConn, config};
 const REQ_FILES_PER_DAY: i64 = 8;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum GeosDayState {
+pub enum MetDayState {
     Complete,
     Incomplete,
     Missing
 }
 
-impl AsRef<str> for GeosDayState {
+impl AsRef<str> for MetDayState {
     fn as_ref(&self) -> &str {
         match self {
             Self::Complete => "complete",
@@ -28,19 +28,20 @@ impl AsRef<str> for GeosDayState {
 
 #[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub enum GeosProduct {
-    Fp,
-    Fpit
+pub enum MetProduct {
+    GeosFp,
+    GeosFpit,
+    GeosIt
 }
 
-impl Into<String> for GeosProduct {
+impl Into<String> for MetProduct {
     fn into(self) -> String {
         format!("{}", self)
     }
 }
 
 
-impl TryFrom<String> for GeosProduct {
+impl TryFrom<String> for MetProduct {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
@@ -48,23 +49,25 @@ impl TryFrom<String> for GeosProduct {
     }
 }
 
-impl FromStr for GeosProduct {
+impl FromStr for MetProduct {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_ref() {
-            "fp" => Ok(Self::Fp),
-            "fpit" => Ok(Self::Fpit),
+            "geosfp" => Ok(Self::GeosFp),
+            "geosfpit" => Ok(Self::GeosFpit),
+            "geosit" => Ok(Self::GeosIt),
             _ => anyhow::bail!("Unknown string value for GeosProduct enum: {s}")
         }
     }
 }
 
-impl Display for GeosProduct {
+impl Display for MetProduct {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            Self::Fp => "fp",
-            Self::Fpit => "fpit"
+            Self::GeosFp => "geosfp",
+            Self::GeosFpit => "geosfpit",
+            Self::GeosIt => "geosit"
         };
 
         write!(f, "{s}")
@@ -73,13 +76,13 @@ impl Display for GeosProduct {
 
 #[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub enum GeosLevels {
+pub enum MetLevels {
     Pres,
     Surf,
     Eta
 }
 
-impl GeosLevels {
+impl MetLevels {
     pub fn standard_subdir(&self) -> PathBuf {
         match self {
             Self::Pres => PathBuf::from("Np"),
@@ -89,13 +92,13 @@ impl GeosLevels {
     }
 }
 
-impl Into<String> for GeosLevels {
+impl Into<String> for MetLevels {
     fn into(self) -> String {
         format!("{}", self)
     }
 }
 
-impl TryFrom<String> for GeosLevels {
+impl TryFrom<String> for MetLevels {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
@@ -103,7 +106,7 @@ impl TryFrom<String> for GeosLevels {
     }
 }
 
-impl FromStr for GeosLevels {
+impl FromStr for MetLevels {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -111,12 +114,12 @@ impl FromStr for GeosLevels {
             "pres" => Ok(Self::Pres),
             "surf" => Ok(Self::Surf),
             "eta" => Ok(Self::Eta),
-            _ => anyhow::bail!("Unknown string value for GeosLevels: {s}")
+            _ => anyhow::bail!("Unknown string value for MetLevels: {s}")
         }
     }
 }
 
-impl Display for GeosLevels {
+impl Display for MetLevels {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Self::Pres => "pres",
@@ -130,18 +133,18 @@ impl Display for GeosLevels {
 
 #[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub enum GeosDataType {
+pub enum MetDataType {
     Met,
     Chm
 }
 
-impl Into<String> for GeosDataType {
+impl Into<String> for MetDataType {
     fn into(self) -> String {
         format!("{}", self)
     }
 }
 
-impl TryFrom<String> for GeosDataType {
+impl TryFrom<String> for MetDataType {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
@@ -149,19 +152,19 @@ impl TryFrom<String> for GeosDataType {
     }
 }
 
-impl FromStr for GeosDataType {
+impl FromStr for MetDataType {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_ref() {
             "met" => Ok(Self::Met),
             "chm" => Ok(Self::Chm),
-            _ => anyhow::bail!("Unknown string value for GeosDataType: {s}")
+            _ => anyhow::bail!("Unknown string value for MetDataType: {s}")
         }
     }
 }
 
-impl Display for GeosDataType {
+impl Display for MetDataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Self::Met => "met",
@@ -173,16 +176,16 @@ impl Display for GeosDataType {
 }
 
 #[derive(Debug, FromRow)]
-pub struct GeosFile {
+pub struct MetFile {
     pub file_id: i32,
     pub root_path: PathBuf,
-    pub product: GeosProduct,
+    pub product: MetProduct,
     pub filedate: NaiveDateTime,
-    pub levels: GeosLevels,
-    pub data_type: GeosDataType,
+    pub levels: MetLevels,
+    pub data_type: MetDataType,
 }
 
-impl GeosFile {
+impl MetFile {
     /// Returns the number of met files expected per day, based on the configuration
     /// 
     /// Will error if the frequency specified in the configuration does not divide evenly
@@ -214,7 +217,7 @@ impl GeosFile {
             r#"SELECT MAX(tbl.date) as max_date
                 FROM (
                     SELECT DATE(filedate) AS date,COUNT(filedate) AS count
-                    FROM GeosFiles
+                    FROM MetFiles
                     WHERE levels = ? AND data_type = ? AND product = ?
                     GROUP BY DATE(filedate)
                 ) AS tbl
@@ -303,47 +306,47 @@ impl GeosFile {
         Ok(None)
     }
 
-    /// Get the most recent date that has a complete set of GEOS files
+    /// Get the most recent date that has a complete set of met files
     /// 
     /// # Parameters
     /// * `conn` - connection to the MySQL database
-    /// * `met_levels` - which 3D levels to require for the meteorology, [`GeosLevels::Eta`] or [`GeosLevels::Pres`]
-    /// * `geos_product` - which product to search for
+    /// * `met_levels` - which 3D levels to require for the meteorology, [`MetLevels::Eta`] or [`MetLevels::Pres`]
+    /// * `met_product` - which product to search for
     /// * `req_chm` - whether to require chemistry files.
     /// 
     /// # Returns
-    /// If a day with complete GEOS files is found, then that date is returned. If there is no such day,
+    /// If a day with complete met files is found, then that date is returned. If there is no such day,
     /// `None` is returned.
     /// 
     /// # Errors
     /// Returns an `Err` if the database query fails for any reason.
     #[deprecated(since = "d9d77ed", note="Replace with `get_last_complete_date_for_config_set`")]
-    pub async fn get_last_complete_date(conn: &mut MySqlConn, met_levels: GeosLevels, geos_product: GeosProduct, req_chm: bool) -> anyhow::Result<Option<NaiveDate>> {
+    pub async fn get_last_complete_date(conn: &mut MySqlConn, met_levels: MetLevels, met_product: MetProduct, req_chm: bool) -> anyhow::Result<Option<NaiveDate>> {
         // We find the date that has a complete set of 8 3D met files, 2D met files, and (optionally)
         // 3D chemistry files by making subqueries for each file type where we count the number of 
         // files for each date and join the subqueries on their dates. We limit the result to where
         // there are the right number of files and take the max date. Note: for the chemistry files
         // ONLY the WHERE clause uses >= instead of = to allow for chemistry files to be present if
         // the amount wanted is 0.
-        let product_string = geos_product.to_string();
+        let product_string = met_product.to_string();
         let max_date = sqlx::query!(
             r#"SELECT MAX(met3d.date) as max_date
                FROM (
                    SELECT DATE(filedate) AS date,COUNT(filedate) AS count
-                   FROM GeosFiles 
+                   FROM MetFiles 
                    WHERE levels = ? AND data_type = "met" AND product = ?
                    GROUP BY DATE(filedate)
                ) AS met3d 
                INNER JOIN (
                    SELECT DATE(filedate) AS date,COUNT(filedate) AS count
-                   FROM GeosFiles 
+                   FROM MetFiles 
                    WHERE levels = "surf" AND data_type = "met" AND product = ?
                    GROUP BY DATE(filedate)
                ) AS met2d
                ON met3d.date = met2d.date 
                INNER JOIN (
                    SELECT DATE(filedate) AS date,COUNT(filedate) AS count
-                   FROM GeosFiles
+                   FROM MetFiles
                    WHERE levels = "eta" AND data_type = "chm" AND product = ?
                    GROUP BY DATE(filedate)
                ) AS chm3d
@@ -367,13 +370,13 @@ impl GeosFile {
     /// 
     /// Note that this only checks a single set of files, e.g. the 2D met files for GEOS FP-IT or GEOS IT. Assume that a met
     /// dataset may require multiple files for a day to be ready for priors generation. For GEOS for example, we need the 
-    /// 2D assimilated met, 3D assimilated met, and 3D chemistry files. To check that, use [`GeosFile::is_date_complete_for_config_set`].
+    /// 2D assimilated met, 3D assimilated met, and 3D chemistry files. To check that, use [`MetFile::is_date_complete_for_config_set`].
     /// 
     /// Will return an `Err` if the database query fails.
-    pub async fn is_date_complete_for_config(conn: &mut MySqlConn, date: NaiveDate, cfg: &config::DownloadConfig) -> anyhow::Result<GeosDayState> {
+    pub async fn is_date_complete_for_config(conn: &mut MySqlConn, date: NaiveDate, cfg: &config::DownloadConfig) -> anyhow::Result<MetDayState> {
         let n_expected = Self::num_expected_daily_files(cfg)?;
         let n_found = sqlx::query!(
-            r#"SELECT COUNT(filedate) as count FROM GeosFiles
+            r#"SELECT COUNT(filedate) as count FROM MetFiles
                WHERE DATE(filedate) = ? and levels = ? AND data_type = ? AND product = ?"#,
             date,
             cfg.levels.to_string(),
@@ -383,69 +386,74 @@ impl GeosFile {
         .await?
         .count;
 
+        debug!(
+            "Checked met (levels = {}, data type = {}, product = {}) files for {date}: expected {n_expected}, found {n_found}",
+            cfg.levels, cfg.data_type, cfg.product
+        );
+
         if n_found == 0 {
-            Ok(GeosDayState::Missing)
+            Ok(MetDayState::Missing)
         }else if n_found < n_expected {
-            Ok(GeosDayState::Incomplete)
+            Ok(MetDayState::Incomplete)
         }else{
-            Ok(GeosDayState::Complete)
+            Ok(MetDayState::Complete)
         }
     }
 
     /// Returns whether a given date has all of the met files needed for a given set of configurations.
     /// 
-    /// This method should be preferred over [`GeosFile::is_date_complete_for_config`] if you just need to know whether we have all
+    /// This method should be preferred over [`MetFile::is_date_complete_for_config`] if you just need to know whether we have all
     /// the met files of a certain type needed to generate priors for a given day. 
     /// 
     /// # Returns
     /// 
-    /// If there is an error connecting to the database, this returns an `Err`. Otherwise, this returns `GeosDayState::Complete` if 
-    /// all the necessary met files are in the database, `GeosDayState::Missing` if none of the met files are present, and 
-    /// `GeosDayState::Incomplete` otherwise (even if only one of several file sets is incomplete).
-    pub async fn is_date_complete_for_config_set(conn: &mut MySqlConn, date: NaiveDate, cfgs: &[config::DownloadConfig]) -> anyhow::Result<GeosDayState> {
+    /// If there is an error connecting to the database, this returns an `Err`. Otherwise, this returns `MetDayState::Complete` if 
+    /// all the necessary met files are in the database, `MetDayState::Missing` if none of the met files are present, and 
+    /// `MetDayState::Incomplete` otherwise (even if only one of several file sets is incomplete).
+    pub async fn is_date_complete_for_config_set(conn: &mut MySqlConn, date: NaiveDate, cfgs: &[config::DownloadConfig]) -> anyhow::Result<MetDayState> {
         let mut states = vec![];
         for cfg in cfgs {
             let this_state = Self::is_date_complete_for_config(conn, date, cfg).await?;
             states.push(this_state);
         }
 
-        if states.iter().all(|&s| s == GeosDayState::Complete) {
-            Ok(GeosDayState::Complete)
-        } else if states.iter().all(|&s| s == GeosDayState::Missing) {
-            Ok(GeosDayState::Missing)
+        if states.iter().all(|&s| s == MetDayState::Complete) {
+            Ok(MetDayState::Complete)
+        } else if states.iter().all(|&s| s == MetDayState::Missing) {
+            Ok(MetDayState::Missing)
         } else {
-            Ok(GeosDayState::Incomplete)
+            Ok(MetDayState::Incomplete)
         }
     }
 
     #[deprecated(since="d9d77ed", note="Replace with `is_date_complete_for_config_set`")]
-    pub async fn is_date_complete(conn: &mut MySqlConn, date: NaiveDate, met_levels: GeosLevels, geos_product: GeosProduct, req_chm: bool) -> anyhow::Result<GeosDayState> {
+    pub async fn is_date_complete(conn: &mut MySqlConn, date: NaiveDate, met_levels: MetLevels, met_product: MetProduct, req_chm: bool) -> anyhow::Result<MetDayState> {
         let mut n_files = 0;
         n_files += sqlx::query!(
-            r#"SELECT COUNT(filedate) as count FROM GeosFiles
+            r#"SELECT COUNT(filedate) as count FROM MetFiles
                WHERE DATE(filedate) = ? AND levels = ? AND data_type = "met" AND product = ? "#,
             date,
             met_levels.to_string(),
-            geos_product.to_string()
+            met_product.to_string()
         ).fetch_one(&mut *conn)
         .await?
         .count;
 
         n_files += sqlx::query!(
-            r#"SELECT COUNT(filedate) as count FROM GeosFiles
+            r#"SELECT COUNT(filedate) as count FROM MetFiles
                WHERE DATE(filedate) = ? AND levels = "surf" AND data_type = "met" AND product = ? "#,
             date,
-            geos_product.to_string()
+            met_product.to_string()
         ).fetch_one(&mut *conn)
         .await?
         .count;
 
         n_files += if req_chm {
             sqlx::query!(
-                r#"SELECT COUNT(filedate) as count FROM GeosFiles
+                r#"SELECT COUNT(filedate) as count FROM MetFiles
                    WHERE DATE(filedate) = ? AND levels = "eta" AND data_type = "chm" AND product = ? "#,
                 date,
-                geos_product.to_string()
+                met_product.to_string()
             ).fetch_one(conn)
             .await?
             .count
@@ -456,15 +464,15 @@ impl GeosFile {
         let n_req = if req_chm { 3 * REQ_FILES_PER_DAY } else { 2 * REQ_FILES_PER_DAY };
 
         if n_files == 0 {
-            return Ok(GeosDayState::Missing)
+            return Ok(MetDayState::Missing)
         }else if n_files < n_req {
-            return Ok(GeosDayState::Incomplete)
+            return Ok(MetDayState::Incomplete)
         }else{
-            return Ok(GeosDayState::Complete)
+            return Ok(MetDayState::Complete)
         }
     }
 
-    /// Add a new GEOS file to the database
+    /// Add a new met file to the database
     /// 
     /// The file must exist at the path given; if not, returns an error.
     /// 
@@ -483,8 +491,8 @@ impl GeosFile {
     /// Panics if `file` is not an absolute path.
     /// 
     /// # See also
-    /// [`GeosFile::add_geos_file_infer_date`] if the file date must be retrieved from the file name.
-    pub async fn add_geos_file(conn: &mut MySqlConn, file: &Path, datetime: NaiveDateTime, download_cfg: &config::DownloadConfig) -> anyhow::Result<()> {
+    /// [`MetFile::add_met_file_infer_date`] if the file date must be retrieved from the file name.
+    pub async fn add_met_file(conn: &mut MySqlConn, file: &Path, datetime: NaiveDateTime, download_cfg: &config::DownloadConfig) -> anyhow::Result<()> {
         if !file.exists() {
             return Err(anyhow::Error::msg(format!("Not adding nonexistant met file to database: {}", file.display())));
         }else if !file.is_absolute() {
@@ -494,7 +502,7 @@ impl GeosFile {
         }
 
         sqlx::query!(
-            "INSERT INTO GeosFiles (file_path, filedate, product, levels, data_type) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO MetFiles (file_path, filedate, product, levels, data_type) VALUES (?, ?, ?, ?, ?)",
             file.to_str().ok_or_else(|| anyhow::Error::msg(format!("Unable to convert path to UTF-8 string: {}", file.display())))?,
             datetime,
             download_cfg.product,
@@ -523,14 +531,14 @@ impl GeosFile {
         Ok(NaiveDateTime::parse_from_str(&basename, date_fmt)?)
     }
 
-    /// Similar to [`GeosFile::add_geos_file`], but infers the date & time from the file name.
+    /// Similar to [`MetFile::add_met_file`], but infers the date & time from the file name.
     /// 
     /// Note that the file's basename must match the time format pattern in the download config, and
     /// must contain time components at least up to minutes. All other behavior follows
-    /// [`GeosFile::add_geos_file`] including panics - `file` must be an absolute path.
-    pub async fn add_geos_file_infer_date(conn: &mut MySqlConn, file: &Path, download_cfg: &config::DownloadConfig) -> anyhow::Result<()> {
+    /// [`MetFile::add_met_file`] including panics - `file` must be an absolute path.
+    pub async fn add_met_file_infer_date(conn: &mut MySqlConn, file: &Path, download_cfg: &config::DownloadConfig) -> anyhow::Result<()> {
         let datetime = Self::date_from_filename(file, download_cfg)?;
-        Self::add_geos_file(conn, file, datetime, download_cfg).await
+        Self::add_met_file(conn, file, datetime, download_cfg).await
     }
 
     /// Check whether a given file is already in the database based on what data it has
@@ -549,7 +557,7 @@ impl GeosFile {
         let datetime = Self::date_from_filename(file, file_cfg)?;
 
         let n = sqlx::query!(
-            r#"SELECT COUNT(*) as count FROM GeosFiles
+            r#"SELECT COUNT(*) as count FROM MetFiles
                WHERE filedate = ? AND product = ? AND levels = ? and data_type = ?"#,
             datetime,
             file_cfg.product,

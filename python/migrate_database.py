@@ -56,8 +56,8 @@ class GeosFilesSqlite(BaseSqlite):
         return f'GeosFilesSqlite(file_id = {self.file_id}, path = {self.path}, product = {self.product}, filedate = {self.filedate}, levels = {self.levels}, type = {self.type})'
 
 
-class GeosFilesSql(BaseSql):
-    __tablename__ = 'GeosFiles'
+class MetFilesSql(BaseSql):
+    __tablename__ = 'MetFiles'
 
     file_id = db.Column(db.Integer, primary_key=True)
     file_path = db.Column(db.Text)
@@ -67,7 +67,7 @@ class GeosFilesSql(BaseSql):
     data_type = db.Column(db.String(8))
 
     def __repr__(self) -> str:
-        return f'GeosFilesSql(file_id = {self.file_id}, file_path = {self.file_path}, product = {self.product}, filedate = {self.filedate}, levels = {self.levels}, type = {self.data_type})'
+        return f'MetFilesSql(file_id = {self.file_id}, file_path = {self.file_path}, product = {self.product}, filedate = {self.filedate}, levels = {self.levels}, type = {self.data_type})'
 
     @classmethod
     def from_sqlite(cls, obj):
@@ -215,7 +215,7 @@ def migrate(sqlite_db, sql_db, sql_user, sql_pw, host='localhost', sites_json=No
     sqlite_engine = db.create_engine(f'sqlite:///{sqlite_db}', future=True)
     mysql_engine = db.create_engine(f'mysql://{sql_user}:{sql_pw}@{host}/{sql_db}?charset=utf8mb4', future=True)
     migrate_table(sqlite_engine, mysql_engine, GeosPathsSqlite, GeosPathsSql)
-    migrate_table(sqlite_engine, mysql_engine, GeosFilesSqlite, GeosFilesSql)
+    migrate_table(sqlite_engine, mysql_engine, GeosFilesSqlite, MetFilesSql)
     migrate_table(sqlite_engine, mysql_engine, JobsSqlite, JobsSql)
     migrate_std_sites(sqlite_engine, mysql_engine)
     if sites_json:

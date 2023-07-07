@@ -9,7 +9,7 @@ use sqlx::migrate::Migrator;
 pub mod error;
 pub mod config;
 pub mod utils;
-pub mod geos;
+pub mod met;
 pub mod siteinfo;
 pub mod jobs;
 pub mod stdsitejobs;

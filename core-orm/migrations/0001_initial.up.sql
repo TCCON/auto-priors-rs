@@ -1,19 +1,20 @@
 --
--- Table structure for table `GeosFiles`
+-- Table structure for table `MetFiles`
 --
 
-CREATE TABLE IF NOT EXISTS `GeosFiles` (
+CREATE TABLE IF NOT EXISTS `MetFiles` (
   `file_id` int(11) NOT NULL AUTO_INCREMENT,
   `file_path` text NOT NULL,
   `product` varchar(8) NOT NULL,
   `filedate` datetime NOT NULL,
   `levels` varchar(8) NOT NULL,
   `data_type` varchar(8) NOT NULL,
-  PRIMARY KEY (`file_id`)
+  PRIMARY KEY (`file_id`),
+  UNIQUE (`file_path`)
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
--- Table structure for table `GeosPaths`
+-- Table structure for table `GeosPaths`. May no longer be needed?
 --
 
 CREATE TABLE IF NOT EXISTS `GeosPaths` (

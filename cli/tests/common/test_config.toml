@@ -20,7 +20,7 @@ zgrid_file = ''
 base_vmr_file = ''
 
 [[data.download.geosfpit]]
-product = "fpit"
+product = "geosfpit"
 data_type = "met"
 levels = "eta"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NVASM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4"
@@ -28,7 +28,7 @@ file_freq_min = 180
 earliest_date = "2000-01-01"
 
 [[data.download.geosfpit]]
-product = "fpit"
+product = "geosfpit"
 data_type = "met"
 levels = "surf"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NXASM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.%Y%m%d_%H%M.V01.nc4"
@@ -36,7 +36,7 @@ file_freq_min = 180
 earliest_date = "2000-01-01"
 
 [[data.download.geosfpit]]
-product = "fpit"
+product = "geosfpit"
 data_type = "chm"
 levels = "eta"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NVCHM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4"
@@ -45,7 +45,7 @@ earliest_date = "2000-01-01"
 
 
 [[data.download.geosit]]
-product = "fpit"
+product = "geosit"
 data_type = "met"
 levels = "eta"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_ASM_I3_L_V72.5.29.4/%Y/%j/.hidden/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
@@ -53,7 +53,7 @@ file_freq_min = 180
 earliest_date = "2000-01-01"
 
 [[data.download.geosit]]
-product = "fpit"
+product = "geosit"
 data_type = "met"
 levels = "surf"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_ASM_I1_L_SLV.5.29.4/%T/%j/.hidden/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
@@ -61,7 +61,7 @@ file_freq_min = 180
 earliest_date = "2000-01-01"
 
 [[data.download.geosit]]
-product = "fpit"
+product = "geosit"
 data_type = "chm"
 levels = "eta"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_CHM_I3_L_V72.5.29.4/%Y/%j/.hidden/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"

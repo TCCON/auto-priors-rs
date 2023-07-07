@@ -8,7 +8,7 @@ use serde::Serialize;
 use sqlx::{self, FromRow, Type, Acquire};
 
 use crate::{MySqlConn, config};
-use crate::{utils,geos,jobs,siteinfo};
+use crate::{utils,met,jobs,siteinfo};
 
 
 #[derive(Debug, Type, Clone, Copy, Serialize)]
@@ -269,7 +269,7 @@ impl StdSiteJob {
         }else{
             // let default_opts = defaultopts::DefaultOptions::get_defaults_for_date(conn, date).await?;
 
-            geos::GeosFile::get_last_complete_date_for_default_mets(
+            met::MetFile::get_last_complete_date_for_default_mets(
                 &mut *conn, 
                 cfg
             ).await?

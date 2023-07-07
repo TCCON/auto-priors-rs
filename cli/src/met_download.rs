@@ -6,7 +6,7 @@ use anyhow::Context;
 use clap::{self, Args};
 use chrono::{NaiveDate, Duration};
 use log::{warn, info, debug};
-use orm::{self, geos::GeosDayState};
+use orm::{self, met::MetDayState};
 
 use crate::utils;
 
@@ -60,7 +60,7 @@ async fn get_start_end_dates(
     }else{
         // If no start date, use the first day we don't have met data for. If no data previously downloaded, use the
         // start date defined for the meteorology. If no meteorology datasets defined, return an error.
-        let x = orm::geos::GeosFile::get_last_complete_date_for_config_set(conn, cfgs).await?;
+        let x = orm::met::MetFile::get_last_complete_date_for_config_set(conn, cfgs).await?;
         let y = if let Some(d) = x {
             Some(d + Duration::days(1))
         }else{
@@ -161,8 +161,8 @@ pub async fn check_files_for_dates_cli(conn: &mut orm::MySqlConn, clargs: CheckD
             // Since we're iterating over the keys of the map, we should always be inside here
             let s = if let Some(state) = v {
                 match state {
-                    GeosDayState::Incomplete | GeosDayState::Missing => any_missing = true,
-                    GeosDayState::Complete => {}
+                    MetDayState::Incomplete | MetDayState::Missing => any_missing = true,
+                    MetDayState::Complete => {}
                 }
 
                 state.as_ref()
@@ -197,7 +197,7 @@ pub async fn check_files_for_dates(
     met_key: &str,
     start_date: NaiveDate,
     end_date: Option<NaiveDate>
-) -> anyhow::Result<HashMap<NaiveDate, Option<orm::geos::GeosDayState>>> 
+) -> anyhow::Result<HashMap<NaiveDate, Option<orm::met::MetDayState>>> 
 {
     // Verify input dates are valid
     let end_date = check_start_end_date(start_date, end_date)?;
@@ -210,7 +210,7 @@ pub async fn check_files_for_dates(
     let mut files_map = HashMap::new();
     let mut curr_date = start_date;
     while curr_date < end_date {
-        let files_found = match orm::geos::GeosFile::is_date_complete_for_config_set(conn, curr_date, dl_configs).await {
+        let files_found = match orm::met::MetFile::is_date_complete_for_config_set(conn, curr_date, dl_configs).await {
             Ok(state) => Some(state),
             Err(e) => {
                 warn!("Error checking met files for date {curr_date}: {e}");
@@ -316,11 +316,11 @@ pub async fn download_missing_files(
     let mut curr_date = start_date;
     while curr_date < end_date {
         for cfg in cfgs {
-            match orm::geos::GeosFile::is_date_complete_for_config(conn, curr_date, cfg).await? {
-                GeosDayState::Complete => {
+            match orm::met::MetFile::is_date_complete_for_config(conn, curr_date, cfg).await? {
+                MetDayState::Complete => {
                     info!("{curr_date} already downloaded for {cfg}, not redownloading")
                 },
-                GeosDayState::Incomplete | GeosDayState::Missing => {
+                MetDayState::Incomplete | MetDayState::Missing => {
                     info!("{curr_date} must be downloaded for {cfg}");
                     download_one_file_one_date(conn, curr_date, cfg, &config.data, downloader.clone(), dry_run).await?;
                 }
@@ -390,13 +390,13 @@ pub async fn rescan_met_files(
 
         for cfg in download_cfgs {
             for file in cfg.expected_files_on_day(curr_date, &config.data)? {
-                match orm::geos::GeosFile::file_exists_by_type(conn, &file, cfg).await {
+                match orm::met::MetFile::file_exists_by_type(conn, &file, cfg).await {
                     Ok(true) => {
                         debug!("{} [{}] already in database", file.display(), cfg);
                     },
                     Ok(false) => {
                         if !dry_run {
-                            n_added += orm::geos::GeosFile::add_geos_file_infer_date(conn, &file, cfg)
+                            n_added += orm::met::MetFile::add_met_file_infer_date(conn, &file, cfg)
                             .await
                             .and(Ok(1))
                             .unwrap_or_else(|e| {warn!("Error adding {} to the database: {}", file.display(), e); 0});
@@ -494,7 +494,7 @@ async fn download_one_file_one_date(
 
         for (file_time, file_path) in expected_met_files {
             if file_path.exists() {
-                orm::geos::GeosFile::add_geos_file(conn, &file_path, file_time, file_cfg).await?;
+                orm::met::MetFile::add_met_file(conn, &file_path, file_time, file_cfg).await?;
             }
         }
     }else{

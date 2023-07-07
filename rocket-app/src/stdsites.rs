@@ -3,7 +3,7 @@ use chrono::{Utc,Duration, NaiveDate};
 use log::warn;
 use rocket_db_pools::Connection;
 use rocket_dyn_templates::{Template,context};
-use orm::{geos,siteinfo,stdsitejobs,utils};
+use orm::{met,siteinfo,stdsitejobs,utils};
 
 use crate::PriorsDb;
 
@@ -24,7 +24,7 @@ pub async fn check_std_sites(mut db: Connection<PriorsDb>) -> Result<Template, S
     ).await
     .expect("Standard site job database query failure!");
 
-    let last_geos_date = geos::GeosFile::get_last_complete_date_for_default_mets(
+    let last_geos_date = met::MetFile::get_last_complete_date_for_default_mets(
         &mut *db, &cfg).await
         .expect("Geos file database query failure!")
         .unwrap_or(NaiveDate::from_ymd(1970, 1, 1));
