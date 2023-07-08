@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-use std::io::{self, Write};
-use std::process::{Command, Termination};
+use std::process::Termination;
 
 use anyhow::Context;
 use clap::{self, Args};
@@ -25,14 +24,45 @@ fn check_start_end_date(start_date: NaiveDate, end_date: Option<NaiveDate>) -> a
     };
 }
 
-/// Get start and end dates with defaults if values not provided.
+/// Returns a [`utils::DateIterator`] that iterates over days to try downloading met data for
 /// 
-/// Defaults follow:
+/// If `met_key` is `None`, then this calls [`get_date_iter_for_defaults`]. This is the normal
+/// use; that figures out what dates we need to download to have all the met files for the default
+/// prior generation up to today. If `met_key` is `Some(_)`, then this calls [`get_date_iter_for_specified_met`].
+/// That is intended for special cases where a single met type needs downloaded, potentially even
+/// for periods when it would not normally be downloaded based on the defaults.
 /// 
-/// 1. If no start date provided, first try to find the last day which has a complete set of
-///    met data and try downloading the next day
-/// 2. If no full days of existing data found, use the "earliest_date" keys in the met section
-///    of the config file (specifically returning the earliest across all the types of met data)
+/// For information on how the inputs map to the output iterator, see the documentation for
+/// [`get_date_iter_for_defaults`] and [`get_date_iter_for_specified_met`].
+pub async fn get_date_iter(
+    conn: &mut orm::MySqlConn,
+    config: &orm::config::Config,
+    start_date: Option<NaiveDate>,
+    end_date: Option<NaiveDate>,
+    met_key: Option<&str>,
+    ignore_defaults: bool
+) -> anyhow::Result<utils::DateIterator>
+{
+    if let Some(key) = met_key {
+        get_date_iter_for_specified_met(conn, start_date, end_date, config, key, ignore_defaults).await
+    } else {
+        get_date_iter_for_defaults(conn, start_date, end_date, config).await
+    }
+}
+
+/// Get a date iterator describing the period to try to download met data for.
+/// 
+/// This function should usually be called through [`get_date_iter`]. This should be more
+/// commonly used than [`get_date_iter_for_defaults`], as this one accounts for how the
+/// default meteorlogy can change for different time periods. The time period it returns
+/// depends on the inputs:
+/// 
+/// 1. If no start date provided, it tries to find the last day which has a complete set of
+///    met data (based on the defaults defined in the config) and starts with the next day
+/// 2. If no full days of existing data found, it takes the list of default option sets from
+///    the config, gets the chronologically first set of defaults, and looks at the met type
+///    used in that set. It takes the latest of the "earliest available" dates across all the
+///    files for that met type as the start date.
 /// 3. If no end date provided, use today as the end date.
 /// 
 /// Note that unlike [`check_start_end_date`] this does NOT verify that the end date is after the 
@@ -40,37 +70,48 @@ fn check_start_end_date(start_date: NaiveDate, end_date: Option<NaiveDate>) -> a
 /// do nothing.
 /// 
 /// # Returns
-/// The start and end dates, either from the input or using the defaults described above. Returns an 
-/// `Err` if:
+/// An iterator over all the dates to check for met, either from the input or using the defaults described above. 
+/// Returns an `Err` if:
 /// 
-/// * the `met_key` is not a valid section in the config, or
-/// * any of the database queries fail, or
-/// * no start date is provided and there are (somehow) no met sections to get the default start date from.
-async fn get_start_end_dates(
+/// * the met key from the first defaults set is not a valid met section in the config,
+/// * any of the database queries fail,
+/// * no start date is provided and there are (somehow) no met sections or default option sets to get 
+///   the default start date from, or
+/// * one of more of the default option sets overlap in time
+async fn get_date_iter_for_defaults(
     conn: &mut orm::MySqlConn,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
-    config: &orm::config::Config,
-    met_key: &str) -> anyhow::Result<(NaiveDate, NaiveDate)>
+    config: &orm::config::Config
+) -> anyhow::Result<utils::DateIterator>
 {
-    let cfgs = config.get_met_configs(met_key)?;
-
     let start_date = if let Some(start) = start_date {
         start
-    }else{
+    }else if let Some(d) = orm::met::MetFile::get_last_complete_date_for_default_mets(conn, config).await? {
         // If no start date, use the first day we don't have met data for. If no data previously downloaded, use the
         // start date defined for the meteorology. If no meteorology datasets defined, return an error.
-        let x = orm::met::MetFile::get_last_complete_date_for_config_set(conn, cfgs).await?;
-        let y = if let Some(d) = x {
-            Some(d + Duration::days(1))
-        }else{
-            info!("Found no complete days, starting from the beginning of the meteorology");
-            config.get_met_start_date(met_key)?
-        };
+        d + Duration::days(1)
+    } else {
+        info!("Found no complete days, starting from the beginning of the meteorology");
+        let defaults = config.get_all_defaults_check_overlap()?;
+        let first_defaults = defaults.first()
+            .ok_or_else(|| anyhow::Error::msg("No default option sets configured"))?;
 
-        y.ok_or_else(|| anyhow::Error::msg(format!(
-            "Could not infer start date: no existing met data for key '{met_key}' and no configured met dataset to determine the default start from"
-        )))?
+        // Take the later of the earliest date for which this meteorology is available and the start of the
+        // default set - assuming that if the default set starts after the met, then we don't need the full
+        // met record.
+        let first_met_configs = config.get_met_configs(&first_defaults.met)?;
+        let met_start_date = first_met_configs.iter()
+            .map(|c| c.earliest_date)
+            .max()
+            .expect("Should have been at least one file configured for the first meteorology"); // get_met_configs should have errored if 0 met files defined
+
+        let defaults_start_date = first_defaults.start_date.unwrap_or(met_start_date);
+        if defaults_start_date > met_start_date {
+            defaults_start_date
+        } else {
+            met_start_date
+        }
     };
 
     let end_date = if let Some(end) = end_date {
@@ -80,7 +121,120 @@ async fn get_start_end_dates(
         chrono::offset::Utc::now().naive_utc().date()
     };
 
-    Ok((start_date, end_date))
+    Ok(utils::DateIterator::new(vec![(start_date, end_date)]))
+}
+
+/// This function provides a date iterator for days relevant to a single met type.
+/// 
+/// This function is usually only called through [`get_date_iter`]. The uses of this
+/// function should be less common than [`get_date_iter_for_defaults`], this function
+/// is useful in two cases:
+/// 
+/// 1. we need to fill in a single (perhaps new) set of met data, or
+/// 2. we want to fill in met data over a period which it isn't typically used (according to the defaults)
+/// 
+/// What dates the iterator contains is very flexible:
+/// 
+/// * If both `start_date` and `end_date` are `Some(_)`, then the returned iterator will only contain
+///   dates between them (with `end_date` being exclusive as normal).
+/// * If `end_date` is `None`, then today is used.
+/// * If `start_date` is None, then this function first looks in the database to see if there is already
+///   some data for this met type. If so, the day after the last complete day is treated as the start date.
+///   If there are no files for this met type in the database, then it checks the configuration to see if the 
+///   requested met type defines its earliest available date on any of the files needed. If so, the latest of 
+///   those dates is treated as the start date. If even the configuration does not define a start date, then it
+///   checks the chronologically first default option set that uses the given met type. If that does not define
+///   a start date, this returns an `Err`.
+/// * When `ignore_defaults` is `false`, the iterator will only include dates for which the specified met type
+///   is the default as given in the configuration. 
+/// * When `ignore_defaults` is `true`, the iterator will include all dates between the provided/calculated
+///   start and end dates. 
+/// 
+/// # Returns
+/// A [`utils::DateIterator`] for the calculated dates. This returns as `Err` if:
+/// 
+/// * `met_key` is not found in the configuration,
+/// * the configuration's default option sets overlap in time,
+/// * the database query to check for the latest complete day fails, or
+/// * the start date could not be determined, as described above.
+async fn get_date_iter_for_specified_met(
+    conn: &mut orm::MySqlConn,
+    start_date: Option<NaiveDate>,
+    end_date: Option<NaiveDate>,
+    config: &orm::config::Config,
+    met_key: &str,
+    ignore_defaults: bool
+) -> anyhow::Result<utils::DateIterator> 
+{
+    let dl_cfgs = config.get_met_configs(met_key)?;
+    let default_options = config.get_all_defaults_check_overlap()?;
+
+    let start_date = if let Some(d) = start_date {
+        // the user provided start date takes precedence
+        Some(d)
+    } else if let Some(d) = orm::met::MetFile::get_last_complete_date_for_config_set(conn, dl_cfgs).await? {
+        // if that's not available, assume we want to start with the day after the last date for which we have this met
+        // data for
+        Some(d + Duration::days(1))
+    } else if let Some(d) = dl_cfgs.iter().map(|c| c.earliest_date).max() {
+        // if there is no existing met data, take the latest date after which all the files needed for this met are available
+        // this should never really *not* have a max value, because if there's an entry for the met in the download HashMap,
+        // it really should have at least one entry in the TOML file. But it's possible someone could write the file like
+        // `data.download.geosfpit = []`, so we'll be careful here.
+        Some(d)
+    } else {
+        None
+    };
+
+    let end_date = if let Some(end) = end_date {
+        // the user provided end date takes precedence
+        end
+    }else {
+        // otherwise we use today
+        chrono::offset::Utc::now().naive_utc().date()
+    };
+
+    // This branch is if we want to get the date range between the start and end date provided as a single
+    // contiguous range. As long as there was a clear starting date, this is simple. If not, then we will 
+    // try to guess the start date from the default options. If those don't define one, then we can't deduce the starting date.
+    if ignore_defaults { 
+        if let Some(d) = start_date {
+            return Ok(utils::DateIterator::new(vec![(d, end_date)]));
+        } else {
+            // This case should be EXTREMELY rare for the reasons in the last else if branch for start_date above
+            let defaults_start = default_options.iter()
+                .filter(|opts| opts.met == met_key)
+                .map(|opts| opts.start_date)
+                .next()
+                .flatten()
+                .ok_or_else(|| anyhow::Error::msg(
+                    format!("No earliest date defined for met = {met_key} and either no default option sets reference this met or the first one to do so has no start date defined.")
+                ))?;
+            
+            return Ok(utils::DateIterator::new(vec![(defaults_start, end_date)]));
+        }
+    }
+
+    // If we're here, then we interpret the request to be for all dates, potentially limited to between given or
+    // inferred start and end dates, for which the default option sets say we should use this met.
+    let mut date_ranges: Vec<(NaiveDate, NaiveDate)> = vec![];
+    for opts in default_options {
+        if opts.met != met_key {
+            continue;
+        }
+
+        let this_start = opts.start_date.or(start_date)
+            .ok_or_else(|| anyhow::Error::msg(format!(
+                "A default option set for met = {met_key} has no start date defined and that met has no earliest date defined."
+            )))?;
+        let this_end = opts.end_date.unwrap_or(end_date);
+        date_ranges.push((this_start, this_end))
+    }
+    
+    // Still use bounds on the iterator even though we do use the defined start and end dates elsewhere. This
+    // is needed in case all the default option sets define start and/or end dates; we still need to cut down
+    // the iterator to the desired limits.
+    Ok(utils::DateIterator::new_with_bounds(date_ranges, start_date, Some(end_date)))
 }
 
 /// Check whether the required model files are present for a range of dates.
@@ -262,10 +416,6 @@ pub async fn download_files_for_dates_cli(
 /// Download missing files for a given meteorological reanalysis [alias: dmr]
 #[derive(Debug, Args)]
 pub struct DownloadMissingCli {
-    /// The key used in your TOML configuration file to declare a meteorology type.
-    /// If you have [[data.download.geosit]] for example, then the key would be "geosit".
-    pub met_key: String,
-
     /// The first date to download data for, in yyyy-mm-dd format. If not given, it will default
     /// to the most recent day that has all the expected met data for the given met_key. If no 
     /// complete days are present, it will use the earliest "earliest_date" value in the TOML 
@@ -277,6 +427,12 @@ pub struct DownloadMissingCli {
     /// defaults to today (and so will try to download met data through yesterday).
     #[clap(short = 'e', long="end-date")]
     pub end_date: Option<NaiveDate>,
+
+    #[clap(short = 'm', long="met")]
+    pub met_key: Option<String>,
+
+    #[clap(short = 'i', long)]
+    pub ignore_defaults: bool,
 
     /// Set this flag to print what would be downloaded, but not actually download anything.
     #[clap(short = 'd', long="dry-run")]
@@ -291,9 +447,10 @@ pub async fn download_missing_files_cli(
 ) -> Result<(), anyhow::Error> {
     download_missing_files(
         conn,
-        &clargs.met_key,
         clargs.start_date,
         clargs.end_date,
+        clargs.met_key.as_deref(),
+        clargs.ignore_defaults,
         config,
         downloader,
         clargs.dry_run
@@ -302,32 +459,31 @@ pub async fn download_missing_files_cli(
 
 pub async fn download_missing_files(
     conn: &mut orm::MySqlConn,
-    met_key: &str,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
+    met_key: Option<&str>,
+    ignore_defaults: bool,
     config: &orm::config::Config,
     downloader: impl utils::Downloader + Clone,
     dry_run: bool) -> Result<(), anyhow::Error> 
 {
-    let cfgs = config.get_met_configs(met_key)?;
-    let (start_date, end_date) = get_start_end_dates(conn, start_date, end_date, config, met_key).await?;
+    let date_iter = get_date_iter(conn, config, start_date, end_date, met_key, ignore_defaults).await?;
 
     // Now the main function: loop through each date and met type, download that met type if needed
-    let mut curr_date = start_date;
-    while curr_date < end_date {
-        for cfg in cfgs {
-            match orm::met::MetFile::is_date_complete_for_config(conn, curr_date, cfg).await? {
+    for curr_date in date_iter {
+        let defaults = config.get_defaults_for_date(curr_date)?;
+        let dl_cfgs = config.get_met_configs(&defaults.met)?;
+        for dl_cfg in dl_cfgs {
+            match orm::met::MetFile::is_date_complete_for_config(conn, curr_date, dl_cfg).await? {
                 MetDayState::Complete => {
-                    info!("{curr_date} already downloaded for {cfg}, not redownloading")
+                    info!("{curr_date} already downloaded for {dl_cfg}, not redownloading")
                 },
                 MetDayState::Incomplete | MetDayState::Missing => {
-                    info!("{curr_date} must be downloaded for {cfg}");
-                    download_one_file_one_date(conn, curr_date, cfg, &config.data, downloader.clone(), dry_run).await?;
+                    info!("{curr_date} must be downloaded for {dl_cfg}");
+                    download_one_file_one_date(conn, curr_date, dl_cfg, &config.data, downloader.clone(), dry_run).await?;
                 }
             }
         }
-
-        curr_date += Duration::days(1);
     }
 
     Ok(())
@@ -336,10 +492,6 @@ pub async fn download_missing_files(
 /// Rescan the directories with met files and add any new files found to the database
 #[derive(Debug, Args)]
 pub struct RescanMetCli {
-    /// The key used in your TOML configuration file to declare a meteorology type.
-    /// If you have [[data.download.geosit]] for example, then the key would be "geosit".
-    pub met_key: String,
-
     /// The first date to download data for, in yyyy-mm-dd format. If not given, it will default
     /// to the most recent day that has all the expected met data for the given met_key. If no 
     /// complete days are present, it will use the earliest "earliest_date" value in the TOML 
@@ -352,6 +504,14 @@ pub struct RescanMetCli {
     #[clap(short = 'e', long="end-date")]
     pub end_date: Option<NaiveDate>,
 
+    /// The key used in your TOML configuration file to declare a meteorology type.
+    /// If you have [[data.download.geosit]] for example, then the key would be "geosit".
+    #[clap(short = 'm', long = "met")]
+    pub met_key: Option<String>,
+
+    #[clap(short = 'i', long)]
+    pub ignore_defaults: bool,
+
     /// Set this flag to print what would be downloaded, but not actually download anything.
     #[clap(short = 'd', long="dry-run")]
     pub dry_run: bool
@@ -363,7 +523,8 @@ pub async fn rescan_met_files_cli(conn: &mut orm::MySqlConn, clargs: RescanMetCl
         clargs.start_date,
         clargs.end_date,
         config,
-        &clargs.met_key,
+        clargs.met_key.as_deref(),
+        clargs.ignore_defaults,
         clargs.dry_run
     ).await?;
 
@@ -376,32 +537,37 @@ pub async fn rescan_met_files(
     start_date: Option<NaiveDate>, 
     end_date: Option<NaiveDate>, 
     config: &orm::config::Config, 
-    met_key: &str,
+    met_key: Option<&str>,
+    ignore_defaults: bool,
     dry_run: bool) -> anyhow::Result<u64>
 {
-    let (start_date, end_date) = get_start_end_dates(conn, start_date, end_date, config, met_key).await?;
-    let mut curr_date = start_date;
-    let download_cfgs = config.get_met_configs(met_key)?;
+    let date_iter = get_date_iter(conn, config, start_date, end_date, met_key, ignore_defaults).await?;
 
     let mut n_added = 0;
 
-    while curr_date < end_date {
+    for curr_date in date_iter {
         info!("Scanning for new met files on {curr_date}");
+        let download_cfgs = if let Some(key) = met_key {
+            config.get_met_configs(key)?
+        } else {
+            let defaults = config.get_defaults_for_date(curr_date)?;
+            config.get_met_configs(&defaults.met)?
+        };
 
-        for cfg in download_cfgs {
-            for file in cfg.expected_files_on_day(curr_date, &config.data)? {
-                match orm::met::MetFile::file_exists_by_type(conn, &file, cfg).await {
+        for dl_cfg in download_cfgs {
+            for file in dl_cfg.expected_files_on_day(curr_date, &config.data)? {
+                match orm::met::MetFile::file_exists_by_type(conn, &file, dl_cfg).await {
                     Ok(true) => {
-                        debug!("{} [{}] already in database", file.display(), cfg);
+                        debug!("{} [{}] already in database", file.display(), dl_cfg);
                     },
                     Ok(false) => {
                         if !dry_run {
-                            n_added += orm::met::MetFile::add_met_file_infer_date(conn, &file, cfg)
+                            n_added += orm::met::MetFile::add_met_file_infer_date(conn, &file, dl_cfg)
                             .await
                             .and(Ok(1))
                             .unwrap_or_else(|e| {warn!("Error adding {} to the database: {}", file.display(), e); 0});
                         } else {
-                            println!("Would add {} [{}]", file.display(), cfg);
+                            println!("Would add {} [{}]", file.display(), dl_cfg);
                             n_added += 1;
                         }
                     },
@@ -411,7 +577,6 @@ pub async fn rescan_met_files(
                 }
             }
         }
-        curr_date += Duration::days(1);
     }
     Ok(n_added)
 }
@@ -456,18 +621,11 @@ async fn download_one_file_one_date(
     date: NaiveDate, 
     file_cfg: &orm::config::DownloadConfig, 
     data_cfg: &orm::config::DataConfig, 
-    downloader: impl utils::Downloader,
+    mut downloader: impl utils::Downloader,
     dry_run: bool) -> Result<(), anyhow::Error>
     
 {
     let save_dir = file_cfg.get_save_dir(data_cfg)?;
-    
-    let mut out: Box<dyn Write> = if dry_run {
-        Box::new(io::stdout())
-    }else{
-        let wget_list = save_dir.join("wget_list.txt");
-        Box::new(std::fs::File::create(wget_list)?)
-    };
 
     if dry_run {
         println!("Would download the following URLs for {date} to {}", save_dir.display());
@@ -476,21 +634,17 @@ async fn download_one_file_one_date(
     let mut expected_met_files = vec![];
     let basename_pat = file_cfg.get_basename_pattern()?;
     for file_time in file_cfg.times_on_day(date) {
-        // `out` will be stdout in the case of a dry run; this allows us to print the exact URLs that
-        // would be downloaded
-        writeln!(out, "{}", file_time.format(&file_cfg.url_pattern))
-            .with_context(|| "Unable to write out download URL")?;
+        let file_url = file_time.format(&file_cfg.url_pattern).to_string();
+        downloader.add_file_to_download(file_url)
+            .with_context(|| "Unable to add URL to list of files to download")?;
 
         let base_name = file_time.format(basename_pat).to_string();
         expected_met_files.push((file_time, save_dir.join(base_name)));
     }
 
     if !dry_run {
-        Command::new("wget")
-            .args(["-i", "wget_list.txt"])
-            .current_dir(&save_dir)
-            .spawn()
-            .with_context(|| format!("wget command to download {} in {} failed", date, save_dir.display()))?;
+        downloader.download_files(&save_dir)
+            .with_context(|| format!("Download of files for {} in {} failed", date, save_dir.display()))?;
 
         for (file_time, file_path) in expected_met_files {
             if file_path.exists() {
@@ -498,6 +652,9 @@ async fn download_one_file_one_date(
             }
         }
     }else{
+        for file in downloader.iter_files() {
+            println!("Would download {file}");
+        }
         println!("");
     }
 

@@ -13,9 +13,6 @@ env_logger = "0.9"
 log = "0.4"
 tokio-test = "0.4.2"
 orm = {path = "../core-orm", package = "tccon_priors_orm"}
-# Should probably be dev deps
-toml = "0.5"
-serial_test = "1.0.0"
 
 [dependencies.sqlx]
 version = "0.5"
@@ -27,7 +24,10 @@ features = ["mysql", "runtime-tokio-rustls", "chrono"]
 version = "1.6.1"
 features = ["full"]
 
-
+[dev-dependencies]
+serial_test = "1.0.0"
+toml = "0.5"
+url = "2.4"
 
 [[bin]]
 name = "tccon_priors_cli"

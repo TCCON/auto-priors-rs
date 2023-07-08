@@ -124,6 +124,22 @@ impl TestDownloader {
     }
 }
 
+impl TestDownloader {
+    /// Return a vector of the file names (no leading directories) to be downloaded
+    /// 
+    /// # Notes
+    /// This is intended for use in testing code where you want to compare the list of files
+    /// 
+    pub fn list_download_file_names(&self) -> Vec<String> {
+        self.files.iter()
+            .map(|f| {
+                let u = url::Url::parse(f).expect("Test download URL should be parseable");
+                let segments = u.path_segments().expect("Test URL should be parseable into segments.");
+                segments.last().expect("Expected at least one segment in the test URL").to_owned()
+            }).collect()
+    }
+}
+
 impl Downloader for TestDownloader {
     fn add_file_to_download(&mut self, url: String) -> anyhow::Result<()> {
         self.files.push(url);
@@ -142,5 +158,9 @@ impl Downloader for TestDownloader {
         }
 
         Ok(())
+    }
+
+    fn iter_files(&self) -> std::slice::Iter<'_, String> {
+        self.files.iter()
     }
 }
