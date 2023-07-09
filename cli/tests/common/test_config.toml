@@ -69,6 +69,15 @@ file_freq_min = 180
 earliest_date = "2000-01-01"
 
 
+[[data.download.geosfp]]
+product = "geosfp"
+data_type = "met"
+levels = "surf"
+url_pattern = "https://portal.nccs.nasa.gov/datashare/gmao_ops/pub/fp/das/Y%Y/M%m/D%d/GEOS.fp.asm.inst3_2d_asm_Nx.%Y%m%d_%H%M.V01.nc4"
+file_freq_min = 180 
+earliest_date = "2000-01-01"
+
+
 [[default_options]]
 end_date = "2023-06-01"
 ginput = "v1.0.6"

@@ -1,6 +1,7 @@
 use std::env;
-use std::io::Write;
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::{Write, Read};
+use std::path::{PathBuf, Path};
 use anyhow::Context;
 use orm;
 use tccon_priors_cli::utils::Downloader;
@@ -114,6 +115,23 @@ macro_rules! multiline_sql_init {
 pub(crate) use multiline_sql;
 pub(crate) use multiline_sql_init;
 
+pub(crate) fn md5sum(p: &Path) -> anyhow::Result<Vec<u8>> {
+    use md5::Digest;
+    let mut hasher = md5::Md5::new();
+    let mut buf: Vec<u8> = vec![0; 1_000_000];
+    let mut f = File::open(p)?;
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        } else {
+            hasher.update(&buf[..n]);
+        }
+    }
+
+    Ok(hasher.finalize().to_vec())
+}
+
 pub(crate) struct TestDownloader {
     files: Vec<String>
 }
@@ -121,22 +139,6 @@ pub(crate) struct TestDownloader {
 impl TestDownloader {
     pub(crate) fn new() -> Self {
         Self { files: vec![] }
-    }
-}
-
-impl TestDownloader {
-    /// Return a vector of the file names (no leading directories) to be downloaded
-    /// 
-    /// # Notes
-    /// This is intended for use in testing code where you want to compare the list of files
-    /// 
-    pub fn list_download_file_names(&self) -> Vec<String> {
-        self.files.iter()
-            .map(|f| {
-                let u = url::Url::parse(f).expect("Test download URL should be parseable");
-                let segments = u.path_segments().expect("Test URL should be parseable into segments.");
-                segments.last().expect("Expected at least one segment in the test URL").to_owned()
-            }).collect()
     }
 }
 

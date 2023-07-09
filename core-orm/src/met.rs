@@ -74,7 +74,7 @@ impl Display for MetProduct {
     }
 }
 
-#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "String", into = "String")]
 pub enum MetLevels {
     Pres,
@@ -131,7 +131,7 @@ impl Display for MetLevels {
     }
 }
 
-#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "String", into = "String")]
 pub enum MetDataType {
     Met,

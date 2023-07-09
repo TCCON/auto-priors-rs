@@ -25,9 +25,11 @@ version = "1.6.1"
 features = ["full"]
 
 [dev-dependencies]
+hex-literal = "0.4"
+md-5 = "0.10"
 serial_test = "1.0.0"
+tempdir = "0.3"
 toml = "0.5"
-url = "2.4"
 
 [[bin]]
 name = "tccon_priors_cli"

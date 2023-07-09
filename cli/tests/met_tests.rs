@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::Context;
 use chrono::{NaiveDate, Duration};
 use serial_test::serial;
-use orm::met::MetDayState;
-use tccon_priors_cli::met_download::{check_files_for_dates, self};
+use orm::met::{MetDayState, MetLevels, MetDataType};
+use tccon_priors_cli::{met_download::{check_files_for_dates, self}, utils::{WgetDownloader, Downloader}};
 mod common;
 
 
@@ -334,7 +334,7 @@ async fn test_single_met_no_valid_start_err() {
     // for this to happen, but it could. Now there should be no way for it to find a start date.
     config.data.download.insert("geosfpit".to_owned(), vec![]);
 
-    let mut res = met_download::get_date_iter(
+    let res = met_download::get_date_iter(
         &mut conn,
         &config, 
         None,
@@ -388,4 +388,31 @@ async fn test_single_met_cross_boundary_ignoring_defaults() {
     // should start on the day we requested and stop on the day before our end
     assert_eq!(date_iter.next(), Some(start), "First date in iterator was incorrect");
     assert_eq!(date_iter.last(), Some(end - Duration::days(1)), "Final date in iterator was incorrect");
+}
+
+#[test]
+fn test_geosfp_download() {
+    let tmp_dir = tempdir::TempDir::new("test_geosfp_download").expect("Failed to make temporary directory");
+    let config = common::make_dummy_config(tmp_dir.path().to_owned()).expect("Failed to make test configuration");
+
+
+    let fp_dl_cfg = config.get_met_configs("geosfp").expect("Could not get geosfp met configs");
+    let fp_dl_cfg = fp_dl_cfg.iter()
+        .find(|&cfg| cfg.levels == MetLevels::Surf && cfg.data_type == MetDataType::Met)
+        .expect("Could not find the surface met GEOS FP download config");
+
+    let test_datetime = NaiveDate::from_ymd(2018, 1, 1).and_hms(0, 0, 0);
+    let test_url = test_datetime.format(&fp_dl_cfg.url_pattern).to_string();
+    let mut downloader = WgetDownloader::new_with_verbosity(0);
+    downloader.add_file_to_download(test_url).unwrap();
+    let dl_res = downloader.download_files(&config.data.geos_path);
+    assert!(dl_res.is_ok(), "Failed to download GEOS FP file.");
+    
+    let expected_file = config.data.geos_path.join("GEOS.fp.asm.inst3_2d_asm_Nx.20180101_0000.V01.nc4");
+    println!("Expected file = {}", expected_file.display());
+    assert!(expected_file.exists(), "Download succeeded, but expected file is not present");
+
+    let expected_checksum = hex_literal::hex!("ade5e528d45f55b9eb37e1676e782ec3");
+    let actual_checksum = common::md5sum(&expected_file).expect("Could not compute checksum on downloaded file");
+    assert_eq!(actual_checksum, expected_checksum, "GEOS FP file checksum did not match");
 }
