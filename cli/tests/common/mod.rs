@@ -14,8 +14,11 @@ pub(crate) fn make_dummy_config(download_root: PathBuf) -> anyhow::Result<orm::c
     let mut cfg: orm::config::Config = toml::from_slice(s.as_bytes())?;
 
     cfg.execution.download_root = download_root.clone();
-    cfg.data.geos_path = download_root.clone();
-    cfg.data.chem_path = download_root.clone();
+    for (_, dl_cfgs) in cfg.data.download.iter_mut() {
+        for dl_cfg in dl_cfgs.iter_mut() {
+            dl_cfg.download_dir = download_root.join(dl_cfg.levels.standard_subdir());
+        }
+    }
 
     Ok(cfg)
 }

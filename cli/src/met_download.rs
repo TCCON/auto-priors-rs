@@ -480,7 +480,7 @@ pub async fn download_missing_files(
                 },
                 MetDayState::Incomplete | MetDayState::Missing => {
                     info!("{curr_date} must be downloaded for {dl_cfg}");
-                    download_one_file_one_date(conn, curr_date, dl_cfg, &config.data, downloader.clone(), dry_run).await?;
+                    download_one_file_one_date(conn, curr_date, dl_cfg, downloader.clone(), dry_run).await?;
                 }
             }
         }
@@ -555,7 +555,7 @@ pub async fn rescan_met_files(
         };
 
         for dl_cfg in download_cfgs {
-            for file in dl_cfg.expected_files_on_day(curr_date, &config.data)? {
+            for file in dl_cfg.expected_files_on_day(curr_date)? {
                 match orm::met::MetFile::file_exists_by_type(conn, &file, dl_cfg).await {
                     Ok(true) => {
                         debug!("{} [{}] already in database", file.display(), dl_cfg);
@@ -603,7 +603,6 @@ pub async fn download_files_for_dates(
                 conn,
                 curr_date, 
                 file_cfg, 
-                &config.data,
                 downloader.clone(),
                 dry_run
             ).await?;
@@ -620,12 +619,11 @@ async fn download_one_file_one_date(
     conn: &mut orm::MySqlConn,
     date: NaiveDate, 
     file_cfg: &orm::config::DownloadConfig, 
-    data_cfg: &orm::config::DataConfig, 
     mut downloader: impl utils::Downloader,
     dry_run: bool) -> Result<(), anyhow::Error>
     
 {
-    let save_dir = file_cfg.get_save_dir(data_cfg)?;
+    let save_dir = &file_cfg.download_dir;
 
     if dry_run {
         println!("Would download the following URLs for {date} to {}", save_dir.display());

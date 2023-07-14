@@ -401,14 +401,17 @@ fn test_geosfp_download() {
         .find(|&cfg| cfg.levels == MetLevels::Surf && cfg.data_type == MetDataType::Met)
         .expect("Could not find the surface met GEOS FP download config");
 
+    std::fs::create_dir(&fp_dl_cfg.download_dir)
+        .expect("Could not create temporary download directory for GEOS FP");
+
     let test_datetime = NaiveDate::from_ymd(2018, 1, 1).and_hms(0, 0, 0);
     let test_url = test_datetime.format(&fp_dl_cfg.url_pattern).to_string();
     let mut downloader = WgetDownloader::new_with_verbosity(0);
     downloader.add_file_to_download(test_url).unwrap();
-    let dl_res = downloader.download_files(&config.data.geos_path);
-    assert!(dl_res.is_ok(), "Failed to download GEOS FP file.");
+    downloader.download_files(&fp_dl_cfg.download_dir)
+        .expect("Failed to download GEOS FP file");
     
-    let expected_file = config.data.geos_path.join("GEOS.fp.asm.inst3_2d_asm_Nx.20180101_0000.V01.nc4");
+    let expected_file = fp_dl_cfg.download_dir.join("GEOS.fp.asm.inst3_2d_asm_Nx.20180101_0000.V01.nc4");
     println!("Expected file = {}", expected_file.display());
     assert!(expected_file.exists(), "Download succeeded, but expected file is not present");
 

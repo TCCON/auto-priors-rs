@@ -13,12 +13,12 @@ use anyhow::{self, Context};
 use chrono::{NaiveDate, NaiveDateTime, Duration};
 use hostname;
 use itertools::Itertools;
-use log::debug;
+use log::{debug, warn};
 use serde::{Serialize, Deserialize};
 use toml;
 use url::Url;
 
-use crate::{met, error::DefaultOptsQueryError};
+use crate::{met::{self, MetDataType}, error::DefaultOptsQueryError};
 
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
@@ -44,6 +44,77 @@ impl Config {
         self.data.download.get(met_key)
         .and_then(|cfgs| Some(cfgs.as_slice()))
         .ok_or_else(|| anyhow::Error::msg(format!("No meteorology with with '{met_key}' found.")))
+    }
+
+    /// Get the GEOS and chemistry directories required to pass to version 1 ginput instances
+    /// 
+    /// Version 1.x ginput instances expect GEOS data to be organized in a specific way: all files
+    /// are to be directly stored in directories that match the levels their data is on: Nx for
+    /// 2D files, Nv for eta-hybrid level files, and Np for fixed pressure level files. Further,
+    /// all met files must be in subdirectories of the same parent. This function will return
+    /// the paths to provide to ginput for a given met key.
+    /// 
+    /// # Returns
+    /// If successful, a tuple containing the `geos_path` and `chem_path` in that order. If the
+    /// met configuration requested does not define any chemistry files, a warning will be logged
+    /// and the `chem_path` will be the same as the `geos_path`.
+    /// 
+    /// This returns an error in a number of conditions:
+    /// 1. Any of the `download_dir` paths cannot be canonicalized
+    /// 2. Any of the `download_dir` paths does not contain at least 1 component
+    /// 3. The final component of any of the `download_dir` paths does not match the levels defined
+    ///    for that file type.
+    /// 4. Any of the `download_dir` paths does not have a parent directory
+    /// 5. Inconsistent `geos_path` or `chem_path` values are defined.
+    pub fn get_geos_and_chem_paths(&self, met_key: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
+        let dl_cfgs = self.get_met_configs(met_key)?;
+        let mut geos_path = None;
+        let mut chem_path = None;
+
+        for (i, cfg) in dl_cfgs.iter().enumerate() {
+            let i = i + 1;
+            let download_dir = cfg.download_dir.canonicalize()
+                .map_err(|e| anyhow::Error::msg(format!("In met type {met_key}, could not canonicalize download path for file type {i}: {e}")))?;
+            let final_dir = download_dir.components()
+                .last()
+                .ok_or_else(|| anyhow::Error::msg(format!("In met type {met_key}, file {i} does not have a final component to its download path")))?;
+
+            if final_dir.as_os_str() != cfg.levels.standard_subdir().as_os_str() {
+                let final_dir = final_dir.as_os_str().to_string_lossy();
+                anyhow::bail!(format!("In met type {met_key}, file type {i}'s final component ({final_dir}) is not consistent with its declared levels ({})", cfg.levels))
+            }
+
+            let parent_dir = download_dir.parent()
+                .ok_or_else(|| anyhow::Error::msg(format!("In met type {met_key}, cannot get parent directory of file type {i}'s download path")))?;
+
+            match cfg.data_type {
+                MetDataType::Met => {
+                    if geos_path.is_none() {
+                        geos_path = Some(parent_dir.to_owned());
+                    } else {
+                        anyhow::bail!("Met type {met_key} defines inconsistent parent directories for its met files");
+                    }
+                },
+                MetDataType::Chm => {
+                    if chem_path.is_none() {
+                        chem_path = Some(parent_dir.to_owned());
+                    } else {
+                        anyhow::bail!("Met type {met_key} defines inconsistent parent directories for its chem files");
+                    }
+                },
+            }
+        }
+
+        let geos_path = geos_path.ok_or_else(|| anyhow::Error::msg(
+            format!("Met type {met_key} defines no met files for download")
+        ))?;
+
+        let chem_path = chem_path.unwrap_or_else(|| {
+            warn!("Met type {met_key} defines no chem files for download");
+            geos_path.clone()
+        });
+
+        Ok((geos_path, chem_path))
     }
 
     /// Get the earliest start date for all the file types of a given met configuration
@@ -207,13 +278,6 @@ pub enum GinputConfig {
 /// Configuration section dealing with input data for jobs
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct DataConfig {
-    /// The path to the GEOS FPIT data. This directory must contain the Nx and 
-    /// Nv subdirectories (Np instead of Nv if using fixed-pressure level files)
-    pub geos_path: PathBuf,
-
-    /// The path to the GEOS FPIT chemistry files. Must contain an Nv subdirectory. 
-    pub chem_path: PathBuf,
-
     /// A map of arrays of configurations that specify how to download reanalysis files.
     /// Each config in the array represents a file that needs to be downloaded for ginput
     /// to run. The keys to the map must be strings that will be passed as arguments to
@@ -265,9 +329,16 @@ pub struct DownloadConfig {
     /// The earliest date for which this met data is available for download
     pub earliest_date: NaiveDate,
 
-    /// The subdirectory in the met or chemistry data directory to save the files to. If not given,
-    /// the correct subdirectory is chosen based on the levels value.
-    pub subdir: Option<PathBuf>,
+    /// The directory to download the data into. For met products intended to be used with ginput v1.y.z,
+    /// this must still follow the expected directory structure for GEOS data. Namely:
+    /// * Surface, hybrid eta level, and fixed pressure level files must reside in `Nx`, `Nv`, and `Np`
+    ///   subdirectories, respectively.
+    /// * Met data for a given met data source must be in subdirectories of the same path; that is, if
+    ///   the eta level files are in `/data/met/Nv`, the surface/2D files must be in `/data/met/Nx`.
+    ///   Chemistry data can be in the same directory or separate, e.g. in this example, the eta-level
+    ///   chem files could go in `/data/met/Nv` or a separate directory such as `/data/chm/Nv`. The
+    ///   latter is recommended.
+    pub download_dir: PathBuf
 }
 
 impl Display for DownloadConfig {
@@ -304,32 +375,6 @@ impl DownloadConfig {
         }
     }
 
-    /// Get the directory in which files of this type should be saved.
-    /// 
-    /// This uses the root directory for the appropriate data type (e.g. met or chem)
-    /// then adds a subdirectory for the levels type. 
-    /// 
-    /// # Returns
-    /// The canonical path to the save directory. Returns an `Err` if the path could not
-    /// be canonicalized (e.g. the path does not exist or an intermediate component is
-    /// not a directory).
-    pub fn get_save_dir(&self, data_cfg: &DataConfig) -> anyhow::Result<PathBuf> {
-        let root_save_dir = match self.data_type {
-            met::MetDataType::Met => data_cfg.geos_path.as_path(),
-            met::MetDataType::Chm => data_cfg.chem_path.as_path(),
-        };
-        
-        let subdir = if let Some(sd) = &self.subdir {
-            sd.clone()
-        }else{
-            self.levels.standard_subdir()
-        };
-        
-        root_save_dir.join(subdir)
-            .canonicalize()
-            .with_context(|| format!("Failed to canonicalized the reanalysis save directory path '{}'", root_save_dir.display()))
-    }
-
     /// Provide a vector of datetimes when this file type is expected to exist on a given date
     pub fn times_on_day(&self, date: NaiveDate) -> Vec<NaiveDateTime> {
         let end = date.and_hms(0, 0, 0) + Duration::days(1);
@@ -351,8 +396,8 @@ impl DownloadConfig {
     /// in the path gievn by [`DownloadConfig::get_save_dir`].
     /// 
     /// Returns an `Err` if it cannot get the save directory or the filename pattern.
-    pub fn expected_files_on_day(&self, date: NaiveDate, data_cfg: &DataConfig) -> anyhow::Result<Vec<PathBuf>> {
-        let save_dir = self.get_save_dir(data_cfg)?;
+    pub fn expected_files_on_day(&self, date: NaiveDate) -> anyhow::Result<Vec<PathBuf>> {
+        let save_dir = &self.download_dir;
         let basename_pat = self.get_basename_pattern()?;
         let mut files = vec![];
         for time in self.times_on_day(date) {
