@@ -2,15 +2,21 @@
 -- Table structure for table `MetFiles`
 --
 
+-- The file_path_sha256 is needed because we can't do unique constraints
+-- on text fields, nor varchar fields over ~3k bytes (384 ASCII characters).
+-- Rather than risk a Fortran-like situation where paths get truncated because
+-- the field is too small, I just have the database hash the path on entry
+-- and enforce uniqueness on that.
 CREATE TABLE IF NOT EXISTS `MetFiles` (
   `file_id` int(11) NOT NULL AUTO_INCREMENT,
   `file_path` text NOT NULL,
+  `file_path_sha256` varchar(64) AS (SHA2(CONCAT(file_path), 256)) STORED,
   `product` varchar(8) NOT NULL,
   `filedate` datetime NOT NULL,
   `levels` varchar(8) NOT NULL,
   `data_type` varchar(8) NOT NULL,
   PRIMARY KEY (`file_id`),
-  UNIQUE (`file_path`)
+  UNIQUE (`file_path_sha256`)
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -78,7 +84,7 @@ CREATE TABLE IF NOT EXISTS `StdSiteInfo` (
   `longitude` float NOT NULL,
   `start_date` date NOT NULL,
   `end_date` date DEFAULT NULL,
-  `comment` text NOT NULL DEFAULT '',
+  `comment` text,
   PRIMARY KEY (`id`),
   KEY `site` (`site`),
   FOREIGN KEY (site) REFERENCES StdSiteList(id)
