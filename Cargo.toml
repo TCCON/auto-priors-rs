@@ -1,8 +1,7 @@
 [workspace]
 members = [
     "core-orm",
-    "rocket-app",
     "cli",
 ]
 
-exclude = ["deps/Rocket", "python-bindings"]
+exclude = ["deps/Rocket", "python-bindings", "rocket-app"]

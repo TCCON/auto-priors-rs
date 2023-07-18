@@ -162,7 +162,7 @@ pub struct SiteInfo {
     /// `None` indicates that the site remains operational here.
     pub end_date: Option<NaiveDate>,
     /// A comment to describe any special considerations with this site.
-    pub comment: String
+    pub comment: Option<String>
 }
 
 impl SiteInfo {
@@ -233,7 +233,7 @@ impl SiteInfo {
             longitude: f32,
             start_date: NaiveDate,
             end_date: Option<NaiveDate>,
-            comment: String
+            comment: Option<String>
         }
 
         #[derive(Debug, Serialize)]
