@@ -163,8 +163,8 @@ impl InputJobBuilder {
 
         let input_job = InputJob {
             site_id: site_ids,
-            start_date: self.start_date.unwrap_or_else(|| {errors.push("smissing field tart_date".to_owned()); NaiveDate::from_ymd(1970, 1, 1)}),
-            end_date: self.end_date.unwrap_or_else(|| {errors.push("missing field end_date".to_owned()); NaiveDate::from_ymd(1970, 1, 1)}),
+            start_date: self.start_date.unwrap_or_else(|| {errors.push("smissing field tart_date".to_owned()); NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()}),
+            end_date: self.end_date.unwrap_or_else(|| {errors.push("missing field end_date".to_owned()); NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()}),
             lat: lats,
             lon: lons,
             email: self.email.unwrap_or_else(|| {errors.push("missing field email".to_owned()); String::new()}),

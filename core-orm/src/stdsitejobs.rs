@@ -107,7 +107,7 @@ impl StdSiteJob {
         }else{
             // Because the standard site jobs *cannot* be prepared for future dates, setting the end
             // date to a few days in the future is the same as not restricting the query on it.
-            (chrono::Utc::today() + chrono::Duration::days(10)).naive_local()
+            chrono::Utc::now().naive_local().date() + chrono::Duration::days(10)
         }; 
 
         let mut jobs = if let Some(sid) = site_id {

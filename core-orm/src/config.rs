@@ -13,7 +13,7 @@ use anyhow::{self, Context};
 use chrono::{NaiveDate, NaiveDateTime, Duration};
 use hostname;
 use itertools::Itertools;
-use log::{debug, warn};
+use log::{debug, warn, info};
 use serde::{Serialize, Deserialize};
 use toml;
 use url::Url;
@@ -87,7 +87,7 @@ impl Config {
             let parent_dir = download_dir.parent()
                 .ok_or_else(|| anyhow::Error::msg(format!("In met type {met_key}, cannot get parent directory of file type {i}'s download path")))?;
 
-            match cfg.data_type {
+            match &cfg.data_type {
                 MetDataType::Met => {
                     if geos_path.is_none() {
                         geos_path = Some(parent_dir.to_owned());
@@ -102,6 +102,9 @@ impl Config {
                         anyhow::bail!("Met type {met_key} defines inconsistent parent directories for its chem files");
                     }
                 },
+                MetDataType::Other(v) => {
+                    info!("Ignoring met type of {v} for GEOS met/chm paths")
+                }
             }
         }
 
@@ -377,8 +380,8 @@ impl DownloadConfig {
 
     /// Provide a vector of datetimes when this file type is expected to exist on a given date
     pub fn times_on_day(&self, date: NaiveDate) -> Vec<NaiveDateTime> {
-        let end = date.and_hms(0, 0, 0) + Duration::days(1);
-        let mut file_time = date.and_hms(0, 0, 0);
+        let end = date.and_hms_opt(0, 0, 0).unwrap() + Duration::days(1);
+        let mut file_time = date.and_hms_opt(0, 0, 0).unwrap();
         let file_time_del = Duration::minutes(self.file_freq_min);
         
         let mut times = vec![];

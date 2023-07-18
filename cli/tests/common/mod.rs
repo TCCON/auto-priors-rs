@@ -3,10 +3,12 @@ use std::fs::File;
 use std::io::{Write, Read};
 use std::path::{PathBuf, Path};
 use anyhow::Context;
-use orm;
+use orm::{self, MySqlConn};
+use orm::met::MetFile;
 use tccon_priors_cli::utils::Downloader;
 
 static TEST_DB_ENV_VARS: [&'static str; 2] = ["PRIORS_TEST_DATABASE_URL", "TEST_DATABASE_URL"];
+static TEST_FILE_DIR_VAR: &'static str = "PRIORS_TEST_FILE_ROOT";
 pub const TEST_MET_KEY: &'static str = "geosfpit";
 
 pub(crate) fn make_dummy_config(download_root: PathBuf) -> anyhow::Result<orm::config::Config> {
@@ -21,6 +23,21 @@ pub(crate) fn make_dummy_config(download_root: PathBuf) -> anyhow::Result<orm::c
     }
 
     Ok(cfg)
+}
+
+pub(crate) fn make_dummy_config_with_temp_dirs(prefix: &str) -> anyhow::Result<(orm::config::Config, TestRootDir)> {
+    let test_dir = TestRootDir::new(prefix)
+        .with_context(|| "Failed to make parent temporary directory")?;
+    dbg!(&test_dir);
+    let cfg = make_dummy_config(test_dir.path().to_owned())?;
+    for (_, dl_cfgs) in cfg.data.download.iter() {
+        for dl_cfg in dl_cfgs.iter() {
+            std::fs::create_dir_all(dl_cfg.download_dir.clone())
+                .with_context(|| "Failed to create a subdirectory for one of the file sets to download")?;
+        }
+    }
+    
+    Ok((cfg, test_dir))
 }
 
 pub(crate) fn get_test_db_url() -> anyhow::Result<String> {
@@ -83,7 +100,7 @@ macro_rules! multiline_sql {
         let read_sql = include_str!($path);
         for (i, statement) in read_sql.split(';').enumerate() {
             if !statement.trim().is_empty() {
-                sqlx::query(statement.trim()).execute(&mut $conn).await.with_context(|| format!("Error in or around statement {}", i+1)).unwrap();
+                sqlx::query(statement.trim()).execute(&mut *$conn).await.with_context(|| format!("Error in or around statement {}", i+1)).unwrap();
             }
         }
     };
@@ -135,6 +152,7 @@ pub(crate) fn md5sum(p: &Path) -> anyhow::Result<Vec<u8>> {
     Ok(hasher.finalize().to_vec())
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct TestDownloader {
     files: Vec<String>
 }
@@ -168,4 +186,102 @@ impl Downloader for TestDownloader {
     fn iter_files(&self) -> std::slice::Iter<'_, String> {
         self.files.iter()
     }
+}
+
+#[derive(Debug)]
+pub(crate) enum TestRootDir {
+    Temporary(tempdir::TempDir),
+    Persistent(PathBuf)
+}
+
+impl TestRootDir {
+    pub(crate) fn path(&self) -> &Path {
+        match self {
+            TestRootDir::Temporary(temp) => temp.path(),
+            TestRootDir::Persistent(p) => p.as_ref(),
+        }
+    }
+
+    pub(crate) fn new(prefix: &str) -> anyhow::Result<Self> {
+        if let Some(root) = get_env_var(TEST_FILE_DIR_VAR) {
+            Self::new_persistent(&root, prefix)
+        } else {
+            Self::new_temporary(prefix)
+        }
+    }
+
+    fn new_temporary(prefix: &str) -> anyhow::Result<Self> {
+        let temp_dir = tempdir::TempDir::new(prefix)?;
+        Ok(Self::Temporary(temp_dir))
+    }
+
+    fn new_persistent(root: &str, prefix: &str) -> anyhow::Result<Self> {
+        let p = PathBuf::from(root).join(prefix);
+        std::fs::create_dir_all(&p)?;
+        Ok(Self::Persistent(p))
+    }
+}
+
+fn get_env_var(varname: &str) -> Option<String> {
+    if let Ok(val) = env::var(varname) {
+        return Some(val);
+    }
+
+    if let Ok(val) = dotenv::var(varname) {
+        return Some(val);
+    }
+
+    None
+}
+
+pub(crate) fn are_met_files_present_on_disk(root: &Path, files: &[&str]) -> anyhow::Result<()> {
+    let missing: Vec<_> = files.iter()
+        .filter_map(|f| {
+            let p = root.join(f);
+            if !p.exists() {
+                Some(*f)
+            } else {
+                None
+            }
+        }).collect();
+
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        let nmiss = missing.len();
+        let nexpect = files.len();
+        let mstr = missing.join(", ");
+        anyhow::bail!("Out of {nexpect} expected files, {nmiss} were missing from {}: {mstr}", root.display())
+    }
+}
+
+pub(crate) async fn are_met_file_present_in_database(conn: &mut MySqlConn, files: &[&str]) -> anyhow::Result<()> {
+    // First strip off any leading directories - that way this works more easily with 
+    // `are_met_files_present_on_disk`, where we might need to specify subdirectories
+    let nexpected = files.len();
+    let files: Vec<String> = files.iter()
+        .map(|&f| {
+            PathBuf::from(f).file_name().expect("Test file name must not terminate in `..`").to_string_lossy().to_string()
+        }).collect();
+
+    
+    let mut missing = vec![];
+
+    for file in files {
+        let check = MetFile::get_file_by_name(conn, &file)
+            .await
+            .with_context(|| format!("Query for {file} failed"))?;
+        if check.is_none() {
+            missing.push(file);
+        }
+    }
+
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        let nmiss = missing.len();
+        let mstr = missing.join(", ");
+        anyhow::bail!("Out of {nexpected} expected files, {nmiss} were missing from the database: {mstr}")
+    }
+
 }

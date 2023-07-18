@@ -19,6 +19,6 @@ toml = "0.5"
 url = {version = "2.2", features = ["serde"]}
 
 [dependencies.sqlx]
-version = "0.5"
-# Copied version and runtime from deps/Rocket/contrib/db_pools/lib/Cargo.toml
-features = ["runtime-tokio-rustls", "chrono", "macros"]
+version = "0.7"
+# version = "0.5"
+features = ["runtime-tokio-rustls", "chrono", "macros", "mysql"]

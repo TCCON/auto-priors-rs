@@ -145,86 +145,86 @@ mod tests {
     #[test]
     fn test_date_iterator_single_range() {
         let it = DateIterator::new(vec![
-            (NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 4))
+            (NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 4).unwrap())
         ]);
 
         let dates: Vec<NaiveDate> = it.collect();
-        assert_eq!(dates, [NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 2), NaiveDate::from_ymd(2018, 1, 3)]);
+        assert_eq!(dates, [NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 2).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()]);
     }
 
     #[test]
     fn test_date_iterator_single_range_with_before() {
         let it = DateIterator::new_with_bounds(
-            vec![(NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 4))],
-            Some(NaiveDate::from_ymd(2018, 1, 2)), None
+            vec![(NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 4).unwrap())],
+            Some(NaiveDate::from_ymd_opt(2018, 1, 2).unwrap()), None
         );
 
         let dates: Vec<NaiveDate> = it.collect();
-        assert_eq!(dates, [NaiveDate::from_ymd(2018, 1, 2), NaiveDate::from_ymd(2018, 1, 3)]);
+        assert_eq!(dates, [NaiveDate::from_ymd_opt(2018, 1, 2).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()]);
     }
 
     #[test]
     fn test_date_iterator_single_range_with_after() {
         let it = DateIterator::new_with_bounds(
-            vec![(NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 4))],
-            None, Some(NaiveDate::from_ymd(2018, 1, 3))
+            vec![(NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 4).unwrap())],
+            None, Some(NaiveDate::from_ymd_opt(2018, 1, 3).unwrap())
         );
 
         let dates: Vec<NaiveDate> = it.collect();
-        assert_eq!(dates, [NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 2)]);
+        assert_eq!(dates, [NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 2).unwrap()]);
     }
 
     #[test]
     fn test_date_iterator_single_range_with_before_and_after() {
         let it = DateIterator::new_with_bounds(
-            vec![(NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 10))],
-            Some(NaiveDate::from_ymd(2018, 1, 2)), Some(NaiveDate::from_ymd(2018, 1, 4))
+            vec![(NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 10).unwrap())],
+            Some(NaiveDate::from_ymd_opt(2018, 1, 2).unwrap()), Some(NaiveDate::from_ymd_opt(2018, 1, 4).unwrap())
         );
 
         let dates: Vec<NaiveDate> = it.collect();
-        assert_eq!(dates, [NaiveDate::from_ymd(2018, 1, 2), NaiveDate::from_ymd(2018, 1, 3)]);
+        assert_eq!(dates, [NaiveDate::from_ymd_opt(2018, 1, 2).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()]);
     }
 
     #[test]
     fn test_date_iterator_multi_range() {
         let it = DateIterator::new(vec![
-            (NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 4)),
-            (NaiveDate::from_ymd(2020, 7, 31), NaiveDate::from_ymd(2020, 8, 2)),
-            (NaiveDate::from_ymd(2020, 12, 31), NaiveDate::from_ymd(2021, 1, 2)),
+            (NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 4).unwrap()),
+            (NaiveDate::from_ymd_opt(2020, 7, 31).unwrap(), NaiveDate::from_ymd_opt(2020, 8, 2).unwrap()),
+            (NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(), NaiveDate::from_ymd_opt(2021, 1, 2).unwrap()),
         ]);
 
         let dates: Vec<NaiveDate> = it.collect();
-        assert_eq!(dates, [NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 2), NaiveDate::from_ymd(2018, 1, 3), 
-                           NaiveDate::from_ymd(2020, 7, 31), NaiveDate::from_ymd(2020, 8, 1),
-                           NaiveDate::from_ymd(2020, 12, 31), NaiveDate::from_ymd(2021, 1, 1)]);
+        assert_eq!(dates, [NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 2).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 3).unwrap(), 
+                           NaiveDate::from_ymd_opt(2020, 7, 31).unwrap(), NaiveDate::from_ymd_opt(2020, 8, 1).unwrap(),
+                           NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(), NaiveDate::from_ymd_opt(2021, 1, 1).unwrap()]);
     }
 
     #[test]
     fn test_date_iterator_multi_range_with_bounds() {
         let it = DateIterator::new_with_bounds(vec![
-                (NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 4)),
-                (NaiveDate::from_ymd(2020, 7, 31), NaiveDate::from_ymd(2020, 8, 2)),
-                (NaiveDate::from_ymd(2020, 12, 31), NaiveDate::from_ymd(2021, 1, 2)),
+                (NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 4).unwrap()),
+                (NaiveDate::from_ymd_opt(2020, 7, 31).unwrap(), NaiveDate::from_ymd_opt(2020, 8, 2).unwrap()),
+                (NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(), NaiveDate::from_ymd_opt(2021, 1, 2).unwrap()),
             ],
-            Some(NaiveDate::from_ymd(2020, 7, 1)),
-            Some(NaiveDate::from_ymd(2021, 1, 1))
+            Some(NaiveDate::from_ymd_opt(2020, 7, 1).unwrap()),
+            Some(NaiveDate::from_ymd_opt(2021, 1, 1).unwrap())
         );
 
         let dates: Vec<NaiveDate> = it.collect();
-        assert_eq!(dates, [NaiveDate::from_ymd(2020, 7, 31), NaiveDate::from_ymd(2020, 8, 1), NaiveDate::from_ymd(2020, 12, 31)]);
+        assert_eq!(dates, [NaiveDate::from_ymd_opt(2020, 7, 31).unwrap(), NaiveDate::from_ymd_opt(2020, 8, 1).unwrap(), NaiveDate::from_ymd_opt(2020, 12, 31).unwrap()]);
     }
 
     #[test]
     fn test_date_iterator_unorded_ranges() {
         let it = DateIterator::new(vec![
-            (NaiveDate::from_ymd(2020, 12, 31), NaiveDate::from_ymd(2021, 1, 2)),
-            (NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 4)),
-            (NaiveDate::from_ymd(2020, 7, 31), NaiveDate::from_ymd(2020, 8, 2)),
+            (NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(), NaiveDate::from_ymd_opt(2021, 1, 2).unwrap()),
+            (NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 4).unwrap()),
+            (NaiveDate::from_ymd_opt(2020, 7, 31).unwrap(), NaiveDate::from_ymd_opt(2020, 8, 2).unwrap()),
         ]);
 
         let dates: Vec<NaiveDate> = it.collect();
-        assert_eq!(dates, [NaiveDate::from_ymd(2020, 12, 31), NaiveDate::from_ymd(2021, 1, 1),
-                           NaiveDate::from_ymd(2018, 1, 1), NaiveDate::from_ymd(2018, 1, 2), NaiveDate::from_ymd(2018, 1, 3), 
-                           NaiveDate::from_ymd(2020, 7, 31), NaiveDate::from_ymd(2020, 8, 1)]);
+        assert_eq!(dates, [NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(), NaiveDate::from_ymd_opt(2021, 1, 1).unwrap(),
+                           NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 2).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 3).unwrap(), 
+                           NaiveDate::from_ymd_opt(2020, 7, 31).unwrap(), NaiveDate::from_ymd_opt(2020, 8, 1).unwrap()]);
     }
 }

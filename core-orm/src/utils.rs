@@ -52,13 +52,13 @@ mod tests {
 
     #[test]
     fn test_date_range_overlap() -> anyhow::Result<()> {
-        let r1_start = NaiveDate::from_ymd(2010, 1, 1);
-        let r1_end = NaiveDate::from_ymd(2010, 1, 31);
-        let r2_before = NaiveDate::from_ymd(2009, 12, 1);
-        let r2_before2 = NaiveDate::from_ymd(2009, 12, 15);
-        let r2_between = NaiveDate::from_ymd(2010, 1, 15);
-        let r2_after = NaiveDate::from_ymd(2010, 2, 15);
-        let r2_after2 = NaiveDate::from_ymd(2010, 3, 1);
+        let r1_start = NaiveDate::from_ymd_opt(2010, 1, 1).unwrap();
+        let r1_end = NaiveDate::from_ymd_opt(2010, 1, 31).unwrap();
+        let r2_before = NaiveDate::from_ymd_opt(2009, 12, 1).unwrap();
+        let r2_before2 = NaiveDate::from_ymd_opt(2009, 12, 15).unwrap();
+        let r2_between = NaiveDate::from_ymd_opt(2010, 1, 15).unwrap();
+        let r2_after = NaiveDate::from_ymd_opt(2010, 2, 15).unwrap();
+        let r2_after2 = NaiveDate::from_ymd_opt(2010, 3, 1).unwrap();
         
         // Test when both ranges are open ended, making sure that the result is symmetrical
         assert_eq!(date_ranges_overlap(r1_start, None, r2_before, None), true);

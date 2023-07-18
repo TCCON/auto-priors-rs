@@ -26,12 +26,13 @@ impl AsRef<str> for MetDayState {
     }
 }
 
-#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub enum MetProduct {
     GeosFp,
     GeosFpit,
-    GeosIt
+    GeosIt,
+    Other(String)
 }
 
 impl Into<String> for MetProduct {
@@ -41,11 +42,10 @@ impl Into<String> for MetProduct {
 }
 
 
-impl TryFrom<String> for MetProduct {
-    type Error = anyhow::Error;
+impl From<String> for MetProduct {
 
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::from_str(value.as_str())
+    fn from(value: String) -> Self {
+        Self::from_str(value.as_str()).unwrap_or_else(|_| Self::Other(value))
     }
 }
 
@@ -64,13 +64,12 @@ impl FromStr for MetProduct {
 
 impl Display for MetProduct {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Self::GeosFp => "geosfp",
-            Self::GeosFpit => "geosfpit",
-            Self::GeosIt => "geosit"
-        };
-
-        write!(f, "{s}")
+        match self {
+            Self::GeosFp => write!(f, "geosfp"),
+            Self::GeosFpit => write!(f, "geosfpit"),
+            Self::GeosIt => write!(f, "geosit"),
+            Self::Other(v) => write!(f, "other({v})")
+        }
     }
 }
 
@@ -79,7 +78,8 @@ impl Display for MetProduct {
 pub enum MetLevels {
     Pres,
     Surf,
-    Eta
+    Eta,
+    Unknown
 }
 
 impl MetLevels {
@@ -87,7 +87,8 @@ impl MetLevels {
         match self {
             Self::Pres => PathBuf::from("Np"),
             Self::Surf => PathBuf::from("Nx"),
-            Self::Eta => PathBuf::from("Nv")
+            Self::Eta => PathBuf::from("Nv"),
+            Self::Unknown => PathBuf::from("UNKNOWN")
         }
     }
 }
@@ -98,13 +99,13 @@ impl Into<String> for MetLevels {
     }
 }
 
-impl TryFrom<String> for MetLevels {
-    type Error = anyhow::Error;
+// impl TryFrom<String> for MetLevels {
+//     type Error = anyhow::Error;
 
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::from_str(value.as_str())
-    }
-}
+//     fn try_from(value: String) -> Result<Self, Self::Error> {
+//         Self::from_str(value.as_str())
+//     }
+// }
 
 impl FromStr for MetLevels {
     type Err = anyhow::Error;
@@ -119,23 +120,31 @@ impl FromStr for MetLevels {
     }
 }
 
+impl From<String> for MetLevels {
+    fn from(value: String) -> Self {
+        Self::from_str(&value).unwrap_or(Self::Unknown)
+    }
+}
+
 impl Display for MetLevels {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Self::Pres => "pres",
             Self::Surf => "surf",
-            Self::Eta => "eta"
+            Self::Eta => "eta",
+            Self::Unknown => "UNKNOWN"
         };
 
         write!(f, "{s}")
     }
 }
 
-#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "String", into = "String")]
 pub enum MetDataType {
     Met,
-    Chm
+    Chm,
+    Other(String)
 }
 
 impl Into<String> for MetDataType {
@@ -144,11 +153,9 @@ impl Into<String> for MetDataType {
     }
 }
 
-impl TryFrom<String> for MetDataType {
-    type Error = anyhow::Error;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::from_str(value.as_str())
+impl From<String> for MetDataType {
+    fn from(value: String) -> Self {
+        Self::from_str(value.as_str()).unwrap_or_else(|_| Self::Other(value))
     }
 }
 
@@ -166,22 +173,26 @@ impl FromStr for MetDataType {
 
 impl Display for MetDataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Self::Met => "met",
-            Self::Chm => "chm"
-        };
-
-        write!(f, "{s}")
+        match self {
+            Self::Met => write!(f, "met"),
+            Self::Chm => write!(f, "chm"),
+            Self::Other(v) => write!(f, "other({v})")
+        }
     }
 }
 
 #[derive(Debug, FromRow)]
 pub struct MetFile {
     pub file_id: i32,
-    pub root_path: PathBuf,
+    #[sqlx(try_from = "String")]
+    pub file_path: PathBuf,
+    file_path_sha256: Option<String>,
+    #[sqlx(try_from = "String")]
     pub product: MetProduct,
     pub filedate: NaiveDateTime,
+    #[sqlx(try_from = "String")]
     pub levels: MetLevels,
+    #[sqlx(try_from = "String")]
     pub data_type: MetDataType,
 }
 
@@ -426,49 +437,56 @@ impl MetFile {
         }
     }
 
-    #[deprecated(since="d9d77ed", note="Replace with `is_date_complete_for_config_set`")]
-    pub async fn is_date_complete(conn: &mut MySqlConn, date: NaiveDate, met_levels: MetLevels, met_product: MetProduct, req_chm: bool) -> anyhow::Result<MetDayState> {
-        let mut n_files = 0;
-        n_files += sqlx::query!(
-            r#"SELECT COUNT(filedate) as count FROM MetFiles
-               WHERE DATE(filedate) = ? AND levels = ? AND data_type = "met" AND product = ? "#,
-            date,
-            met_levels.to_string(),
-            met_product.to_string()
-        ).fetch_one(&mut *conn)
-        .await?
-        .count;
+    /// Get the [`MetFile`] instance for a met file from the database with the basename `filename`
+    /// 
+    /// # Returns
+    /// - `Ok(Some(MetFile))` if it finds exactly one file with the basename `filename`
+    /// - `Ok(None)` if it finds no file with that basename
+    /// - `Err` if the database query fails or there is >1 file with that basename.
+    /// 
+    /// # See also
+    /// [`get_file_by_full_path`] if you have a full path to a met file that you want information on.
+    pub async fn get_file_by_name(conn: &mut MySqlConn, filename: &str) -> anyhow::Result<Option<MetFile>> {
+        let mut file = sqlx::query_as!(
+            MetFile,
+            "SELECT * FROM MetFiles WHERE file_path LIKE ?",
+            format!("%{filename}")
+        ).fetch_all(conn).await?;
 
-        n_files += sqlx::query!(
-            r#"SELECT COUNT(filedate) as count FROM MetFiles
-               WHERE DATE(filedate) = ? AND levels = "surf" AND data_type = "met" AND product = ? "#,
-            date,
-            met_product.to_string()
-        ).fetch_one(&mut *conn)
-        .await?
-        .count;
+        if file.is_empty() {
+            Ok(None)
+        } else if file.len() == 1 {
+            Ok(file.pop())
+        } else {
+            anyhow::bail!("Multiple files matched the name {filename}")
+        }
+    }
 
-        n_files += if req_chm {
-            sqlx::query!(
-                r#"SELECT COUNT(filedate) as count FROM MetFiles
-                   WHERE DATE(filedate) = ? AND levels = "eta" AND data_type = "chm" AND product = ? "#,
-                date,
-                met_product.to_string()
-            ).fetch_one(conn)
-            .await?
-            .count
-        }else{
-            0
-        };
+    /// Get the [`MetFile`] instance for a met file from the database with the full path `path`
+    /// 
+    /// # Returns
+    /// - `Ok(Some(MetFile))` if it finds exactly one file with the path `path`
+    /// - `Ok(None)` if it finds no file with that path. Note that this can happen if you give a
+    ///   different path to the file than the one stored in the database (i.e. through links)
+    /// - `Err` if the database query fails or there is >1 file with that path. Note that the latter
+    ///   case should not happen since the database has a UNIQUE constraint on the file path hashes.
+    /// 
+    /// # See also
+    /// [`get_file_by_name`] if you only have the basename of the file.
+    pub async fn get_file_by_full_path(conn: &mut MySqlConn, path: &Path) -> anyhow::Result<Option<MetFile>> {
+        let path = path.to_string_lossy();
+        let mut file = sqlx::query_as!(
+            MetFile,
+            "SELECT * FROM MetFiles WHERE file_path = ?",
+            path
+        ).fetch_all(conn).await?;
 
-        let n_req = if req_chm { 3 * REQ_FILES_PER_DAY } else { 2 * REQ_FILES_PER_DAY };
-
-        if n_files == 0 {
-            return Ok(MetDayState::Missing)
-        }else if n_files < n_req {
-            return Ok(MetDayState::Incomplete)
-        }else{
-            return Ok(MetDayState::Complete)
+        if file.is_empty() {
+            Ok(None)
+        } else if file.len() == 1 {
+            Ok(file.pop())
+        } else {
+            anyhow::bail!("Multiple files matched the name {path}")
         }
     }
 
@@ -505,9 +523,9 @@ impl MetFile {
             "INSERT INTO MetFiles (file_path, filedate, product, levels, data_type) VALUES (?, ?, ?, ?, ?)",
             file.to_str().ok_or_else(|| anyhow::Error::msg(format!("Unable to convert path to UTF-8 string: {}", file.display())))?,
             datetime,
-            download_cfg.product,
-            download_cfg.levels,
-            download_cfg.data_type
+            download_cfg.product.to_string(),
+            download_cfg.levels.to_string(),
+            download_cfg.data_type.to_string()
         ).execute(conn)
         .await?;
         
@@ -560,9 +578,9 @@ impl MetFile {
             r#"SELECT COUNT(*) as count FROM MetFiles
                WHERE filedate = ? AND product = ? AND levels = ? and data_type = ?"#,
             datetime,
-            file_cfg.product,
-            file_cfg.levels,
-            file_cfg.data_type
+            file_cfg.product.to_string(),
+            file_cfg.levels.to_string(),
+            file_cfg.data_type.to_string()
         ).fetch_one(conn)
         .await?
         .count;
