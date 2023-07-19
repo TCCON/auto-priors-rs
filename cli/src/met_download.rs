@@ -6,6 +6,7 @@ use clap::{self, Args};
 use chrono::{NaiveDate, Duration};
 use log::{warn, info, debug};
 use orm::{self, met::MetDayState};
+use sqlx::Connection;
 
 use crate::utils;
 
@@ -480,7 +481,7 @@ pub async fn download_missing_files(
                 },
                 MetDayState::Incomplete | MetDayState::Missing => {
                     info!("{curr_date} must be downloaded for {dl_cfg}");
-                    download_one_file_one_date(conn, curr_date, dl_cfg, downloader.clone(), dry_run).await?;
+                    download_one_file_set_one_date(conn, curr_date, dl_cfg, downloader.clone(), dry_run).await?;
                 }
             }
         }
@@ -544,6 +545,7 @@ pub async fn rescan_met_files(
     let date_iter = get_date_iter(conn, config, start_date, end_date, met_key, ignore_defaults).await?;
 
     let mut n_added = 0;
+    let mut transaction = conn.begin().await?;
 
     for curr_date in date_iter {
         info!("Scanning for new met files on {curr_date}");
@@ -556,13 +558,13 @@ pub async fn rescan_met_files(
 
         for dl_cfg in download_cfgs {
             for file in dl_cfg.expected_files_on_day(curr_date)? {
-                match orm::met::MetFile::file_exists_by_type(conn, &file, dl_cfg).await {
+                match orm::met::MetFile::file_exists_by_type(&mut transaction, &file, dl_cfg).await {
                     Ok(true) => {
                         debug!("{} [{}] already in database", file.display(), dl_cfg);
                     },
                     Ok(false) => {
                         if !dry_run {
-                            n_added += orm::met::MetFile::add_met_file_infer_date(conn, &file, dl_cfg)
+                            n_added += orm::met::MetFile::add_met_file_infer_date(&mut transaction, &file, dl_cfg)
                             .await
                             .and(Ok(1))
                             .unwrap_or_else(|e| {warn!("Error adding {} to the database: {}", file.display(), e); 0});
@@ -578,6 +580,8 @@ pub async fn rescan_met_files(
             }
         }
     }
+
+    transaction.commit().await?;
     Ok(n_added)
 }
 
@@ -599,7 +603,7 @@ pub async fn download_files_for_dates(
     let mut curr_date = start_date;
     while curr_date < end_date {
         for file_cfg in met_cfg {
-            download_one_file_one_date(
+            download_one_file_set_one_date(
                 conn,
                 curr_date, 
                 file_cfg, 
@@ -615,7 +619,7 @@ pub async fn download_files_for_dates(
 }
 
 
-async fn download_one_file_one_date(
+async fn download_one_file_set_one_date(
     conn: &mut orm::MySqlConn,
     date: NaiveDate, 
     file_cfg: &orm::config::DownloadConfig, 
@@ -623,6 +627,7 @@ async fn download_one_file_one_date(
     dry_run: bool) -> Result<(), anyhow::Error>
     
 {
+    let mut transaction = conn.begin().await?;
     let save_dir = &file_cfg.download_dir;
 
     if dry_run {
@@ -646,7 +651,7 @@ async fn download_one_file_one_date(
 
         for (file_time, file_path) in expected_met_files {
             if file_path.exists() {
-                orm::met::MetFile::add_met_file(conn, &file_path, file_time, file_cfg).await?;
+                orm::met::MetFile::add_met_file(&mut transaction, &file_path, file_time, file_cfg).await?;
             }
         }
     }else{
@@ -656,9 +661,6 @@ async fn download_one_file_one_date(
         println!("");
     }
 
+    transaction.commit().await?;
     Ok(())
-}
-
-pub fn test_me() -> i32 {
-    42
 }
