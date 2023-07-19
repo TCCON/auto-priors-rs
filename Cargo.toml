@@ -3,5 +3,10 @@ members = [
     "core-orm",
     "cli",
 ]
-
 exclude = ["deps/Rocket", "python-bindings", "rocket-app"]
+
+[workspace.dependencies]
+anyhow = "1.0"
+sqlx = {version = "0.7", features = ["mysql", "runtime-tokio-rustls", "chrono"]}
+tokio = {version = "1.6.1", features = ["full"]}
+
