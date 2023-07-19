@@ -1,0 +1,9 @@
+[package]
+name = "tccon-priors-service"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+sqlx.workspace = true
+tokio.workspace = true

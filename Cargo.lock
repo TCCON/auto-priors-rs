@@ -1731,6 +1731,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tccon-priors-service"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "tccon_priors_orm"
 version = "0.1.0"
 dependencies = [
