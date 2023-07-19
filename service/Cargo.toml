@@ -7,3 +7,5 @@ edition = "2021"
 anyhow.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
+
+orm = {path = "../core-orm", package = "tccon_priors_orm"}

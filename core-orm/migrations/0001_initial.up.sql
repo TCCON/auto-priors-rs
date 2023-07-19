@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS `Jobs` (
   `email` varchar(64) DEFAULT NULL,
   `delete_time` datetime DEFAULT NULL,
   `priority` int(11) NOT NULL DEFAULT 0,
+  `queue` varchar(32) NOT NULL DEFAULT 'default',
   `save_dir` text NOT NULL,
   `save_tarball` tinyint(4) NOT NULL DEFAULT 1,
   `mod_fmt` varchar(8) NOT NULL,

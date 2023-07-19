@@ -1,5 +1,4 @@
 [execution]
-max_ntasks = 2
 max_numpy_threads = 2
 hours_to_keep = 168 
 download_server = 'ftp://example/'

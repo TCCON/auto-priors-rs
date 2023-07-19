@@ -310,6 +310,7 @@ struct QJob {
     email: Option<String>,
     delete_time: Option<NaiveDateTime>,
     priority: i32,
+    queue: String,
     save_dir: String,
     save_tarball: i8,
     mod_fmt: String,
@@ -355,6 +356,7 @@ impl TryFrom<Job> for QJob {
             email: j.email,
             delete_time: j.delete_time,
             priority: j.priority,
+            queue: j.queue,
             save_dir: save_dir,
             save_tarball: j.save_tarball as i8,
             mod_fmt: j.mod_fmt.to_string(),
@@ -402,6 +404,9 @@ pub struct Job {
 
     /// Priority to give this job, greater values will run first.
     pub priority: i32,
+
+    /// Name of the queue in which this job should run; queues are defined in the configuration.
+    pub queue: String,
 
     /// Where to save the output.
     pub save_dir: PathBuf,
@@ -458,6 +463,7 @@ impl TryFrom<QJob> for Job {
             email: q.email,
             delete_time: q.delete_time,
             priority: q.priority,
+            queue: q.queue,
             save_dir: PathBuf::from(q.save_dir),
             save_tarball: TarChoice::try_from(q.save_tarball)?,
             mod_fmt: ModFmt::from_str(&q.mod_fmt)?,
@@ -530,6 +536,33 @@ impl Job {
         }
 
         return Ok(jobs)
+    }
+
+    pub async fn get_queues_with_pending_jobs(conn: &mut MySqlConn) -> anyhow::Result<Vec<String>> {
+        let queues = sqlx::query!(
+            "SELECT DISTINCT(queue) AS q FROM Jobs WHERE state = ?",
+            JobState::Pending
+        ).fetch_all(conn)
+        .await?
+        .into_iter()
+        .map(|r| r.q)
+        .collect();
+
+        Ok(queues)
+    }
+
+    pub async fn get_next_job_in_queue(conn: &mut MySqlConn, queue: &str) -> anyhow::Result<Option<Job>> {
+        let job: Option<Job>  = sqlx::query_as!(
+            QJob,
+            "SELECT * FROM Jobs WHERE state = ? AND queue = ? ORDER BY priority desc, submit_time LIMIT 1",
+            JobState::Pending,
+            queue
+        ).fetch_optional(conn)
+        .await?
+        .map(|qjob| qjob.try_into())
+        .transpose()?;
+        
+        Ok(job)
     }
 
     /// Convert a user-inputted string of site IDs into a proper vector of site IDs

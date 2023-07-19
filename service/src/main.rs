@@ -1,5 +1,7 @@
 use tokio::process::Command;
 
+mod jobs;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut fib = Command::new("python")

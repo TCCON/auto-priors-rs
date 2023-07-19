@@ -204,13 +204,24 @@ impl Config {
             Err(DefaultOptsQueryError::MultipleMatches { date, matches })
         }
     }
+
+    /// Get the information about a job queue by name
+    /// 
+    /// If the queue does not have a section defined in the configuration, then the
+    /// default queue (allocated 1 processor) is returned.
+    pub fn get_queue(&self, queue_name: &str) -> JobQueue {
+        self.execution.queues
+            .get(queue_name)
+            .map(|q| q.to_owned())
+            .unwrap_or_default()
+    }
 }
 
 /// Configuration section dealing with how jobs are run
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExecutionConfig {
     /// Maximum number of jobs to run simultaneously
-    pub max_ntasks: u32, 
+    pub queues: HashMap<String, JobQueue>,
 
     /// Maximum number of threads to let numpy use
     pub max_numpy_threads: u32,
@@ -254,7 +265,7 @@ impl Default for ExecutionConfig {
         let host = host.to_string_lossy();
 
         Self { 
-            max_ntasks: 4, 
+            queues: Default::default(), 
             max_numpy_threads: 2, 
             hours_to_keep: 168,
             download_server: Url::parse(&format!("ftp://{host}/")).unwrap_or_else(|_| Url::parse("ftp://localhost/").unwrap()), 
@@ -495,6 +506,18 @@ impl Display for DefaultOptions {
             self.ginput,
             self.met
         )
+    }
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobQueue {
+    max_num_procs: u16
+}
+
+impl Default for JobQueue {
+    fn default() -> Self {
+        Self { max_num_procs: 1 }
     }
 }
 
