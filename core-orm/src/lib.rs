@@ -55,12 +55,36 @@ pub fn get_database_url(url_in: Option<String>) -> anyhow::Result<String> {
     return Err(anyhow::anyhow!("Unable to find database URL."))
 }
 
-pub async fn get_database_pool(url_in: Option<String>) -> anyhow::Result<sqlx::MySqlPool> {
+/// A wrapper around a [`sqlx::MySqlPool`] that helps enforce certain access conditions.
+/// 
+/// For the priors code, we want to enforce the safest behavior regarding transactions'
+/// interaction with each other. That means setting the isolation level to `SERIALIZABLE`.
+/// This wrapper ensures that any connections returned via the `get_connection` method
+/// have that setting applied.
+pub struct PoolWrapper(sqlx::MySqlPool);
+
+impl PoolWrapper {
+    pub async fn get_connection(&self) -> anyhow::Result<MySqlPC> {
+        let mut conn = self.0.acquire().await?;
+        // This, theoretically, should provide the maximum protection against
+        // transactions interfering with each other, see
+        // https://www.databasestar.com/sql-transactions/
+        sqlx::query!("SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            .execute(&mut *conn)
+            .await?;
+        Ok(conn)
+    }
+}
+
+/// Returns access to a pool of database connections
+/// 
+/// All access to the database for the priors should use this function to ensure 
+/// certain per-session settings are enabled.
+pub async fn get_database_pool(url_in: Option<String>) -> anyhow::Result<PoolWrapper> {
     let url = get_database_url(url_in)?;
     let pool = sqlx::MySqlPool::connect(&url).await?;
-    // This was how I tried to make this synchronous
-    // let pool = Runtime::new()?.block_on(future)?;
-    return Ok(pool)
+    let wrapper = PoolWrapper(pool);
+    return Ok(wrapper)
 }
 
 pub fn hello(name: &str) -> String {

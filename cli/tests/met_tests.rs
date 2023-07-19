@@ -229,7 +229,7 @@ async fn test_check_met() {
 async fn test_geosfpit_download_by_dates() {
     // Don't need any initial values in the database, just a connection to a blank database
     let pool = common::open_test_database(true).await.expect("Failed to open test database");
-    let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+    let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
 
     // 2018 should be GEOS FP-IT in the default configuration
     let (config, tmp_dir) = common::make_dummy_config_with_temp_dirs("default_fpit").expect("Failed to set up test config and temp directories");
@@ -256,7 +256,7 @@ async fn test_geosfpit_download_by_dates() {
 async fn test_geosit_download_by_dates() {
     // Don't need any initial values in the database, just a connection to a blank database
     let pool = common::open_test_database(true).await.expect("Failed to open test database");
-    let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+    let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
 
     // 2023 after June should be GEOS IT in the default configuration
     let (config, tmp_dir) = common::make_dummy_config_with_temp_dirs("default_it").expect("Failed to set up test config and temp directories");
@@ -283,7 +283,7 @@ async fn test_geosit_download_by_dates() {
 async fn test_geosfpit_to_geos_it_download_by_dates() {
     // Don't need any initial values in the database, just a connection to a blank database
     let pool = common::open_test_database(true).await.expect("Failed to open test database");
-    let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+    let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
 
     // 2023 after June should be GEOS IT in the default configuration
     let (config, tmp_dir) = common::make_dummy_config_with_temp_dirs("default_fpit_to_it").expect("Failed to set up test config and temp directories");
@@ -490,7 +490,7 @@ async fn test_download_partial_day_scattered() {
 async fn test_met_rescanning() {
     // Don't need any initial values in the database, just a connection to a blank database
     let pool = common::open_test_database(true).await.expect("Failed to open test database");
-    let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+    let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("met_rescan").expect("Failed to set up test config and temp directories");
 
     // Let's use the TestDownloader to "download" some files without adding them to the database
@@ -524,7 +524,7 @@ async fn test_met_rescanning() {
 async fn test_met_dates_defaults_empty_db() {
     // Don't need any initial values in the database, just a connection to a blank database
     let pool = common::open_test_database(true).await.expect("Failed to open test database");
-    let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+    let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let mut date_iter = met_download::get_date_iter(
@@ -544,7 +544,7 @@ async fn test_met_dates_defaults_empty_db() {
 async fn test_met_dates_user_empty_db() {
     // Don't need any initial values in the database, just a connection to a blank database
     let pool = common::open_test_database(true).await.expect("Failed to open test database");
-    let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+    let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let start = NaiveDate::from_ymd_opt(2010, 1, 1).unwrap();
@@ -686,7 +686,7 @@ async fn test_single_met_dates_start_from_db() {
 async fn test_single_met_start_from_dl_config() {
     // Don't need any initial values in the database, just a connection to a blank database
     let pool = common::open_test_database(true).await.expect("Failed to open test database");
-    let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+    let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let mut config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let mut date_iter = met_download::get_date_iter(
@@ -725,7 +725,7 @@ async fn test_single_met_start_from_dl_config() {
 async fn test_single_met_start_from_defaults() {
     // Don't need any initial values in the database, just a connection to a blank database
     let pool = common::open_test_database(true).await.expect("Failed to open test database");
-    let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+    let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let mut config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     // This is deliberately contrived - someone would really have to write a funky TOML file
@@ -756,7 +756,7 @@ async fn test_single_met_start_from_defaults() {
 async fn test_single_met_no_valid_start_err() {
     // Don't need any initial values in the database, just a connection to a blank database
     let pool = common::open_test_database(true).await.expect("Failed to open test database");
-    let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+    let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let mut config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     // This is deliberately contrived - someone would really have to write a funky TOML file

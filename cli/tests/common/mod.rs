@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{Write, Read};
 use std::path::{PathBuf, Path};
 use anyhow::Context;
-use orm::{self, MySqlConn};
+use orm::{self, MySqlConn, PoolWrapper};
 use orm::met::MetFile;
 use tccon_priors_cli::utils::Downloader;
 
@@ -62,14 +62,14 @@ pub(crate) fn get_test_db_url() -> anyhow::Result<String> {
     return Err(anyhow::anyhow!("Unable to find database URL."))
 }
 
-pub(crate) async fn open_test_database(reset_db: bool) -> anyhow::Result<sqlx::MySqlPool> {
+pub(crate) async fn open_test_database(reset_db: bool) -> anyhow::Result<PoolWrapper> {
     
     let db_url = get_test_db_url()?;
     println!("db_url = {db_url}");
     let pool = orm::get_database_pool(Some(db_url)).await?;
 
     if reset_db {
-        let mut conn = pool.acquire().await?;
+        let mut conn = pool.get_connection().await?;
         orm::unapply_migrations(&mut conn, 0).await?;
         orm::apply_migrations(&mut conn).await?;
     }
@@ -123,7 +123,7 @@ macro_rules! multiline_sql_init {
     ($path:literal) => {
         {
             let pool = common::open_test_database(true).await.expect("Failed to open test database");
-            let mut conn = pool.acquire().await.expect("Failed to acquire connection to database");
+            let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
             multiline_sql!($path, conn);
             conn
         }

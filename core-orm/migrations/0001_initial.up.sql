@@ -1,3 +1,10 @@
+-- If I understand correctly, this should make sure that any transactions
+-- block access to their rows until the transaction is complete. 
+-- See https://www.databasestar.com/sql-transactions/ and 
+-- https://dev.mysql.com/doc/refman/8.0/en/set-transaction.html
+-- However it requires SUPER privilege and affects all databases.
+-- SET GLOBAL TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+
 --
 -- Table structure for table `MetFiles`
 --

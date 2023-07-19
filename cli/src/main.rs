@@ -151,57 +151,57 @@ async fn main() -> anyhow::Result<()> {
 
     match args.command {
         Commands::MigrateDb(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             run_migrations(&mut conn, &db_url, subargs.yes).await?;
         }
 
         Commands::UnmigrateDb(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             undo_migrations(&mut conn, &db_url, subargs.yes, subargs.target).await?;
         }
 
         Commands::CheckMet(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             met_download::check_files_for_dates_cli(&mut conn, subargs, &config).await?;
         },
 
         Commands::DownloadReanalysisByDates(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             met_download::download_files_for_dates_cli(&mut conn, subargs, &config, wget_dl).await?;
         },
 
         Commands::DownloadMissingReanalysis(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             met_download::download_missing_files_cli(&mut conn, subargs, &config, wget_dl).await?;
         }
 
         Commands::RescanMet(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             met_download::rescan_met_files_cli(&mut conn, subargs, &config).await?;
         }
 
         Commands::ParseInputFilesManually(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             input_files::add_jobs_from_input_files(&mut conn, subargs, &config).await?; 
         },
 
         Commands::AddJob(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             jobs::add_job(&mut conn, subargs).await?;
         },
 
         Commands::DeleteJob(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             jobs::delete_job(&mut conn, subargs).await?
         },
 
         Commands::StdSites(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             stdsites::standard_site_driver(&mut conn, subargs, &config).await?
         },
 
         Commands::SiteInfoJson(subargs) => {
-            let mut conn = db.acquire().await?;
+            let mut conn = db.get_connection().await?;
             siteinfo::site_info_json(&mut conn, &subargs).await?;
         },
 
