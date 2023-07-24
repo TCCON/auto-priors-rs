@@ -311,6 +311,8 @@ struct QJob {
     delete_time: Option<NaiveDateTime>,
     priority: i32,
     queue: String,
+    met_key: Option<String>,
+    ginput_key: Option<String>,
     save_dir: String,
     save_tarball: i8,
     mod_fmt: String,
@@ -357,6 +359,8 @@ impl TryFrom<Job> for QJob {
             delete_time: j.delete_time,
             priority: j.priority,
             queue: j.queue,
+            met_key: j.met_key,
+            ginput_key: j.ginput_key,
             save_dir: save_dir,
             save_tarball: j.save_tarball as i8,
             mod_fmt: j.mod_fmt.to_string(),
@@ -407,6 +411,14 @@ pub struct Job {
 
     /// Name of the queue in which this job should run; queues are defined in the configuration.
     pub queue: String,
+
+    /// The key from the configuration file corresponding to which meteorology data to use for this
+    /// job. If `None`, that indicates that the default met for the given dates should be used.
+    pub met_key: Option<String>,
+
+    /// The key from the configuration file corresponding to which version of ginput to use for this
+    /// job. If `None`, that indicates that the default version for the given dates should be used.
+    pub ginput_key: Option<String>,
 
     /// Where to save the output.
     pub save_dir: PathBuf,
@@ -464,6 +476,8 @@ impl TryFrom<QJob> for Job {
             delete_time: q.delete_time,
             priority: q.priority,
             queue: q.queue,
+            met_key: q.met_key,
+            ginput_key: q.ginput_key,
             save_dir: PathBuf::from(q.save_dir),
             save_tarball: TarChoice::try_from(q.save_tarball)?,
             mod_fmt: ModFmt::from_str(&q.mod_fmt)?,
