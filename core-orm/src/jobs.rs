@@ -1,25 +1,26 @@
 //! The main ORM interface to the jobs queue.
 //! 
 //! 
-use std::{path::{PathBuf, Path}, str::FromStr, fmt::Display};
+use std::{path::{PathBuf, Path}, str::FromStr, fmt::{Display, Debug}};
 
 use anyhow;
 use chrono::{NaiveDate, NaiveDateTime};
+use log::info;
 use serde::Deserialize;
 use serde_json;
-use sqlx::{self, FromRow, Type};
+use sqlx::{self, FromRow, Type, Acquire};
 
-use crate::{MySqlConn, siteinfo};
+use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
 /// Deserialize a JSON string into a vector of a deserializable type
-fn str_to_json_arr<'a, T: Deserialize<'a>> (s: &'a str) -> anyhow::Result<Vec<T>> {
+fn str_to_json_arr<'a, T: Deserialize<'a>> (s: &'a str) -> JobResult<Vec<T>> {
     Ok(serde_json::from_str(s)?)
 }
 
 /// An enum representing possible states for a priors job
-#[derive(Debug, Type, Clone, Copy)]
+#[derive(Debug, Type, Clone, Copy, PartialEq, Eq)]
 #[repr(i8)]
 pub enum JobState {
     /// **\[default\]** This job is queued but has not begun to execute. `i8` value = `0`.
@@ -68,7 +69,7 @@ impl From<JobState> for i8 {
 }
 
 impl TryFrom<i8> for JobState {
-    type Error = anyhow::Error;
+    type Error = JobError;
 
     /// Convert an i8 to a [`JobState`]
     /// 
@@ -83,7 +84,7 @@ impl TryFrom<i8> for JobState {
             2 => Ok(Self::Complete),
             3 => Ok(Self::Errored),
             4 => Ok(Self::Cleaned),
-            _ => Err(anyhow::anyhow!("Unknown value for JobState: {value}"))
+            _ => Err(JobError::InvalidState(value))
         }
     }
 }
@@ -131,7 +132,7 @@ impl From<TarChoice> for i8 {
 }
 
 impl TryFrom<i8> for TarChoice {
-    type Error = anyhow::Error;
+    type Error = JobError;
 
     /// Convert a `i8` into the equivalent [`TarChoice`] variant
     /// 
@@ -144,7 +145,7 @@ impl TryFrom<i8> for TarChoice {
             0 => Ok(Self::No),
             1 => Ok(Self::Yes),
             2 => Ok(Self::Egi),
-            _ => Err(anyhow::anyhow!("Unknown value for TarChoice: {value}"))
+            _ => Err(JobError::InvalidTar(value))
         }
     }
 }
@@ -176,7 +177,7 @@ impl Display for ModFmt {
 }
 
 impl FromStr for ModFmt {
-    type Err = anyhow::Error;
+    type Err = JobError;
 
     /// Convert a string into a [`ModFmt`] variant.
     /// 
@@ -189,7 +190,7 @@ impl FromStr for ModFmt {
         match s.to_ascii_lowercase().as_ref() {
             "none" => Ok(Self::None),
             "text" => Ok(Self::Text),
-            _ => Err(anyhow::anyhow!("Unknown value for ModFmt: {s}"))
+            _ => Err(JobError::InvalidModFmt(s.to_owned()))
         }
     }
 }
@@ -223,7 +224,7 @@ impl Display for VmrFmt {
 }
 
 impl FromStr for VmrFmt {
-    type Err = anyhow::Error;
+    type Err = JobError;
 
     /// Convert a string into a [`VmrFmt`] variant.
     /// 
@@ -236,7 +237,7 @@ impl FromStr for VmrFmt {
         match s.to_ascii_lowercase().as_ref() {
             "none" => Ok(Self::None),
             "text" => Ok(Self::Text),
-            _ => Err(anyhow::anyhow!("Unknown value for VmrFmt: {s}"))
+            _ => Err(JobError::InvalidVmrFmt(s.to_owned()))
         }
     }
 }
@@ -273,7 +274,7 @@ impl Display for MapFmt {
 }
 
 impl FromStr for MapFmt {
-    type Err = anyhow::Error;
+    type Err = JobError;
 
     /// Convert a string into a [`MapFmt`] variant.
     /// 
@@ -287,7 +288,7 @@ impl FromStr for MapFmt {
             "none" => Ok(Self::None),
             "text" => Ok(Self::Text),
             "netcdf" => Ok(Self::NetCDF),
-            _ => Err(anyhow::anyhow!("Unknown value for MapFmt: {s}"))
+            _ => Err(JobError::InvalidMapFmt(s.to_owned()))
         }
     }
 }
@@ -447,7 +448,7 @@ pub struct Job {
 }
 
 impl TryFrom<QJob> for Job {
-    type Error = anyhow::Error;
+    type Error = JobError;
 
     /// Try creating a `Job` instance from the SQL-mapped `QJob`.
     /// 
@@ -502,7 +503,7 @@ impl Job {
     /// 
     /// * no job with that ID was found.
     /// * the query could not be converted into the Rust `Job` type.
-    pub async fn get_job_with_id(conn: &mut MySqlConn, id: i32) -> anyhow::Result<Job> {
+    pub async fn get_job_with_id(conn: &mut MySqlConn, id: i32) -> JobResult<Job> {
         let result = sqlx::query_as!(
                 QJob,
                 "SELECT * FROM Jobs WHERE job_id = ?",
@@ -565,7 +566,18 @@ impl Job {
         Ok(queues)
     }
 
-    pub async fn get_next_job_in_queue(conn: &mut MySqlConn, queue: &str) -> anyhow::Result<Option<Job>> {
+    /// Get the next job in `queue` which should be run
+    /// 
+    /// This will return the job with its queue value equal to `queue` that has
+    /// the highest priority then earliest submission time. If there are no
+    /// jobs in that queue, the return value will be `None`.
+    /// 
+    /// # Note
+    /// This does *not* set the job state to running; if you are querying for the
+    /// next job with the intent of starting it running, prefer [`Job::claim_next_job_in_queue`]
+    /// or [`Job::claim_next_job_in_queue_with_opts`], which prevent race conditions
+    /// if multiple connections try to get the next job for the same queue too closely in time.
+    pub async fn get_next_job_in_queue(conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>> {
         let job: Option<Job>  = sqlx::query_as!(
             QJob,
             "SELECT * FROM Jobs WHERE state = ? AND queue = ? ORDER BY priority desc, submit_time LIMIT 1",
@@ -577,6 +589,92 @@ impl Job {
         .transpose()?;
         
         Ok(job)
+    }
+
+    /// Try to "claim" the next job in a given queue by settings its state to 'running'
+    /// 
+    /// In a case where multiple connections to the database try to start the next job in a queue
+    /// at similar times, we can end up in a race-like condition, where both connections query the
+    /// database, get the same job ID, and both start running the same job because the second query
+    /// came before the first one could set the job state to 'running'.
+    /// 
+    /// The solution is to use transactions, which prevent multiple connections from interacting with
+    /// overlapping parts of the database at the same time. However, testing showed that this approach
+    /// could deadlock if connection A held a "read" lock on a row when connection "B" went to set the
+    /// state - B could not update the state because it was waiting for A to release its read lock,
+    /// while A could not upgrade its read lock to write while B also held a lock on that row.
+    /// 
+    /// This function handles that by starting a transaction to get the next job, then querying and
+    /// updating the job state within the transaction. Should either action deadlock, it waits for
+    /// `delay` seconds, then tries again. If it tries `ntries` times and fails every time, then
+    /// it returns with an error.
+    /// 
+    /// # Inputs
+    /// - `conn`: connection to the MySQL database
+    /// - `queue`: which queue in the Jobs table to get the next job to run from
+    /// - `delay`: delay in seconds to wait after a deadlock before trying again
+    /// - `ntries`: number of times to try resolving a deadlock before giving up and returning an error
+    /// 
+    /// # Returns
+    /// - `Ok(Some(Job))` if there is a job to run and it successfully claimed it. The state will be 
+    ///   [`JobState::Running`]
+    /// - `Ok(None)` if there is no job in the given queue
+    /// - `Err` if the queries fail or the deadlock cannot be resolved in `ntries` attempts.
+    /// 
+    /// # See also
+    /// - [`Job::claim_next_job_in_queue`] for a version of this function with defaults for `delay` and `ntries`
+    /// - [`Job::get_next_job_in_queue`] for a function that does not set the job state to 'running'
+    pub async fn claim_next_job_in_queue_with_opts(conn: &mut MySqlConn, queue: &str, delay: f32, ntries: usize) -> JobResult<Option<Job>> {
+        let delay_val = std::time::Duration::from_secs_f32(delay);
+        
+        let mut n = 0;
+        while n < ntries {
+            n += 1;
+
+            let mut trans = conn.begin().await?;
+
+            let mut job = match Self::get_next_job_in_queue(&mut trans, queue).await {
+                Ok(Some(j)) => {
+                    j
+                },
+                Ok(None) => {
+                    return Ok(None)
+                },
+                Err(JobError::DeadlockError(_)) => {
+                    info!("SQL database deadlocked while getting next job, waiting {delay} s before querying again");
+                    tokio::time::sleep(delay_val).await;
+                    continue;
+                },
+                Err(e) => {
+                    return Err(e)
+                }
+            };
+
+            match job.set_state(&mut trans, JobState::Running).await {
+                Ok(_) => {
+                    trans.commit().await?;
+                    return Ok(Some(job))
+                },
+                Err(JobError::DeadlockError(_)) => {
+                    info!("SQL database deadlocked while setting job state, waiting {delay} s before querying again");
+                    tokio::time::sleep(delay_val).await;
+                    continue;
+                },
+                Err(e) => {
+                    return Err(e)
+                }
+            }
+        }
+
+        Err(JobError::Other("Failed to claim next job due to repeated deadlocks".to_owned()))
+    }
+
+    /// Try to "claim" the next job in a given queue by settings its state to 'running'
+    /// 
+    /// This is the same as [`Job::claim_next_job_in_queue_with_opts`] with `delay = 1.0` and
+    /// `ntries = 5`.
+    pub async fn claim_next_job_in_queue(conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>> {
+        Self::claim_next_job_in_queue_with_opts(conn, queue, 1.0, 5).await
     }
 
     /// Convert a user-inputted string of site IDs into a proper vector of site IDs
@@ -896,7 +994,7 @@ impl Job {
     /// 
     /// # Errors
     /// Returns an `Err` if the SQL query to update the state failed.
-    pub async fn set_state_by_id(conn: &mut MySqlConn, job_id: i32, state: JobState) -> anyhow::Result<u64> {
+    pub async fn set_state_by_id(conn: &mut MySqlConn, job_id: i32, state: JobState) -> JobResult<u64> {
         let nrows = sqlx::query!(
             "UPDATE Jobs SET state = ? WHERE job_id = ?",
             state,
@@ -916,7 +1014,7 @@ impl Job {
     /// Note that [`Job::set_completed`] is preferred when
     /// setting the state to [`JobState::Complete`], as that method ensures
     /// that the completion time and output file are updated correctly as well.
-    pub async fn set_state(&mut self, conn: &mut MySqlConn, state: JobState) -> anyhow::Result<u64> {
+    pub async fn set_state(&mut self, conn: &mut MySqlConn, state: JobState) -> JobResult<u64> {
         let n = Self::set_state_by_id(conn, self.job_id, state).await?;
         self.state = state;
         return Ok(n)

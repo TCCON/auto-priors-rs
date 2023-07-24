@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::env;
 use std::fs::File;
 use std::io::{Write, Read};
@@ -97,6 +98,7 @@ pub(crate) async fn open_test_database(reset_db: bool) -> anyhow::Result<PoolWra
 #[macro_export]
 macro_rules! multiline_sql {
     ($path:literal, $conn:ident) => {
+        use anyhow::Context;
         let read_sql = include_str!($path);
         for (i, statement) in read_sql.split(';').enumerate() {
             if !statement.trim().is_empty() {

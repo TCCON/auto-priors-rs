@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use anyhow::Context;
 use chrono::{NaiveDate, Duration};
 use serial_test::serial;
 use orm::met::{MetDayState, MetLevels, MetDataType, MetFile};

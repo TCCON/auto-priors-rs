@@ -31,3 +31,57 @@ impl Display for DefaultOptsQueryError {
 }
 
 impl Error for DefaultOptsQueryError {}
+
+pub type JobResult<T> = Result<T, JobError>;
+
+#[derive(Debug)]
+pub enum JobError {
+    QueryError(sqlx::Error),
+    DeadlockError(sqlx::Error),
+    InvalidState(i8),
+    InvalidTar(i8),
+    InvalidModFmt(String),
+    InvalidVmrFmt(String),
+    InvalidMapFmt(String),
+    InvalidJson(serde_json::Error),
+    Other(String)
+}
+
+impl Display for JobError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JobError::QueryError(e) => write!(f, "SQL Job Error: {e}"),
+            JobError::DeadlockError(e) => write!(f, "SQL transaction deadlock: {e}"),
+            JobError::InvalidState(state) => write!(f, "Unknown state integer: {state}"),
+            JobError::InvalidTar(choice) => write!(f, "Unknown Tar choice integer: {choice}"),
+            JobError::InvalidModFmt(fmt) => write!(f, "Unknown ModFmt integer: {fmt}"),
+            JobError::InvalidVmrFmt(fmt) => write!(f, "Unknown VmrFmt integer: {fmt}"),
+            JobError::InvalidMapFmt(fmt) => write!(f, "Unknown MapFmt integer: {fmt}"),
+            JobError::InvalidJson(e) => write!(f, "Invalid JSON found in job information: {e}"),
+            JobError::Other(msg) => write!(f, "Other Job Error: {msg}"),
+        }
+    }
+}
+
+impl Error for JobError {}
+
+impl From<sqlx::Error> for JobError {
+    fn from(value: sqlx::Error) -> Self {
+        if let sqlx::Error::Database(e) = &value {
+            // NB: This code is the code for a deadlock in MySql version 8.0.33 on a Mac.
+            // If this changes on other versions, systems, the logic here may need updated.
+            // The test_next_job_with_transaction integration test should catch if that happens.
+            if e.code() == Some("40001".into()) {
+                return Self::DeadlockError(value)
+            }
+        }
+
+        return Self::QueryError(value)
+    }
+}
+
+impl From<serde_json::Error> for JobError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::InvalidJson(value)
+    }
+}
