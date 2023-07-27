@@ -182,7 +182,7 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::ParseInputFilesManually(subargs) => {
             let mut conn = db.get_connection().await?;
-            input_files::add_jobs_from_input_files(&mut conn, subargs, &config).await?; 
+            input_files::add_jobs_from_input_files_cli(&mut conn, subargs, &config).await?; 
         },
 
         Commands::AddJob(subargs) => {

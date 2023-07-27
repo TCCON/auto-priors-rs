@@ -12,6 +12,7 @@ pub mod utils;
 pub mod met;
 pub mod siteinfo;
 pub mod jobs;
+pub mod input_files;
 pub mod stdsitejobs;
 
 pub type MySqlPool = sqlx::pool::Pool<sqlx::MySql>;

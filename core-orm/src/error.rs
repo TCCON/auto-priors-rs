@@ -44,6 +44,10 @@ pub enum JobError {
     InvalidVmrFmt(String),
     InvalidMapFmt(String),
     InvalidJson(serde_json::Error),
+    ConfigurationError(anyhow::Error),
+    InvalidSiteLocation(anyhow::Error),
+    RunDirectoryError(std::io::Error),
+    CancellationError(String),
     Other(String)
 }
 
@@ -58,6 +62,10 @@ impl Display for JobError {
             JobError::InvalidVmrFmt(fmt) => write!(f, "Unknown VmrFmt integer: {fmt}"),
             JobError::InvalidMapFmt(fmt) => write!(f, "Unknown MapFmt integer: {fmt}"),
             JobError::InvalidJson(e) => write!(f, "Invalid JSON found in job information: {e}"),
+            JobError::ConfigurationError(e) => write!(f, "Invalid configuration: {e}"),
+            JobError::InvalidSiteLocation(e) => write!(f, "Invalid site location: {e}"),
+            JobError::RunDirectoryError(e) => write!(f, "There was a problem with the run directory: {e}"),
+            JobError::CancellationError(msg) => write!(f, "There was a problem cancelling a job: {msg}"),
             JobError::Other(msg) => write!(f, "Other Job Error: {msg}"),
         }
     }

@@ -134,7 +134,9 @@ macro_rules! multiline_sql_init {
 
 // Per https://stackoverflow.com/a/31749071 this is necessary to
 // use macros across modules
+#[allow(unused_imports)]
 pub(crate) use multiline_sql;
+#[allow(unused_imports)]
 pub(crate) use multiline_sql_init;
 
 pub(crate) fn md5sum(p: &Path) -> anyhow::Result<Vec<u8>> {

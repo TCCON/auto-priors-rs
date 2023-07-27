@@ -42,7 +42,7 @@ pub async fn get_date_iter(
     end_date: Option<NaiveDate>,
     met_key: Option<&str>,
     ignore_defaults: bool
-) -> anyhow::Result<utils::DateIterator>
+) -> anyhow::Result<orm::utils::DateIterator>
 {
     if let Some(key) = met_key {
         get_date_iter_for_specified_met(conn, start_date, end_date, config, key, ignore_defaults).await
@@ -84,7 +84,7 @@ async fn get_date_iter_for_defaults(
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
     config: &orm::config::Config
-) -> anyhow::Result<utils::DateIterator>
+) -> anyhow::Result<orm::utils::DateIterator>
 {
     let start_date = if let Some(start) = start_date {
         start
@@ -122,7 +122,7 @@ async fn get_date_iter_for_defaults(
         chrono::offset::Utc::now().naive_utc().date()
     };
 
-    Ok(utils::DateIterator::new(vec![(start_date, end_date)]))
+    Ok(orm::utils::DateIterator::new(vec![(start_date, end_date)]))
 }
 
 /// This function provides a date iterator for days relevant to a single met type.
@@ -165,7 +165,7 @@ async fn get_date_iter_for_specified_met(
     config: &orm::config::Config,
     met_key: &str,
     ignore_defaults: bool
-) -> anyhow::Result<utils::DateIterator> 
+) -> anyhow::Result<orm::utils::DateIterator> 
 {
     let dl_cfgs = config.get_met_configs(met_key)?;
     let default_options = config.get_all_defaults_check_overlap()?;
@@ -200,7 +200,7 @@ async fn get_date_iter_for_specified_met(
     // try to guess the start date from the default options. If those don't define one, then we can't deduce the starting date.
     if ignore_defaults { 
         if let Some(d) = start_date {
-            return Ok(utils::DateIterator::new(vec![(d, end_date)]));
+            return Ok(orm::utils::DateIterator::new(vec![(d, end_date)]));
         } else {
             // This case should be EXTREMELY rare for the reasons in the last else if branch for start_date above
             let defaults_start = default_options.iter()
@@ -212,7 +212,7 @@ async fn get_date_iter_for_specified_met(
                     format!("No earliest date defined for met = {met_key} and either no default option sets reference this met or the first one to do so has no start date defined.")
                 ))?;
             
-            return Ok(utils::DateIterator::new(vec![(defaults_start, end_date)]));
+            return Ok(orm::utils::DateIterator::new(vec![(defaults_start, end_date)]));
         }
     }
 
@@ -235,7 +235,7 @@ async fn get_date_iter_for_specified_met(
     // Still use bounds on the iterator even though we do use the defined start and end dates elsewhere. This
     // is needed in case all the default option sets define start and/or end dates; we still need to cut down
     // the iterator to the desired limits.
-    Ok(utils::DateIterator::new_with_bounds(date_ranges, start_date, Some(end_date)))
+    Ok(orm::utils::DateIterator::new_with_bounds(date_ranges, start_date, Some(end_date)))
 }
 
 /// Check whether the required model files are present for a range of dates.

@@ -169,12 +169,12 @@ impl SiteInfo {
     /// Return the standard site table entry associated with this site information.
     /// 
     /// If a standard site cannot be found, the returned result will be and `Err`.
-    pub async fn get_std_site(&self, pool: &mut MySqlConn) -> anyhow::Result<StdSite> {
+    pub async fn get_std_site(&self, conn: &mut MySqlConn) -> anyhow::Result<StdSite> {
         let result = sqlx::query_as!(
                 QStdSite,
                 "SELECT * FROM StdSiteList WHERE id = ?",
                 self.site
-            ).fetch_one(pool)
+            ).fetch_one(conn)
             .await?;
 
         Ok(StdSite::from(result))
@@ -288,12 +288,12 @@ impl SiteInfo {
     /// 
     /// * `pool` - the MySQL pool or connection object to perform the query with
     /// * `site_id` - the two letter site ID of the site to query, e.g. "pa"
-    pub async fn get_most_recent_site_location(pool: &mut MySqlConn, site_id: &str) -> anyhow::Result<SiteInfo> {
+    pub async fn get_most_recent_site_location(conn: &mut MySqlConn, site_id: &str) -> anyhow::Result<SiteInfo> {
         let result = sqlx::query_as!(
                 SiteInfo, 
                 "SELECT * FROM v_StdSiteInfo WHERE site_id = ? ORDER BY start_date DESC LIMIT 1",
                 site_id
-            ).fetch_one(pool)
+            ).fetch_one(conn)
             .await?;
     
         Ok(result)

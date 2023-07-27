@@ -1,12 +1,11 @@
 //! The main ORM interface to the jobs queue.
 //! 
 //! 
-use std::{path::{PathBuf, Path}, str::FromStr, fmt::{Display, Debug}};
+use std::{path::{PathBuf, Path}, str::FromStr, fmt::{Display, Debug}, process::Stdio};
 
-use anyhow;
 use chrono::{NaiveDate, NaiveDateTime};
-use log::info;
-use serde::Deserialize;
+use log::{info, warn};
+use serde::{Deserialize, Serialize};
 use serde_json;
 use sqlx::{self, FromRow, Type, Acquire};
 
@@ -817,6 +816,52 @@ impl Job {
                       site_id.len(), lat.len());
     }
 
+    pub async fn lats_lons_sids_filled_for_date(&self, conn: &mut MySqlConn, date: NaiveDate) -> anyhow::Result<(Vec<String>, Vec<f32>, Vec<f32>)> {
+        let (site_ids, lats, lons) = Self::expand_site_lat_lon(
+                self.site_id.clone(), 
+                Some(self.lat.clone()), 
+                Some(self.lon.clone())
+            )?;
+
+        let (lats, lons) = crate::siteinfo::SiteInfo::fill_null_latlons(
+            conn, 
+            &site_ids, 
+            &lats, 
+            &lons, 
+            date, 
+            Some(date + chrono::Duration::days(1))
+        ).await?;
+
+        Ok((site_ids, lats, lons))
+    }
+
+    // pub async fn lat_lons_sids_filled_for_date(&self, conn: &mut MySqlConn, date: NaiveDate) -> anyhow::Result<(Vec<String>, Vec<f32>, Vec<f32>)> {
+    //     let (sids, lats, lons) = Self::expand_site_lat_lon(
+    //         self.site_id.clone(), 
+    //         Some(self.lat.clone()), 
+    //         Some(self.lon.clone())
+    //     )?;
+
+    //     let mut filled_lats = vec![];
+    //     let mut filled_lons = vec![];
+
+    //     for (idx, sid) in sids.iter().enumerate() {
+    //         if let (Some(y), Some(x)) = (lats[idx], lons[idx]) {
+    //             filled_lats.push(y);
+    //             filled_lons.push(x);
+    //         } else {
+    //             if lats[idx].is_some() || lons[idx].is_some() {
+    //                 anyhow::bail!("Site '{sid}' in job {} has lat or lon given but not both; the standard lat/lon willl override the given one", self.job_id);
+    //             }
+
+    //             let site_info = crate::siteinfo::SiteInfo::get_site_info_for_date(
+    //                 conn, date, true
+    //             ).await?;
+    //         }
+    //     }
+    //     todo!();
+    // }
+
     /// Add a new job to the database
     /// 
     /// # Parameters
@@ -1064,4 +1109,190 @@ impl Job {
         return Ok((n, t))
     }
 
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RunState {
+    InProgress,
+    Complete,
+    Errored,
+}
+
+pub enum JobRunner {
+    Shell(ShellJobRunner)
+}
+
+impl JobRunner {
+    pub fn is_done(&mut self) -> JobResult<RunState> {
+        match self {
+            JobRunner::Shell(runner) => runner.is_done(),
+        }
+    }
+
+    pub async fn cancel(&mut self, conn: &mut MySqlConn, job: &mut Job) -> JobResult<()> {
+        match self {
+            JobRunner::Shell(runner) => runner.cancel().await?,
+        }
+
+        std::fs::remove_dir_all(&job.save_dir)
+            .unwrap_or_else(|e| warn!(
+                "Error occurred while trying to remove run directory ({}) for job {}. Error was: {e}",
+                job.save_dir.display(), job.job_id
+            ));
+
+        job.set_state(conn, JobState::Pending)
+            .await?;
+            // .with_context(|| format!(
+            //     "An error occurred while trying to reset the state for job #{} to 'pending'; job may need reset manually to finish.",
+            //     job.job_id
+            // ))?;
+
+        Ok(())
+    }
+}
+
+pub fn job_run_dir(config: &crate::config::Config, job_id: i32) -> std::io::Result<PathBuf> {
+    let job_subdir = format!("job{:09}", job_id);
+    let base_run_dir = config.execution.output_path.join(job_subdir);
+
+    if !base_run_dir.exists() {
+        std::fs::create_dir_all(&base_run_dir)?;
+    }
+
+    Ok(base_run_dir)
+}
+
+pub struct ShellJobRunner {
+    child: tokio::process::Child
+}
+
+impl ShellJobRunner {
+    fn is_done(&mut self) -> JobResult<RunState> {
+        // let mut child = match self.child.try_borrow_mut() {
+        //     Ok(c) => c,
+        //     Err(e) => return RunState::Unknown(format!(
+        //         "Could not access child process, error was: {e}"
+        //     ))
+        // };
+
+        match self.child.try_wait() {
+            Ok(Some(status)) => {
+                if status.success() {
+                    Ok(RunState::Complete)
+                } else {
+                    Ok(RunState::Errored)
+                }
+            },
+            Ok(None) => {
+                Ok(RunState::InProgress)
+            },
+            Err(e) => {
+                Err(JobError::Other(format!("Error when checking if tokio shell process completed: {e}")))
+            }
+        }
+    }
+
+    async fn cancel(&mut self) -> JobResult<()> {
+        let pid = if let Some(p) = self.child.id() {
+            p
+        } else {
+            // No pid = no process, so nothing to killl presumably?
+            return Ok(())
+        };
+
+        self.child.kill().await
+            .map_err(|e| JobError::CancellationError(format!(
+                "Error occurred while trying to cancel child process ID {pid}: {e}"
+            )))?;
+
+        Ok(())
+    }
+}
+
+pub async fn start_job_for_date_through_shell(
+    conn: &mut MySqlConn,
+    date: NaiveDate,
+    job: &Job,
+    config: &crate::config::Config,
+    run_ginput_path: &Path
+) -> JobResult<JobRunner> {
+    let met_key = if let Some(k) = &job.met_key {
+        k.to_owned()
+    } else {
+        let defaults = config.get_defaults_for_date(date)
+            .map_err(|e| JobError::ConfigurationError(e.into()))?;
+        defaults.met.clone()
+    };
+
+    let (met_path, chem_path) = config.get_geos_and_chem_paths(&met_key)
+        .map_err(|e| JobError::ConfigurationError(e))?;
+
+    let (site_ids, lats, lons) = job.lats_lons_sids_filled_for_date(conn, date)
+        .await
+        .map_err(|e| JobError::InvalidSiteLocation(e))?;
+
+    let run_dir = job_run_dir(config, job.job_id)
+        .map_err(|e| JobError::RunDirectoryError(e))?;
+    
+    let ginput_args = GinputAutomationArgs {
+        start_date: date,
+        end_date: None,
+        met_path: &met_path,
+        chem_path: &chem_path,
+        save_path: &run_dir,
+        site_ids: &site_ids,
+        site_lats: &lats,
+        site_lons: &lons,
+        site_alts: &vec![0.0; lons.len()],
+        base_vmr_file: config.data.base_vmr_file.as_deref(),
+        zgrid_file: config.data.zgrid_file.as_deref(),
+        map_file_format: job.map_fmt.to_string(),
+        n_threads: config.execution.max_numpy_threads
+    };
+
+    let args_file = run_dir.join("ginput_run_args.json");
+    let args_file_h = std::fs::File::create(&args_file)
+        .map_err(|e| JobError::RunDirectoryError(e))?;
+    serde_json::to_writer_pretty(args_file_h, &ginput_args)?;
+
+    let log_file = std::fs::File::create(
+        run_dir.join(format!("ginput_job_{}.out", job.job_id))
+    ).map_err(|e| JobError::RunDirectoryError(e))?;
+    let log_stdout = Stdio::from(log_file);
+
+    let log_file = std::fs::File::create(
+        run_dir.join(format!("ginput_job_{}.err", job.job_id))
+    ).map_err(|e| JobError::RunDirectoryError(e))?;
+    let log_stderr = Stdio::from(log_file);
+
+    let child = tokio::process::Command::new(run_ginput_path)
+        .arg(args_file)
+        .stdout(log_stdout)
+        .stderr(log_stderr)
+        .spawn()
+        .map_err(|e| JobError::RunDirectoryError(e))?;
+
+    let shell_runner = ShellJobRunner { child };
+
+    Ok(JobRunner::Shell(shell_runner))
+}
+
+#[derive(Debug, Serialize)]
+struct GinputAutomationArgs<'a> {
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>,
+    met_path: &'a Path,
+    chem_path: &'a Path,
+    save_path: &'a Path,
+    site_ids: &'a[String],
+    site_lons: &'a[f32],
+    site_lats: &'a[f32],
+    site_alts: &'a[f32],
+
+    base_vmr_file: Option<&'a Path>,
+    zgrid_file: Option<&'a Path>,
+
+    map_file_format: String,
+
+    n_threads: u32
 }

@@ -18,7 +18,7 @@ use serde::{Serialize, Deserialize};
 use toml;
 use url::Url;
 
-use crate::{met::{self, MetDataType}, error::DefaultOptsQueryError};
+use crate::{met::{self, MetDataType}, error::{DefaultOptsQueryError, JobResult}, MySqlConn};
 
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
@@ -209,11 +209,10 @@ impl Config {
     /// 
     /// If the queue does not have a section defined in the configuration, then the
     /// default queue (allocated 1 processor) is returned.
-    pub fn get_queue(&self, queue_name: &str) -> JobQueue {
+    pub fn get_queue(&self, queue_name: &str) -> Option<JobQueueOptions> {
         self.execution.queues
             .get(queue_name)
             .map(|q| q.to_owned())
-            .unwrap_or_default()
     }
 }
 
@@ -221,10 +220,13 @@ impl Config {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExecutionConfig {
     /// Maximum number of jobs to run simultaneously
-    pub queues: HashMap<String, JobQueue>,
+    pub queues: HashMap<String, JobQueueOptions>,
 
     /// Maximum number of threads to let numpy use
     pub max_numpy_threads: u32,
+
+    /// Full glob pattern (including directory) to use to find input files
+    pub input_file_pattern: String,
 
     /// Hours to retain requested jobs before deleting
     pub hours_to_keep: u32,
@@ -268,6 +270,7 @@ impl Default for ExecutionConfig {
             queues: Default::default(), 
             max_numpy_threads: 2, 
             hours_to_keep: 168,
+            input_file_pattern: "input_file_2020*.txt".to_owned(),
             download_server: Url::parse(&format!("ftp://{host}/")).unwrap_or_else(|_| Url::parse("ftp://localhost/").unwrap()), 
             download_root: Default::default(), 
             output_path: Default::default(), 
@@ -286,7 +289,23 @@ impl Default for ExecutionConfig {
 pub enum GinputConfig {
     /// A ginput installation to be called via its `run_ginput.py` entry point. Requires
     /// one option, `entry_point_path`, which is the path to the `run_ginput.py` file.
-    Script{entry_point_path: String}
+    Script{entry_point_path: PathBuf}
+}
+
+impl GinputConfig {
+    pub async fn start_job_for_date(&self, 
+        conn: &mut MySqlConn,
+        date: NaiveDate,
+        job: &crate::jobs::Job,
+        config: &Config
+    ) -> JobResult<crate::jobs::JobRunner> {
+        match self {
+            GinputConfig::Script { entry_point_path } => {
+                crate::jobs::start_job_for_date_through_shell(conn, date, job, config, &entry_point_path)
+                .await
+            },
+        }
+    }
 }
 
 /// Configuration section dealing with input data for jobs
@@ -511,11 +530,11 @@ impl Display for DefaultOptions {
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JobQueue {
-    max_num_procs: u16
+pub struct JobQueueOptions {
+    pub max_num_procs: usize
 }
 
-impl Default for JobQueue {
+impl Default for JobQueueOptions {
     fn default() -> Self {
         Self { max_num_procs: 1 }
     }

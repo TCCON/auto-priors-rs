@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-trait = "0.1.72"
+clokwerk = "0.4"
+glob = "0.3"
+
 anyhow.workspace = true
+log.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 
