@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
         shared_config: config,
         error_handler: err_handler,
         exit_signal: rx.clone(),
+        lut_regen_time: None,
         job_queues: HashMap::new()
     };
 

@@ -186,6 +186,7 @@ pub struct MetFile {
     pub file_id: i32,
     #[sqlx(try_from = "String")]
     pub file_path: PathBuf,
+    #[allow(dead_code)]
     file_path_sha256: Option<String>,
     #[sqlx(try_from = "String")]
     pub product: MetProduct,

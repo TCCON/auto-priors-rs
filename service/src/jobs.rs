@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use anyhow::Context;
+use chrono::{DateTime, Local};
 use log::{warn, info, debug};
 use orm::{jobs::{Job, JobState, JobRunner}, MySqlConn, config::Config, MySqlPC};
 use tokio::sync::{RwLock, watch::Receiver};
@@ -13,6 +14,7 @@ pub(crate) struct JobManager<T: Queueable, H: ErrorHandler> {
     pub(crate) shared_config: Arc<RwLock<Config>>,
     pub(crate) job_queues: HashMap<String, Queue<T>>,
     pub(crate) error_handler: H,
+    pub(crate) lut_regen_time: Option<DateTime<Local>>,
     pub(crate) exit_signal: Receiver<ExitCommand>
 }
 
@@ -137,6 +139,22 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         Ok(())
     }
 
+    async fn try_regen_luts(&mut self) -> anyhow::Result<bool> {
+        let needs_regen_asap = self.lut_regen_time
+            .map(|t| (Local::now() - t) > chrono::Duration::days(1))
+            .unwrap_or(true);
+
+        if self.num_jobs_running() > 0 {
+            return Ok(needs_regen_asap)
+        }
+
+        // TODO: if we can, call the ginput code to regenerate the LUTs, blocking jobs until that is
+        // done. If tables need regenerated urgently, block new jobs from being submitted, wait until
+        // all the jobs currently running are done, then regen the luts.
+
+        Ok(false)
+    }
+
     async fn wait_for_jobs_to_finish(&mut self) {
         loop {
             let mut njobs = 0;
@@ -160,6 +178,11 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             queue.cancel_running_jobs(&mut self.db_conn, &self.error_handler).await;
             info!("Stopped and reset all jobs in {name} queue");
         }
+    }
+
+    fn num_jobs_running(&self) -> usize {
+        self.job_queues.values()
+            .fold(0, |tot, q| tot + q.num_jobs_left())
     }
 }
 
@@ -301,7 +324,7 @@ impl Queueable for ServiceJobRunner {
         let date_iter = orm::utils::DateIterator::new(
             vec![(self.job.start_date, self.job.end_date)]
         );
-        
+
         for date in date_iter {
             let ginput_key = if let Some(key) = &self.job.ginput_key {
                 key
