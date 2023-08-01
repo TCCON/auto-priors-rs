@@ -373,6 +373,7 @@ impl TryFrom<Job> for QJob {
     }
 }
 
+#[derive(Debug)]
 /// The public interface to the Jobs MySQL table.
 pub struct Job {
     /// **\[primary key\]** The unique integer ID of this job
@@ -1118,20 +1119,21 @@ pub enum RunState {
     Errored,
 }
 
-pub enum JobRunner {
-    Shell(ShellJobRunner)
+#[derive(Debug)]
+pub enum GinputRunner {
+    Shell(ShellGinputRunner)
 }
 
-impl JobRunner {
+impl GinputRunner {
     pub fn is_done(&mut self) -> JobResult<RunState> {
         match self {
-            JobRunner::Shell(runner) => runner.is_done(),
+            GinputRunner::Shell(runner) => runner.is_done(),
         }
     }
 
     pub async fn cancel(&mut self, conn: &mut MySqlConn, job: &mut Job) -> JobResult<()> {
         match self {
-            JobRunner::Shell(runner) => runner.cancel().await?,
+            GinputRunner::Shell(runner) => runner.cancel().await?,
         }
 
         std::fs::remove_dir_all(&job.save_dir)
@@ -1162,11 +1164,12 @@ pub fn job_run_dir(config: &crate::config::Config, job_id: i32) -> std::io::Resu
     Ok(base_run_dir)
 }
 
-pub struct ShellJobRunner {
+#[derive(Debug)]
+pub struct ShellGinputRunner {
     child: tokio::process::Child
 }
 
-impl ShellJobRunner {
+impl ShellGinputRunner {
     fn is_done(&mut self) -> JobResult<RunState> {
         // let mut child = match self.child.try_borrow_mut() {
         //     Ok(c) => c,
@@ -1215,7 +1218,7 @@ pub async fn start_job_for_date_through_shell(
     job: &Job,
     config: &crate::config::Config,
     run_ginput_path: &Path
-) -> JobResult<JobRunner> {
+) -> JobResult<GinputRunner> {
     let met_key = if let Some(k) = &job.met_key {
         k.to_owned()
     } else {
@@ -1272,9 +1275,9 @@ pub async fn start_job_for_date_through_shell(
         .spawn()
         .map_err(|e| JobError::RunDirectoryError(e))?;
 
-    let shell_runner = ShellJobRunner { child };
+    let shell_runner = ShellGinputRunner { child };
 
-    Ok(JobRunner::Shell(shell_runner))
+    Ok(GinputRunner::Shell(shell_runner))
 }
 
 #[derive(Debug, Serialize)]

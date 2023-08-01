@@ -1,7 +1,7 @@
 use std::{sync::Arc, collections::HashMap, time::Duration};
 
-use clokwerk::TimeUnits;
-use tokio::sync::RwLock;
+use clokwerk::{TimeUnits, Job};
+use tokio::sync::{RwLock, Mutex, OnceCell};
 
 mod error;
 mod jobs;
@@ -13,6 +13,8 @@ enum ExitCommand {
     Rapid
 }
 
+static JOBS_MANAGER: OnceCell<Mutex<jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler>>> = OnceCell::const_new();
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let db_url = orm::get_database_url(None)?;
@@ -23,26 +25,35 @@ async fn main() -> anyhow::Result<()> {
     let config = Arc::new(RwLock::new(config));
 
     let err_handler = error::LoggingErrorHandler{};
-    let (_sx, rx) = tokio::sync::watch::channel(ExitCommand::Continue);
+    let (_exit_sx, exit_rx) = tokio::sync::watch::channel(ExitCommand::Continue);
 
-
-    let mut job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager{
+    let job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager{
         db_conn: db.get_connection().await.expect("Failed to initialize database connection for job manager"),
         shared_config: config,
         error_handler: err_handler,
-        exit_signal: rx.clone(),
+        exit_signal: exit_rx.clone(),
         lut_regen_time: None,
         job_queues: HashMap::new()
     };
+    JOBS_MANAGER.set(Mutex::new(job_manager)).expect("Could not set the global job manager");
 
-    let job_task = tokio::spawn(async move {
-        loop {
-            if job_manager.scheduler_entry_point().await {
-                break;
-            }
-            tokio::time::sleep(Duration::from_secs(30)).await;
-        }
-    });
+    let mut scheduler = clokwerk::AsyncScheduler::new();
+    scheduler
+        .every(1.minute())
+            .run(|| async {
+                let mutex = JOBS_MANAGER.get().unwrap();
+                let mut jm = mutex.lock().await;
+                jm.scheduler_entry_point().await;
+            });
+    scheduler
+        .every(1.day())
+            .at("00:00")
+            .run(|| async { 
+                let mutex = JOBS_MANAGER.get().unwrap();
+                let mut jm = mutex.lock().await;
+                jm.schedule_lut_regen();
+            });
+    
 
     Ok(())
 }

@@ -298,7 +298,7 @@ impl GinputConfig {
         date: NaiveDate,
         job: &crate::jobs::Job,
         config: &Config
-    ) -> JobResult<crate::jobs::JobRunner> {
+    ) -> JobResult<crate::jobs::GinputRunner> {
         match self {
             GinputConfig::Script { entry_point_path } => {
                 crate::jobs::start_job_for_date_through_shell(conn, date, job, config, &entry_point_path)

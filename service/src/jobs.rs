@@ -4,11 +4,15 @@ use async_trait::async_trait;
 use anyhow::Context;
 use chrono::{DateTime, Local};
 use log::{warn, info, debug};
-use orm::{jobs::{Job, JobState, JobRunner}, MySqlConn, config::Config, MySqlPC};
+use orm::{jobs::{Job, JobState, GinputRunner}, MySqlConn, config::Config, MySqlPC};
 use tokio::sync::{RwLock, watch::Receiver};
 
 use crate::{ExitCommand, error::ErrorHandler};
 
+const LUT_REGEN_BLOCKING_PRIORITY: i32 = 10;
+
+
+#[derive(Debug)]
 pub(crate) struct JobManager<T: Queueable, H: ErrorHandler> {
     pub(crate) db_conn: MySqlPC,
     pub(crate) shared_config: Arc<RwLock<Config>>,
@@ -32,7 +36,13 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                         self.error_handler.report_error(e.as_ref())
                     });
 
-                self.start_pending_jobs()
+                self.add_pending_jobs_to_queues()
+                    .await
+                    .unwrap_or_else(|e| {
+                        self.error_handler.report_error(e.as_ref())
+                    });
+
+                self.start_queues_with_jobs()
                     .await
                     .unwrap_or_else(|e| {
                         self.error_handler.report_error(e.as_ref())
@@ -55,6 +65,12 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         }
     }
 
+    pub(crate) fn schedule_lut_regen(&mut self) {
+        // For each ginput defined in the config, add a blocking job to the special queue
+        // to regenerate its LUTs
+        todo!()
+    }
+
     pub(crate) async fn scan_for_job_submissions(&mut self) -> anyhow::Result<()> {
         let (input_glob_pattern, save_dir) = { 
             let c = self.shared_config
@@ -75,7 +91,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         orm::input_files::add_jobs_from_input_files(&mut self.db_conn, &input_files, &save_dir).await
     }
 
-    pub(crate) async fn start_pending_jobs(&mut self) -> anyhow::Result<()> {
+    pub(crate) async fn add_pending_jobs_to_queues(&mut self) -> anyhow::Result<()> {
         let queue_names = Job::get_queues_with_pending_jobs(&mut self.db_conn)
             .await
             .with_context(|| "Error occurred while trying to retrieve the list of queues with pending jobs")?;
@@ -114,8 +130,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                     & *self.shared_config.read().await,
                 );
                 
-                let config = self.shared_config.read().await;
-                if !this_queue.add(runner, &mut self.db_conn, &config, &self.error_handler).await {
+                if !this_queue.add(runner).await {
                     // Really we should not enter this block; the loop over n_to_add should ensure we only
                     // add as many jobs as we are allow to. But just in case, we should ensure that a job not
                     // added to the queue gets reset to 'pending'
@@ -137,6 +152,81 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         }
 
         Ok(())
+    }
+
+    async fn start_queues_with_jobs(&mut self) -> anyhow::Result<()> {
+        let pending_queues: Vec<_> = self.get_queues_that_can_start()
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+
+        for queue_name in pending_queues.iter() {
+            if self.can_queue_start_jobs(queue_name).await? {
+                let conn = &mut self.db_conn;
+                let config = self.shared_config.read().await;
+                if let Some(queue) = self.job_queues.get_mut(queue_name) {
+                    queue.start(conn, &config, &self.error_handler).await;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn get_queues_that_can_start(&self) -> Vec<&str> {
+        let mut queue_names = Vec::new();
+
+        let max_bp = self.job_queues.values()
+            .map(|q| q.blocking_priority())
+            .max();
+
+        let max_bp = if let Some(m) = max_bp {
+            m
+        } else {
+            // The only way there's no maximum is if there are no queues, which by definition means
+            // there are no queues that can run jobs.
+            return queue_names;
+        };
+
+        // Only queues with the highest blocking priority can start new jobs, and they can only
+        // start if no other queues are running jobs.
+        for (name, queue) in self.job_queues.iter() {
+            if queue.blocking_priority() == max_bp {
+                queue_names.push(&name);
+            } else if queue.has_running_jobs() {
+                return Vec::new();
+            }
+        }
+
+        queue_names
+    }
+
+    async fn can_queue_start_jobs(&self, queue_name: &str) -> anyhow::Result<bool> {
+        
+        let queue_bp = self.job_queues
+            .get(queue_name)
+            .map(|q| q.blocking_priority())
+            .unwrap_or(0);
+
+        for (other_name, other_queue) in self.job_queues.iter() {
+            let other_bp = other_queue.blocking_priority();
+            if other_bp < queue_bp {
+                if other_queue.has_running_jobs() {
+                    info!("Queue '{queue_name}' cannot start jobs because it is waiting for jobs in queue {other_name} to finish");
+                    return Ok(false)
+                }
+
+            }
+
+            if other_bp > queue_bp {
+                if other_queue.num_jobs_left() > 0 {
+                    info!("Queue '{queue_name}' cannot start jobs because a higher blocking priority queue ({other_name}) has jobs pending");
+                    return Ok(false)
+                }
+            }
+        }
+
+        Ok(true)
     }
 
     async fn try_regen_luts(&mut self) -> anyhow::Result<bool> {
@@ -191,18 +281,29 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
 pub(crate) trait Queueable {
     fn new_from_job(job: Job, config: &Config) -> Self;
     async fn start(&mut self, conn: &mut MySqlConn, config: &Config) -> anyhow::Result<()>;
+    fn is_running(&self) -> bool;
     async fn is_done(&mut self, conn: &mut MySqlConn) -> anyhow::Result<bool>;
     async fn cancel(&mut self, conn: &mut MySqlConn) -> anyhow::Result<bool>;
 }
 
+#[derive(Debug)]
 pub(crate) struct Queue<T: Queueable> {
     max_num_items: usize,
-    items: Vec<T>
+    items: Vec<T>,
+    blocking_priority: i32
 } 
 
 impl<T: Queueable> Queue<T> {
     pub fn new(max_num_items: usize) -> Self {
-        Self { max_num_items, items: Vec::new() }
+        Self { max_num_items, items: Vec::new(), blocking_priority: 0 }
+    }
+
+    pub fn new_blocking(max_num_items: usize, blocking_priority: i32) -> Self {
+        Self { max_num_items, items: Vec::new(), blocking_priority }
+    }
+
+    pub fn blocking_priority(&self) -> i32 {
+        self.blocking_priority
     }
 
     /// Check whether a new item can be added to this queue
@@ -224,14 +325,21 @@ impl<T: Queueable> Queue<T> {
     /// 
     /// Returns `true` if the item was added, `false` otherwise.
     /// If the item was added, its `start` method is called.
-    pub async fn add(&mut self, mut item: T, conn: &mut MySqlConn, config: &Config, error_handler: &dyn ErrorHandler) -> bool {
+    pub async fn add(&mut self, item: T) -> bool {
         if !self.can_add() {
             false
         } else {
-            item.start(conn, config).await
-                .unwrap_or_else(|e| error_handler.report_error(e.as_ref()));
             self.items.push(item);
             true
+        }
+    }
+
+    pub async fn start(&mut self, conn: &mut MySqlConn, config: &Config, error_handler: &dyn ErrorHandler) {
+        for item in self.items.iter_mut() {
+            if !item.is_running() {
+                item.start(conn, config).await
+                    .unwrap_or_else(|e| error_handler.report_error(e.as_ref()));
+            }
         }
     }
 
@@ -262,6 +370,11 @@ impl<T: Queueable> Queue<T> {
         self.items.len()
     }
 
+    pub fn has_running_jobs(&self) -> bool {
+        self.items.iter()
+            .any(|i| i.is_running())
+    }
+
     pub async fn cancel_running_jobs(&mut self, conn: &mut MySqlConn, error_handler: &dyn ErrorHandler) {
         for item in self.items.iter_mut() {
             item.cancel(conn).await
@@ -271,18 +384,24 @@ impl<T: Queueable> Queue<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct ServiceJobRunner {
     job: Job,
-    inner_runner: Option<JobRunner>,
-    cancel_requested: bool,
-    cancel_completed: bool
+    inner_runner: Option<GinputRunner>,
 }
 
 #[async_trait]
 impl Queueable for ServiceJobRunner {
 
     fn new_from_job(job: Job, _config: &Config) -> Self {
-        Self { job, inner_runner: None, cancel_requested: false, cancel_completed: false }
+        Self { job, inner_runner: None }
+    }
+
+    fn is_running(&self) -> bool {
+        // I don't think there can be a race condition between this and start - since start
+        // takes a mutable ref, it can't be called at the same time as this function,
+        // so we should never have a case where start is in progress when this is called
+        self.inner_runner.is_some()
     }
 
     async fn is_done(&mut self, conn: &mut MySqlConn) -> anyhow::Result<bool> {
@@ -352,28 +471,21 @@ impl Queueable for ServiceJobRunner {
             };
             self.inner_runner = Some(task);
 
-            // There is a possibility of a race condition that the task may be cancelled while the startup process
-            // is running. If we reach this point, the any future cancels will work properly because the task has
-            // been stored. 
-            if self.cancel_requested && !self.cancel_completed {
-                self.cancel(conn).await?;
-            }
+            // I'd originally worried that there could be a race condition between this method and cancel,
+            // but since both require mut refs and you can't have >1 mut ref to the same object at a time,
+            // a race should actually be impossible.
         }
 
         Ok(())
     }
 
     async fn cancel(&mut self, conn: &mut MySqlConn) -> anyhow::Result<bool> {
-        self.cancel_requested = true;
 
         if let Some(task) = &mut self.inner_runner {
             task.cancel(conn, &mut self.job)
                 .await
-                .with_context(|| format!("Error occurred while trying to stop job #{}", self.job.job_id))
-                .map(|_| {
-                    self.cancel_completed = true;
-                    true
-                })
+                .with_context(|| format!("Error occurred while trying to stop job #{}", self.job.job_id))?;
+            Ok(true)
         } else {
             Ok(false)
         }
