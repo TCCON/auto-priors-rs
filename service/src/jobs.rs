@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use anyhow::Context;
 use log::{warn, info, debug};
 use orm::{jobs::{Job, JobState, GinputRunner}, MySqlConn, config::Config, MySqlPC};
-use tokio::sync::{RwLock, watch::Receiver};
+use tokio::sync::RwLock;
 
 use crate::{ExitCommand, error::ErrorHandler};
 
@@ -18,50 +18,52 @@ pub(crate) struct JobManager<T: Queueable, H: ErrorHandler> {
     pub(crate) shared_config: Arc<RwLock<Config>>,
     pub(crate) job_queues: HashMap<String, Queue<T>>,
     pub(crate) error_handler: H,
-    pub(crate) exit_signal: Receiver<ExitCommand>
 }
 
 impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
-    pub(crate) async fn scheduler_entry_point(&mut self) -> bool {
-        // Ensure that the exit command is cloned/copied to avoid a deadlock:
-        // https://docs.rs/tokio/latest/tokio/sync/watch/struct.Receiver.html#method.borrow
-        let sig = { self.exit_signal.borrow().to_owned() };
-        match sig {
-            ExitCommand::Continue => {
-                // No signal to exit, keep going
-                self.scan_for_job_submissions()
-                    .await
-                    .unwrap_or_else(|e| {
-                        self.error_handler.report_error(e.as_ref())
-                    });
+    #[allow(dead_code)] // used in tests
+    pub(crate) async fn new(
+        shared_config: Arc<RwLock<Config>>, 
+        error_handler: H,
+    ) -> anyhow::Result<Self> {
+        let db_url = orm::get_database_url(None)?;
+        let db = orm::get_database_pool(Some(db_url.clone())).await.unwrap();
+        Self::new_from_pool(&db, shared_config, error_handler).await
+    }
 
-                self.add_pending_jobs_to_queues()
-                    .await
-                    .unwrap_or_else(|e| {
-                        self.error_handler.report_error(e.as_ref())
-                    });
+    pub(crate) async fn new_from_pool(
+        db: &orm::PoolWrapper, 
+        shared_config: Arc<RwLock<Config>>, 
+        error_handler: H,
+    ) -> anyhow::Result<Self> {
+        let db_conn = db.get_connection().await?;
+        Ok(Self { 
+            db_conn,
+            shared_config,
+            job_queues: HashMap::new(), 
+            error_handler
+        })
+    }
 
-                self.start_queues_with_jobs()
-                    .await
-                    .unwrap_or_else(|e| {
-                        self.error_handler.report_error(e.as_ref())
-                    });
-                return false;
-            },
-            ExitCommand::Graceful => {
-                // Allow current jobs to finish, then exit
-                self.wait_for_jobs_to_finish().await;
-                info!("All current jobs complete, stopping job runner loop");
-                return true;
-            },
-            ExitCommand::Rapid => {
-                // Cancel running jobs, but take time to clean them up
-                // and reset their status
-                self.stop_and_reset_jobs().await;
-                info!("All current jobs stopped and reset, stopping job runner loop");
-                return true;
-            }
-        }
+    pub(crate) async fn scheduler_entry_point(&mut self) {
+        self.scan_for_job_submissions()
+            .await
+            .unwrap_or_else(|e| {
+                self.error_handler.report_error(e.as_ref())
+            });
+
+        self.add_pending_jobs_to_queues()
+            .await
+            .unwrap_or_else(|e| {
+                self.error_handler.report_error(e.as_ref())
+            });
+
+        self.start_queues_with_jobs()
+            .await
+            .unwrap_or_else(|e| {
+                self.error_handler.report_error(e.as_ref())
+            });
+        
     }
 
     pub(crate) async fn schedule_lut_regen(&mut self) {
@@ -167,6 +169,13 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         }
 
         Ok(())
+    }
+
+    pub async fn stop_jobs(&mut self, exit_cmd: ExitCommand) {
+        match exit_cmd {
+            ExitCommand::Graceful => self.wait_for_jobs_to_finish().await,
+            ExitCommand::Rapid => self.stop_and_reset_jobs().await,
+        }
     }
 
     async fn start_queues_with_jobs(&mut self) -> anyhow::Result<()> {
@@ -613,30 +622,22 @@ mod tests {
     }
 
     async fn make_dummy_job_manager() -> JobManager<DummyJobRunner, LoggingErrorHandler> {
-        let db_url = orm::get_database_url(None).expect("Could not get database URL");
-        let db = orm::get_database_pool(Some(db_url.clone())).await.unwrap();
-
         let mut config = orm::config::Config::default();
         config.execution.queues.insert(
             TEST_QUEUE_NAME.to_string(), 
             orm::config::JobQueueOptions{ max_num_procs: TEST_QUEUE_MAX_NUM_ITEMS }
         );
 
-        let (_, exit_rx) = tokio::sync::watch::channel(ExitCommand::Continue);
-
-        JobManager {
-            db_conn: db.get_connection().await.expect("Failed to initialize database connection for job manager"),
-            shared_config: Arc::new(RwLock::new(config)),
-            job_queues: HashMap::new(),
-            error_handler: LoggingErrorHandler{},
-            exit_signal: exit_rx,
-        }
+        JobManager::new(
+            Arc::new(RwLock::new(config)), 
+            LoggingErrorHandler{}
+        ).await.expect("Could not make dummy JobManager")
     }
 
-    // TODO: test that:
+    // Test that:
     // 1) [x] Already running standard jobs prevent the LUT jobs from starting
     // 2) [x] The presence of LUT jobs in the queue prevent new standard jobs from starting
-    // 3) [ ] Once LUT jobs finish, standard jobs are allowed to start
+    // 3) [x] Once LUT jobs finish, standard jobs are allowed to start
     #[tokio::test]
     async fn test_lut_with_running_jobs() {
         let mut manager = make_dummy_job_manager().await;

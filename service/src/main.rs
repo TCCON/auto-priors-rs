@@ -1,6 +1,8 @@
-use std::{sync::Arc, collections::HashMap, time::Duration};
+use std::{sync::{Arc, atomic::AtomicBool}, time::Duration};
 
 use clokwerk::{TimeUnits, Job};
+use log::{info, warn};
+use signal_hook::{consts::signal, iterator::Signals};
 use tokio::sync::{RwLock, Mutex, OnceCell};
 
 mod error;
@@ -19,16 +21,16 @@ async fn main() -> anyhow::Result<()> {
     let config = Arc::new(RwLock::new(config));
 
     let err_handler = error::LoggingErrorHandler{};
-    let (_exit_sx, exit_rx) = tokio::sync::watch::channel(ExitCommand::Continue);
 
-    let job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager{
-        db_conn: db.get_connection().await.expect("Failed to initialize database connection for job manager"),
-        shared_config: config,
-        error_handler: err_handler,
-        exit_signal: exit_rx.clone(),
-        job_queues: HashMap::new()
-    };
+    let job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager::new_from_pool(
+        &db, 
+        config, 
+        err_handler
+    ).await.expect("Failed to initialize job manager");
+        
     JOBS_MANAGER.set(Mutex::new(job_manager)).expect("Could not set the global job manager");
+
+    let mut signals = setup_signals().expect("Could not set up signal handling");
 
     let mut scheduler = clokwerk::AsyncScheduler::new();
     scheduler
@@ -50,20 +52,33 @@ async fn main() -> anyhow::Result<()> {
         lut_job.at(&at);
     }
 
-    // Start the scheduler
-    {
-        let exit = exit_rx.clone();
-        tokio::spawn(async move {
-            loop {
-                let sig = { exit.borrow().to_owned() };
-                if let ExitCommand::Continue = sig {
-                    scheduler.run_pending().await;
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                } else {
-                    break;
-                }
+    let schedule_handle = tokio::spawn(async move {
+        loop {
+            scheduler.run_pending().await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+
+    // schedule_handle.abort();
+
+    // If I understand the signal_hook docs correctly, this should be an infinite loop.
+    for sig in &mut signals {
+        match sig {
+            signal::SIGHUP => todo!(), // reload config
+            signal::SIGINT => {
+                schedule_handle.abort();
+                shutdown_components(ExitCommand::Graceful).await;
+                break;
+            },
+            signal::SIGTERM | signal::SIGQUIT => {
+                schedule_handle.abort();
+                shutdown_components(ExitCommand::Rapid).await;
+                break;
+            },
+            _ => {
+                info!("Received signal {sig}, taking no action");
             }
-        });
+        }
     }
 
     Ok(())
@@ -71,7 +86,34 @@ async fn main() -> anyhow::Result<()> {
 
 #[derive(Debug, Clone, Copy)]
 enum ExitCommand {
-    Continue,
     Graceful,
     Rapid
+}
+
+fn setup_signals() -> std::io::Result<Signals> {
+    // Copied from https://docs.rs/signal-hook/latest/signal_hook/index.html
+    // This should make it so that two Ctrl+C signals will immediately exit
+    let term_now = Arc::new(AtomicBool::new(true));
+    for sig in signal_hook::consts::TERM_SIGNALS {
+        signal_hook::flag::register_conditional_shutdown(*sig, 1, Arc::clone(&term_now))?;
+        signal_hook::flag::register(*sig, Arc::clone(&term_now))?;
+    }
+
+    let mut sigs = vec![
+        signal::SIGHUP, // we'll use this to reload the config, signal_hook docs imply that is common for daemons
+    ];
+    // this should include SIGTERM, SIGQUIT, and SIGINT. INT will be our graceful shutdown, the other two our rapid
+    // shutdown.
+    sigs.extend(signal_hook::consts::TERM_SIGNALS);
+
+    Signals::new(sigs)
+}
+
+async fn shutdown_components(exit_cmd: ExitCommand) {
+    if let Some(jobs_manager) = JOBS_MANAGER.get() {
+        let mut lock = jobs_manager.lock().await;
+        lock.stop_jobs(exit_cmd).await;
+    } else {
+        warn!("Could not get access to jobs manager to properly stop running jobs; some jobs may be in an incomplete state.");
+    }
 }
