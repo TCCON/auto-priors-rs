@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
 
     let job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager::new_from_pool(
         &db, 
-        config, 
+        Arc::clone(&config), 
         err_handler
     ).await.expect("Failed to initialize job manager");
         
@@ -59,12 +59,17 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // schedule_handle.abort();
-
     // If I understand the signal_hook docs correctly, this should be an infinite loop.
     for sig in &mut signals {
         match sig {
-            signal::SIGHUP => todo!(), // reload config
+            signal::SIGHUP => {
+                let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
+                info!("Reloading configuration");
+                let new_config = orm::config::load_config_file_or_default(config_file)?;
+                let mut global_config = config.write().await;
+                *global_config = new_config; // todo: verify this works
+                
+            }, // reload config
             signal::SIGINT => {
                 schedule_handle.abort();
                 shutdown_components(ExitCommand::Graceful).await;
