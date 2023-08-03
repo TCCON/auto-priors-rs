@@ -306,6 +306,15 @@ impl GinputConfig {
             },
         }
     }
+
+    pub async fn start_lut_regen(&self) -> JobResult<crate::jobs::GinputRunner> {
+        match self {
+            GinputConfig::Script { entry_point_path } => {
+                crate::jobs::start_lut_regen_through_shell(&entry_point_path)
+                    .await
+            }
+        }
+    }
 }
 
 /// Configuration section dealing with input data for jobs

@@ -1131,26 +1131,28 @@ impl GinputRunner {
         }
     }
 
-    pub async fn cancel(&mut self, conn: &mut MySqlConn, job: &mut Job) -> JobResult<()> {
+    pub async fn cancel_ginput_job(&mut self, conn: &mut MySqlConn, job: Option<&mut Job>) -> JobResult<()> {
         match self {
             GinputRunner::Shell(runner) => runner.cancel().await?,
         }
 
-        std::fs::remove_dir_all(&job.save_dir)
-            .unwrap_or_else(|e| warn!(
-                "Error occurred while trying to remove run directory ({}) for job {}. Error was: {e}",
-                job.save_dir.display(), job.job_id
-            ));
+        if let Some(job) = job {
+            std::fs::remove_dir_all(&job.save_dir)
+                .unwrap_or_else(|e| warn!(
+                    "Error occurred while trying to remove run directory ({}) for job {}. Error was: {e}",
+                    job.save_dir.display(), job.job_id
+                ));
 
-        job.set_state(conn, JobState::Pending)
-            .await?;
-            // .with_context(|| format!(
-            //     "An error occurred while trying to reset the state for job #{} to 'pending'; job may need reset manually to finish.",
-            //     job.job_id
-            // ))?;
-
+            job.set_state(conn, JobState::Pending)
+                .await?;
+                // .with_context(|| format!(
+                //     "An error occurred while trying to reset the state for job #{} to 'pending'; job may need reset manually to finish.",
+                //     job.job_id
+                // ))?;
+        }
         Ok(())
     }
+
 }
 
 pub fn job_run_dir(config: &crate::config::Config, job_id: i32) -> std::io::Result<PathBuf> {
@@ -1212,6 +1214,22 @@ impl ShellGinputRunner {
     }
 }
 
+pub async fn start_lut_regen_through_shell(
+    run_ginput_path: &Path
+) -> JobResult<GinputRunner> {
+    // TODO: send to LUT log file or log to the normal log file (capture output)
+
+    let child = tokio::process::Command::new(run_ginput_path)
+        .arg("auto")
+        .arg("regen-lut")
+        .spawn()
+        .map_err(|e| JobError::RunDirectoryError(e))?;
+
+    let shell_runner = ShellGinputRunner { child };
+
+    Ok(GinputRunner::Shell(shell_runner))
+}
+
 pub async fn start_job_for_date_through_shell(
     conn: &mut MySqlConn,
     date: NaiveDate,
@@ -1269,6 +1287,8 @@ pub async fn start_job_for_date_through_shell(
     let log_stderr = Stdio::from(log_file);
 
     let child = tokio::process::Command::new(run_ginput_path)
+        .arg("auto")
+        .arg("run")
         .arg(args_file)
         .stdout(log_stdout)
         .stderr(log_stderr)

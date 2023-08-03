@@ -1,4 +1,4 @@
-use std::{sync::Arc, collections::HashMap, time::Duration};
+use std::{sync::Arc, collections::HashMap};
 
 use clokwerk::{TimeUnits, Job};
 use tokio::sync::{RwLock, Mutex, OnceCell};
@@ -32,7 +32,6 @@ async fn main() -> anyhow::Result<()> {
         shared_config: config,
         error_handler: err_handler,
         exit_signal: exit_rx.clone(),
-        lut_regen_time: None,
         job_queues: HashMap::new()
     };
     JOBS_MANAGER.set(Mutex::new(job_manager)).expect("Could not set the global job manager");
@@ -51,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
             .run(|| async { 
                 let mutex = JOBS_MANAGER.get().unwrap();
                 let mut jm = mutex.lock().await;
-                jm.schedule_lut_regen();
+                jm.schedule_lut_regen().await;
             });
     
 
