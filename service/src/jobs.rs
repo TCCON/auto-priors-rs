@@ -12,6 +12,89 @@ const LUT_REGEN_BLOCKING_PRIORITY: i32 = 10;
 static LUT_QUEUE_NAME: &'static str = "LUT_REGEN";
 
 
+/// A manager for parsing job input files, starting jobs, and regenerating the chemical LUTs
+/// 
+/// Processing automatic ginput jobs as part of the systemd service requires several steps:
+/// 
+/// 1. *Parse input files:* this requires scanning for text files matching the `input_file_pattern`
+///    in the configuration and entering the request into the `Jobs` database table. 
+/// 2. *Regenerate the chemical LUTs if needed:* `ginput` needs to calculate look up tables for
+///    stratospheric CO2, N2O, and CH4. Calculating these takes a fair amount of time, so we don't
+///    do it for every run. Instead this should be done once and the tables stored on disk for reuse.
+///    `ginput` can do that automatically, but if we let each job make that determination, we run the 
+///    risk of corrupting the LUT files with multiple processes each writing to the files at the same
+///    time. Instead, this needs to be done as a special job periodically (at least once a month, but
+///    once a day is safer). See **Usage** and **Queues** below.
+/// 3. *Starting queued jobs:* once jobs are in the `Jobs` table, we need to launch `ginput` for each
+///    one, but limit the maximum number to avoid monopolizing all the resources on our system. See
+///    **Queues** below.
+/// 
+/// # Usage
+/// 
+/// 1. Instantiate an instance using either `new_from_pool` or `new`. The former is 
+///    preferred when you will already have a pool of database connections that we
+///    can get a database connection from:
+/// 
+/// ```ignore
+/// // orm is the tccon_priors_orm crate
+/// let db_url = orm::get_database_url(None)?;
+/// let db = orm::get_database_pool(Some(db_url.clone())).await.unwrap();
+/// let config = orm::config::load_config_file_or_default(None).unwrap();
+/// let job_manager = JobManager::new_from_pool(
+///     &db, Arc::new(RwLock::new(config)), LoggingErrorHandler {}
+/// )
+/// 
+/// // now we can reuse the `db` pool for other components that need database connections
+/// ```
+/// 
+/// 2. Periodically call the [`JobManager::scheduler_entry_point`] method. This is intended
+///    to be called from within a [`clokwerk::AsyncScheduler`] job, but could also just be
+///    called in a loop. Each time this method is called, it reads any job input files and
+///    starts as many of the next highest priority jobs as it is allowed.
+/// 
+/// 3. About once per day, call the [`JobManager::schedule_lut_regen`] method. This will
+///    add a special set of jobs to regenerate the `ginput` chemical look up tables at the
+///    next opportunity.
+/// 
+/// 4. To stop, call the [`JobManager::stop_jobs`] method. If called with [`ExitCommand::Graceful`],
+///    this will allow any currently running jobs to finish, then return. If called with 
+///    [`ExitCommand::Rapid`], it will immediately stop the jobs, but clean up their run
+///    directories and reset their status in the database to "pending". 
+/// 
+/// # Queues
+/// In this automation code, we use "queue" to refer to two similar but slightly different
+/// concepts. The first is what set of resources a particular job in the database table is
+/// allowed to call on. For example, we could define a "requests" queue which manually 
+/// requested jobs go into and a "stdsites" queue, which the jobs to generate the priors
+/// for standard TCCON and EM27 sites go into. The "requests" queue might be allowed to use
+/// at most 4 processors, so users can't overwhelm our system, but the "stdsites" queue might
+/// get 10 processors, since we can schedule it for times when the system isn't being heavily
+/// used.
+/// 
+/// The second use of "queue" refers to the list of actively running jobs maintained by the
+/// `JobManager` as instances of [`Queue`]. Each queue of the first sense maps to one queue 
+/// of the second sense; that is, given the example above, the `JobManager` would have one 
+/// [`Queue`] for requested jobs and one for standard site jobs. These [`Queue`] objects
+/// help ensure that the number of jobs running in them is correctly capped, per the configuration.
+/// 
+/// The [`Queue`] objects also have the concept of a "blocking priority", which was put in
+/// place to deal with the LUT regeneration requirements. Blocking priority is set up so that
+/// queues with different blocking priorities never run at the same time, and jobs waiting in
+/// a queue with a higher blocking priority prevent jobs in a lower blocking priority queue 
+/// from starting. As an example, consider this sequence of events:
+/// 
+/// * Four regular `ginput` jobs are running in a queue with a blocking priority of 0.
+/// * While they are running, jobs to regenerate the LUTs are added to a queue with a blocking
+///   priority of 10. These LUT jobs can't start yet because jobs in a queue with a different
+///   blocking priority (the four `ginput` jobs) are still running.
+/// * As each `ginput` job finishes, the job manager will replace it with the next job in the
+///   database table. However, the new jobs won't start, because the LUT jobs (with their
+///   higher blocking priority) are waiting.
+/// * Once all four of the initial `ginput` jobs are done, then the LUT jobs can start.
+///   As long as they are running, no regular `ginput` jobs will start.
+/// * Finally, when the LUT jobs are done, the `ginput` jobs resume.
+/// 
+/// This approach can be extended to other tasks that are mutually exclusive with each other.
 #[derive(Debug)]
 pub(crate) struct JobManager<T: Queueable, H: ErrorHandler> {
     pub(crate) db_conn: MySqlPC,
@@ -21,16 +104,31 @@ pub(crate) struct JobManager<T: Queueable, H: ErrorHandler> {
 }
 
 impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
+    /// Create a new instance of a `JobManager`
+    /// 
+    /// This method creates a database pool just to get onoe connection from it.
+    /// If you need other database connections, use [`JobManager::new_from_pool`]
+    /// instead and create a pool yourself.
+    /// 
+    /// # Returns
+    /// The `JobManager` instance, only returns an `Err` if connecting to the database
+    /// failed.
     #[allow(dead_code)] // used in tests
     pub(crate) async fn new(
         shared_config: Arc<RwLock<Config>>, 
         error_handler: H,
     ) -> anyhow::Result<Self> {
         let db_url = orm::get_database_url(None)?;
-        let db = orm::get_database_pool(Some(db_url.clone())).await.unwrap();
+        let db = orm::get_database_pool(Some(db_url.clone())).await?;
         Self::new_from_pool(&db, shared_config, error_handler).await
     }
 
+    /// Create a new instance of `JobManager`, taking a database connection from an existing database pool.
+    /// 
+    /// See the struct help for example usage.
+    /// 
+    /// # Returns
+    /// The `JobManager` instance, only returns an `Err` if getting the database connection failed.
     pub(crate) async fn new_from_pool(
         db: &orm::PoolWrapper, 
         shared_config: Arc<RwLock<Config>>, 
@@ -45,7 +143,18 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         })
     }
 
+    /// The main driver function to be called in a loop or frequently scheduled task.
+    /// 
+    /// This will scan for new job submission files and start as many jobs as it is
+    /// allowed. Complete jobs will be pruned from the internal queues as well.
+    /// 
+    /// Note that while errors may occur in this function, they are passed to the instance's
+    /// error handler to report (usually to a log file and/or email). 
     pub(crate) async fn scheduler_entry_point(&mut self) {
+        // TODO: check if the configuration queues still match the ones we have stored
+        // and update if needed. Alternatively, pop any empty queues from the HashMap
+        // so that they eventually get updated. The former approach would benefit from
+        // switching the config to a tokio watcher tunnel.
         self.scan_for_job_submissions()
             .await
             .unwrap_or_else(|e| {
@@ -66,6 +175,10 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         
     }
 
+    /// Insert special jobs to regenerate ginput's chemical LUTs into the queues
+    /// 
+    /// This should be called about once per day to ensure that the LUTs are up to date,
+    /// as they will periodically need to extrapolate further into the future.
     pub(crate) async fn schedule_lut_regen(&mut self) {
         // For each ginput defined in the config, add a blocking job to the special queue
         // to regenerate its LUTs
@@ -89,7 +202,8 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         }
     }
 
-    pub(crate) async fn scan_for_job_submissions(&mut self) -> anyhow::Result<()> {
+    /// Scan for job request files and add them to the database.
+    async fn scan_for_job_submissions(&mut self) -> anyhow::Result<()> {
         let (input_glob_pattern, save_dir) = { 
             let c = self.shared_config
                 .read().await;
@@ -109,7 +223,11 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         orm::input_files::add_jobs_from_input_files(&mut self.db_conn, &input_files, &save_dir).await
     }
 
-    pub(crate) async fn add_pending_jobs_to_queues(&mut self) -> anyhow::Result<()> {
+    /// Insert the next highest priority job(s) from the database into the internal queues.
+    /// 
+    /// This also prunes finished jobs from the internal queues. It does *not* start the jobs,
+    /// see `start_queues_with_jobs`.
+    async fn add_pending_jobs_to_queues(&mut self) -> anyhow::Result<()> {
         let queue_names = self.get_all_queue_names().await?;
 
         info!("{} queues to add jobs for", queue_names.len());
@@ -144,7 +262,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                 let job_id = next_job.job_id;
                 let runner = T::new_from_job(
                     next_job, 
-                    & *self.shared_config.read().await,
+                    & *self.shared_config.read().await
                 );
                 
                 if !this_queue.add(runner).await {
@@ -171,6 +289,11 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         Ok(())
     }
 
+    /// Handles stopping jobs when terminating the service.
+    /// 
+    /// Given an [`ExitCommand::Graceful`], any running jobs are allowed 
+    /// to finish before this function returns. Conversely, [`ExitCommand::Rapid`]
+    /// will stop running jobs ASAP and reset their state in the database.
     pub async fn stop_jobs(&mut self, exit_cmd: ExitCommand) {
         match exit_cmd {
             ExitCommand::Graceful => self.wait_for_jobs_to_finish().await,
@@ -178,11 +301,12 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         }
     }
 
+    /// Start jobs waiting in queues, respecting queue blocking priority
     async fn start_queues_with_jobs(&mut self) -> anyhow::Result<()> {
         let pending_queues = self.get_all_queue_names().await?;
 
         for queue_name in pending_queues.iter() {
-            if self.can_queue_start_jobs(queue_name).await? {
+            if self.can_queue_start_jobs(queue_name).await {
                 let conn = &mut self.db_conn;
                 let config = self.shared_config.read().await;
                 if let Some(queue) = self.job_queues.get_mut(queue_name) {
@@ -194,6 +318,11 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         Ok(())
     }
 
+    /// Get the list of all queue names we need to update.
+    /// 
+    /// This includes all internal queues (whether or not they have jobs) and
+    /// any queues listed in the `Jobs` database table. Will return an error
+    /// if querying the database for queue names failed.
     async fn get_all_queue_names(&mut self) -> anyhow::Result<Vec<String>> {
         let mut queue_names = Job::get_queues_with_pending_jobs(&mut self.db_conn)
             .await
@@ -208,7 +337,8 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         Ok(queue_names)
     }
 
-    async fn can_queue_start_jobs(&self, queue_name: &str) -> anyhow::Result<bool> {
+    /// Check if a queue with the given name is allowed to start jobs, based on blocking priority rules.
+    async fn can_queue_start_jobs(&self, queue_name: &str) -> bool {
         
         let queue_bp = self.job_queues
             .get(queue_name)
@@ -220,7 +350,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             if other_bp < queue_bp {
                 if other_queue.has_running_jobs() {
                     info!("Queue '{queue_name}' cannot start jobs because it is waiting for jobs in queue {other_name} to finish");
-                    return Ok(false)
+                    return false
                 }
 
             }
@@ -228,20 +358,23 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             if other_bp > queue_bp {
                 if other_queue.num_jobs_left() > 0 {
                     info!("Queue '{queue_name}' cannot start jobs because a higher blocking priority queue ({other_name}) has jobs pending");
-                    return Ok(false)
+                    return false
                 }
             }
         }
 
-        Ok(true)
+        true
     }
 
+    /// Repeatedly check if all jobs currently running are done and return when that is true.
+    /// 
+    /// This is used for the [`ExitCommand::Graceful`] case.
     async fn wait_for_jobs_to_finish(&mut self) {
         loop {
             let mut njobs = 0;
             for (name, queue) in self.job_queues.iter_mut() {
                 queue.clean_up_finished(&mut self.db_conn, &self.error_handler).await;
-                njobs += queue.num_jobs_left();
+                njobs += queue.num_jobs_running();
                 debug!("Jobs remaining in {name}: {}", queue.num_jobs_left());
             }
 
@@ -254,6 +387,9 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         }
     }
 
+    /// Halt any running jobs and reset their state in the database and on disk.
+    /// 
+    /// This is used for the [`ExitCommand::Rapid`] case.
     async fn stop_and_reset_jobs(&mut self) {
         for (name, queue) in self.job_queues.iter_mut() {
             queue.cancel_running_jobs(&mut self.db_conn, &self.error_handler).await;
@@ -263,13 +399,32 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
 }
 
 
+/// Represents an object that can be used in a [`Queue`]
+/// 
+/// Note, this mainly exists to allow mocking jobs for testing; in proper execution,
+/// all jobs will be instances of [`ServiceJobRunner`]. Jobs to run ginput to generate
+/// priors and to update the LUTs are both variants of [`ServiceJobRunner`], not 
+/// separate implementors of this trait (though that could change in the future).
 #[async_trait]
 pub(crate) trait Queueable {
+    /// Create a new instance of this type from a job in the database.
     fn new_from_job(job: Job, config: &Config) -> Self;
+
+    /// Create a new instance of this type that will regenerate LUTs for the given `ginput` configuration.
     fn new_lut_job(ginput_key: String) -> Self;
+
+    /// Start the job, updating the database if needed.
     async fn start(&mut self, conn: &mut MySqlConn, config: &Config) -> anyhow::Result<()>;
-    fn is_running(&self) -> bool;
+
+    /// Return whether this job has started yet. It can be `true` even if the job is complete,
+    /// use `is_done` instead to check if a previously started job is complete or errored.
+    fn has_started(&self) -> bool;
+
+    /// Return whether a job is waiting to start/actively running (`false`) or completed/errored (`true`).
+    /// This should also do any finalization 
     async fn is_done(&mut self, conn: &mut MySqlConn) -> anyhow::Result<bool>;
+
+    /// Stop this job prematurely, do whatever cleanup is required.
     async fn cancel(&mut self, conn: &mut MySqlConn) -> anyhow::Result<bool>;
 }
 
@@ -281,14 +436,20 @@ pub(crate) struct Queue<T: Queueable> {
 } 
 
 impl<T: Queueable> Queue<T> {
+    /// Create a new `Queue` that allows at most `max_num_items` to be in it at once.
+    /// The queue will have a blocking priority of 0 (see the [`JobManager`] help for
+    /// details on blocking priority).
     pub fn new(max_num_items: usize) -> Self {
         Self { max_num_items, items: Vec::new(), blocking_priority: 0 }
     }
 
+    /// Create a new queue with a given blocking priority, see [`JobManager`] for details
+    /// on that.
     pub fn new_blocking(max_num_items: usize, blocking_priority: i32) -> Self {
         Self { max_num_items, items: Vec::new(), blocking_priority }
     }
 
+    /// Return the queue's blocking priority.
     pub fn blocking_priority(&self) -> i32 {
         self.blocking_priority
     }
@@ -321,9 +482,10 @@ impl<T: Queueable> Queue<T> {
         }
     }
 
+    /// Start running any items in the queue not already in progrees.
     pub async fn start(&mut self, conn: &mut MySqlConn, config: &Config, error_handler: &dyn ErrorHandler) {
         for item in self.items.iter_mut() {
-            if !item.is_running() {
+            if !item.has_started() {
                 item.start(conn, config).await
                 .unwrap_or_else(|e| error_handler.report_error(e.as_ref()));
             }
@@ -353,15 +515,19 @@ impl<T: Queueable> Queue<T> {
         }
     }
 
+    /// How many jobs are currently in this queue.
+    /// Note that jobs waiting to start and completed/errored count; this does
+    /// *not* run `clean_up_finished` before counting jobs.
     pub fn num_jobs_left(&self) -> usize {
         self.items.len()
     }
 
-    #[allow(dead_code)] // used in unit tests
+    /// Number of jobs that have been started. Jobs that have finished but not
+    /// been pruned yet still count.
     pub fn num_jobs_running(&self) -> usize {
         self.items.iter()
             .fold(0, |acc, el| {
-                if el.is_running() {
+                if el.has_started() {
                     acc + 1
                 }else{
                     acc
@@ -369,11 +535,13 @@ impl<T: Queueable> Queue<T> {
             })
     }
 
+    /// Return `true` if there are any actively running jobs in this queue.
     pub fn has_running_jobs(&self) -> bool {
         self.items.iter()
-            .any(|i| i.is_running())
+            .any(|i| i.has_started())
     }
 
+    /// Stop and clean up any jobs running in this queue.
     pub async fn cancel_running_jobs(&mut self, conn: &mut MySqlConn, error_handler: &dyn ErrorHandler) {
         for item in self.items.iter_mut() {
             item.cancel(conn).await
@@ -383,6 +551,17 @@ impl<T: Queueable> Queue<T> {
     }
 }
 
+
+/// The object that runs a job
+/// 
+/// There are three levels of indirection:
+/// 1. This enum handles whether we are generating priors (`GinputJob`) or updating the look up tables
+///    (`LutRegenJob`) as well as iterating over dates in a given job. The latter is necessary in case
+///    different ginput configurations or meteorology paths are needed for different days of the same job.
+/// 2. Internally, it has a [`GinputRunner`], which is an enum over possible ways of calling `ginput`,
+///    e.g. via the shell or directly through a Rust/Python interface. 
+/// 3. [`GinputRunner`] holds internally a separate struct which actually implements the given way of 
+///    calling `ginput`. Right now, there is only a [`ShellGinputRunner`].
 #[derive(Debug)]
 pub enum ServiceJobRunner {
     GinputJob{job: Job, inner_runner: Option<GinputRunner>},
@@ -444,6 +623,9 @@ impl ServiceJobRunner {
         // so we verify here too. (That check should go in the core-orm since it'll be used in a couple places.)
         // As long as the job falls entirely within one of the configured time periods, we can set up the ginput
         // run. Otherwise, we either error or break this into multiple calls.
+
+        // TODO: check if this needs spawned into its own thread to avoid blocking the main scheduler thread
+        // See: https://docs.rs/clokwerk/latest/clokwerk/struct.AsyncScheduler.html#method.run_pending
         let date_iter = orm::utils::DateIterator::new(
             vec![(job.start_date, job.end_date)]
         );
@@ -528,7 +710,7 @@ impl Queueable for ServiceJobRunner {
         Self::LutRegenJob { ginput_key, inner_runner: None }
     }
 
-    fn is_running(&self) -> bool {
+    fn has_started(&self) -> bool {
         // I don't think there can be a race condition between this and start - since start
         // takes a mutable ref, it can't be called at the same time as this function,
         // so we should never have a case where start is in progress when this is called
@@ -602,7 +784,7 @@ mod tests {
             Ok(())
         }
 
-        fn is_running(&self) -> bool {
+        fn has_started(&self) -> bool {
             self.start_time.is_some()
         }
 
