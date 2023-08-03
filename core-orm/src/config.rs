@@ -33,7 +33,8 @@ pub struct Config {
     pub execution: ExecutionConfig,
     pub data: DataConfig,
     pub default_options: Vec<DefaultOptions>,
-    pub admin: AdminConfig
+    pub admin: AdminConfig,
+    pub timing: ServiceTimingOptions
 }
 
 impl Config {
@@ -546,6 +547,31 @@ pub struct JobQueueOptions {
 impl Default for JobQueueOptions {
     fn default() -> Self {
         Self { max_num_procs: 1 }
+    }
+}
+
+
+/// Configuration for how frequently elements of the systemd service run
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceTimingOptions {
+    pub met_download_hours: u32,
+    pub job_start_seconds: u32,
+    pub lut_regen_hours: u32,
+    pub lut_regen_at: Option<String>,
+    pub std_site_gen_hours: u32,
+    pub std_site_gen_at: Option<String>
+}
+
+impl Default for ServiceTimingOptions {
+    fn default() -> Self {
+        Self { 
+            met_download_hours: 6, 
+            job_start_seconds: 60, 
+            lut_regen_hours: 24, 
+            lut_regen_at: Some("00:00".to_string()), 
+            std_site_gen_hours: 24, 
+            std_site_gen_at: Some("03:00".to_string()) 
+        }
     }
 }
 

@@ -1,17 +1,10 @@
-use std::{sync::Arc, collections::HashMap};
+use std::{sync::Arc, collections::HashMap, time::Duration};
 
 use clokwerk::{TimeUnits, Job};
 use tokio::sync::{RwLock, Mutex, OnceCell};
 
 mod error;
 mod jobs;
-
-#[derive(Debug, Clone, Copy)]
-enum ExitCommand {
-    Continue,
-    Graceful,
-    Rapid
-}
 
 static JOBS_MANAGER: OnceCell<Mutex<jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler>>> = OnceCell::const_new();
 
@@ -22,6 +15,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
     let config = orm::config::load_config_file_or_default(config_file)?;
+    let timing_config = (&config.timing).clone();
     let config = Arc::new(RwLock::new(config));
 
     let err_handler = error::LoggingErrorHandler{};
@@ -38,21 +32,46 @@ async fn main() -> anyhow::Result<()> {
 
     let mut scheduler = clokwerk::AsyncScheduler::new();
     scheduler
-        .every(1.minute())
+        .every(timing_config.job_start_seconds.seconds())
             .run(|| async {
                 let mutex = JOBS_MANAGER.get().unwrap();
                 let mut jm = mutex.lock().await;
                 jm.scheduler_entry_point().await;
             });
-    scheduler
-        .every(1.day())
-            .at("00:00")
+
+    let lut_job = scheduler
+        .every(timing_config.lut_regen_hours.hours())
             .run(|| async { 
                 let mutex = JOBS_MANAGER.get().unwrap();
                 let mut jm = mutex.lock().await;
                 jm.schedule_lut_regen().await;
             });
-    
+    if let Some(at) = timing_config.lut_regen_at {
+        lut_job.at(&at);
+    }
+
+    // Start the scheduler
+    {
+        let exit = exit_rx.clone();
+        tokio::spawn(async move {
+            loop {
+                let sig = { exit.borrow().to_owned() };
+                if let ExitCommand::Continue = sig {
+                    scheduler.run_pending().await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                } else {
+                    break;
+                }
+            }
+        });
+    }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExitCommand {
+    Continue,
+    Graceful,
+    Rapid
 }
