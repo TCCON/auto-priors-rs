@@ -1,10 +1,10 @@
 use log::error;
 
-pub(crate) trait ErrorHandler: Sync {
+pub(crate) trait ErrorHandler: Clone + Sync + Send {
     fn report_error(&self, err: &(dyn std::error::Error + Send + Sync + 'static));
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct LoggingErrorHandler {}
 
 impl ErrorHandler for LoggingErrorHandler {

@@ -28,7 +28,7 @@ pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
 /// 
 /// [`ExecutionConfig`], [`DataConfig`], [`AdminConfig`], and a `Vec` of 
 /// [`DefaultOptions`] objects comprise subsections.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub execution: ExecutionConfig,
     pub data: DataConfig,
@@ -218,7 +218,7 @@ impl Config {
 }
 
 /// Configuration section dealing with how jobs are run
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ExecutionConfig {
     /// Maximum number of jobs to run simultaneously
     pub queues: HashMap<String, JobQueueOptions>,
@@ -285,7 +285,7 @@ impl Default for ExecutionConfig {
 }
 
 /// Configuration describing an available version of ginput that the automation can call.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum GinputConfig {
     /// A ginput installation to be called via its `run_ginput.py` entry point. Requires
@@ -319,7 +319,7 @@ impl GinputConfig {
 }
 
 /// Configuration section dealing with input data for jobs
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct DataConfig {
     /// A map of arrays of configurations that specify how to download reanalysis files.
     /// Each config in the array represents a file that needs to be downloaded for ginput
@@ -453,7 +453,7 @@ impl DownloadConfig {
 
 
 /// Configuration section dealing with error reporting and job limits
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AdminConfig {
     /// A list of email addresses to contact if an unexpected error occurs.
     pub admin_emails: Vec<String>,

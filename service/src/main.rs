@@ -1,14 +1,17 @@
 use std::{sync::{Arc, atomic::AtomicBool}, time::Duration};
 
 use clokwerk::{TimeUnits, Job};
+use error::LoggingErrorHandler;
 use log::{info, warn};
 use signal_hook::{consts::signal, iterator::Signals};
 use tokio::sync::{RwLock, Mutex, OnceCell};
 
 mod error;
 mod jobs;
+mod met;
 
-static JOBS_MANAGER: OnceCell<Mutex<jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler>>> = OnceCell::const_new();
+static JOBS_MANAGER: OnceCell<Mutex<jobs::JobManager<jobs::ServiceJobRunner,LoggingErrorHandler>>> = OnceCell::const_new();
+static MET_MANAGER: OnceCell<Mutex<met::MetManager<LoggingErrorHandler>>> = OnceCell::const_new();
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -22,35 +25,64 @@ async fn main() -> anyhow::Result<()> {
 
     let err_handler = error::LoggingErrorHandler{};
 
+    let mut scheduler = clokwerk::AsyncScheduler::new();
+    let mut signals = setup_signals().expect("Could not set up signal handling");
+
+    // JOB MANAGER SETUP //
+
     let job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager::new_from_pool(
         &db, 
         Arc::clone(&config), 
-        err_handler
+        err_handler.clone()
     ).await.expect("Failed to initialize job manager");
         
     JOBS_MANAGER.set(Mutex::new(job_manager)).expect("Could not set the global job manager");
 
-    let mut signals = setup_signals().expect("Could not set up signal handling");
 
-    let mut scheduler = clokwerk::AsyncScheduler::new();
     scheduler
         .every(timing_config.job_start_seconds.seconds())
-            .run(|| async {
-                let mutex = JOBS_MANAGER.get().unwrap();
-                let mut jm = mutex.lock().await;
-                jm.scheduler_entry_point().await;
-            });
+        .run(|| async {
+            let mutex = JOBS_MANAGER.get().unwrap();
+            let mut jm = mutex.lock().await;
+            jm.scheduler_entry_point().await;
+        });
 
     let lut_job = scheduler
         .every(timing_config.lut_regen_hours.hours())
-            .run(|| async { 
-                let mutex = JOBS_MANAGER.get().unwrap();
-                let mut jm = mutex.lock().await;
-                jm.schedule_lut_regen().await;
-            });
+        .run(|| async { 
+            // Should be safe to unwrap, will only be None if JOBS_MANAGER wasn't set, and 
+            // we did that above
+            let mutex = JOBS_MANAGER.get().unwrap();
+            let mut jm = mutex.lock().await;
+            jm.schedule_lut_regen().await;
+        });
     if let Some(at) = timing_config.lut_regen_at {
         lut_job.at(&at);
     }
+
+    // END JOB MANAGER SETUP //
+
+    // MET MANAGER SETUP //
+
+    let met_manager: met::MetManager::<LoggingErrorHandler> = met::MetManager::new_with_pool(
+        db.clone(), 
+        Arc::clone(&config), 
+        LoggingErrorHandler {  }
+    ).await;
+
+    MET_MANAGER.set(Mutex::new(met_manager)).expect("Could not set the global met manager");
+
+    scheduler
+        .every(timing_config.met_download_hours.hours())
+        .run(|| async {
+            // Should be safe to unwrap, will only be None if MET_MANAGER wasn't set, and 
+            // we did that above
+            let mutex = MET_MANAGER.get().unwrap();
+            let mut mm = mutex.lock().await;
+            mm.scheduler_entry_point().await;
+        });
+
+    // END MET MANAGER SETUP //
 
     let schedule_handle = tokio::spawn(async move {
         loop {

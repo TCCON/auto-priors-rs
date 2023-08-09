@@ -1778,6 +1778,7 @@ dependencies = [
  "log",
  "signal-hook",
  "sqlx",
+ "tccon-priors-cli",
  "tccon_priors_orm",
  "tokio",
 ]

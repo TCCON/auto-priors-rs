@@ -62,6 +62,7 @@ pub fn get_database_url(url_in: Option<String>) -> anyhow::Result<String> {
 /// interaction with each other. That means setting the isolation level to `SERIALIZABLE`.
 /// This wrapper ensures that any connections returned via the `get_connection` method
 /// have that setting applied.
+#[derive(Debug, Clone)]
 pub struct PoolWrapper(sqlx::MySqlPool);
 
 impl PoolWrapper {

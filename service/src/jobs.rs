@@ -483,7 +483,7 @@ impl<T: Queueable> Queue<T> {
     }
 
     /// Start running any items in the queue not already in progrees.
-    pub async fn start(&mut self, conn: &mut MySqlConn, config: &Config, error_handler: &dyn ErrorHandler) {
+    pub async fn start<H: ErrorHandler>(&mut self, conn: &mut MySqlConn, config: &Config, error_handler: &H) {
         for item in self.items.iter_mut() {
             if !item.has_started() {
                 item.start(conn, config).await
@@ -497,7 +497,7 @@ impl<T: Queueable> Queue<T> {
     /// Typically, you would call this method before `add`
     /// or `num_can_add` to remove any completed jobs to
     /// make room for new ones.
-    pub async fn clean_up_finished(&mut self, conn: &mut MySqlConn, error_handler: &dyn ErrorHandler) {
+    pub async fn clean_up_finished<H: ErrorHandler>(&mut self, conn: &mut MySqlConn, error_handler: &H) {
         let old_items = std::mem::take(&mut self.items);
         for mut item in old_items {
             let still_running = match item.is_done(conn).await {
@@ -542,7 +542,7 @@ impl<T: Queueable> Queue<T> {
     }
 
     /// Stop and clean up any jobs running in this queue.
-    pub async fn cancel_running_jobs(&mut self, conn: &mut MySqlConn, error_handler: &dyn ErrorHandler) {
+    pub async fn cancel_running_jobs<H: ErrorHandler>(&mut self, conn: &mut MySqlConn, error_handler: &H) {
         for item in self.items.iter_mut() {
             item.cancel(conn).await
                 .map(|_| ()) // need this to avoid a type error on the unwrap; don't care if there was a task to cancel
