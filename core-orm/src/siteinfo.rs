@@ -136,6 +136,8 @@ impl StdSite {
 struct QStdSite {
     id: i32,
     site_id: String,
+    #[allow(dead_code)]
+    name: String,
     site_type: String
 }
 
@@ -149,8 +151,8 @@ pub struct SiteInfo {
     pub site_id: Option<String>,
     #[serde(skip)]
     site: i32,
-    /// The long name of this site.
-    pub name: String,
+    /// The long name of this site. May be `None` for the same reason as `site_id`.
+    pub name: Option<String>,
     /// The human-readable location of this site (e.g. "Park Falls, WI, USA")
     pub location: String,
     /// The latitude of this site, south is negative.
@@ -264,7 +266,7 @@ impl SiteInfo {
                 json_map.insert(
                     sid,
                     Site {
-                        name: this_info.name.clone(),
+                        name: this_info.name.as_ref().map(|name| name.to_string()).unwrap_or_default(),
                         location: this_info.location.clone(),
                         time_periods: vec![info_to_tp(this_info)]
                     }
@@ -571,12 +573,11 @@ impl SiteInfo {
         Ok(())
     }
 
-    pub async fn create(conn: &mut MySqlConn, site: i32, name: &str, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<Self> {
+    pub async fn create(conn: &mut MySqlConn, site: i32, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<Self> {
         let q = sqlx::query!(
-            r#"INSERT INTO StdSiteInfo(site, name, location, latitude, longitude, start_date, end_date, comment)
-               VALUES(?, ?, ?, ?, ?, ?, ?, ?)"#,
+            r#"INSERT INTO StdSiteInfo(site, location, latitude, longitude, start_date, end_date, comment)
+               VALUES(?, ?, ?, ?, ?, ?, ?)"#,
             site,
-            name,
             location,
             latitude,
             longitude,
@@ -596,7 +597,7 @@ impl SiteInfo {
         Ok(new)
     }
 
-    pub async fn create_from_site_id(conn: &mut MySqlConn, site_id: &str, name: &str, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<Self> {
+    pub async fn create_from_site_id(conn: &mut MySqlConn, site_id: &str, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<Self> {
         let site = sqlx::query!(
             "SELECT id FROM StdSiteList WHERE site_id = ?",
             site_id
@@ -605,7 +606,7 @@ impl SiteInfo {
         .ok_or_else(|| anyhow::anyhow!("No site known matching site ID '{site_id}'"))?
         .id;
 
-        Self::create(conn, site, name, location, latitude, longitude, start_date, end_date, comment).await
+        Self::create(conn, site, location, latitude, longitude, start_date, end_date, comment).await
     }
 
     pub async fn set_location(&mut self, conn: &mut MySqlConn, location: String) -> anyhow::Result<()> {
@@ -689,7 +690,6 @@ impl SiteInfo {
         Self::create(
             conn,
             self.site,
-            &self.name,
             &self.location,
             self.latitude,
             self.longitude,

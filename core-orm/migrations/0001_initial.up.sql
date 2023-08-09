@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS `Jobs` (
 CREATE TABLE IF NOT EXISTS `StdSiteList` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `site_id` char(2) NOT NULL,
+  `name` varchar(32) NOT NULL,
   `site_type` enum('Unknown','TCCON','EM27') NOT NULL DEFAULT 'Unknown',
   PRIMARY KEY (`id`),
   UNIQUE KEY `site_id` (`site_id`)
@@ -88,7 +89,6 @@ CREATE TABLE IF NOT EXISTS `StdSiteList` (
 CREATE TABLE IF NOT EXISTS `StdSiteInfo` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `site` int(11) NOT NULL,
-  `name` varchar(32) NOT NULL,
   `location` varchar(64) NOT NULL,
   `latitude` float NOT NULL,
   `longitude` float NOT NULL,
@@ -125,14 +125,14 @@ CREATE TABLE IF NOT EXISTS `StdSiteJobs` (
 CREATE OR REPLACE VIEW `v_StdSiteInfo` AS select 
   `StdSiteInfo`.`id` AS `id`,
   `StdSiteInfo`.`site` AS `site`,
-  `StdSiteInfo`.`name` AS `name`,
   `StdSiteInfo`.`location` AS `location`,
   `StdSiteInfo`.`latitude` AS `latitude`,
   `StdSiteInfo`.`longitude` AS `longitude`,
   `StdSiteInfo`.`start_date` AS `start_date`,
   `StdSiteInfo`.`end_date` AS `end_date`,
   `StdSiteInfo`.`comment` AS `comment`,
-  `StdSiteList`.`site_id` AS `site_id` from (`StdSiteInfo` left join `StdSiteList` on(`StdSiteInfo`.`site` = `StdSiteList`.`id`));
+  `StdSiteList`.`site_id` AS `site_id`,
+  `StdSiteList`.`name` AS `name` from (`StdSiteInfo` left join `StdSiteList` on(`StdSiteInfo`.`site` = `StdSiteList`.`id`));
 
 --
 -- Table structure for view `v_StdSiteJobs`
