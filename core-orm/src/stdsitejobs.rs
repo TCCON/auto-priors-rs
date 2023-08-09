@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{NaiveDate, Duration};
 use futures::TryStreamExt;
@@ -51,7 +51,8 @@ pub struct StdSiteJob {
     pub site_id: String,
     pub date: NaiveDate,
     pub state: StdSiteJobState,
-    pub job: Option<i32>
+    pub job: Option<i32>,
+    pub tarfile: Option<PathBuf>
 }
 
 impl From<QStdSiteJob> for StdSiteJob {
@@ -62,7 +63,8 @@ impl From<QStdSiteJob> for StdSiteJob {
             site_id: site_id, 
             date: query_job.date,
             state: query_job.state.into(),
-            job: query_job.job
+            job: query_job.job,
+            tarfile: query_job.tarfile.map(|s| PathBuf::from(s))
         }
     }
 }
@@ -126,6 +128,8 @@ impl StdSiteJob {
                 end_date
             ).fetch(conn)
         };
+
+        
 
         let mut avail_std_site_days = vec![];
         loop {
@@ -299,6 +303,7 @@ struct QStdSiteJob {
     site_id: Option<String>,
     date: NaiveDate,
     state: i8,
-    job: Option<i32>
+    job: Option<i32>,
+    tarfile: Option<String>
 }
 

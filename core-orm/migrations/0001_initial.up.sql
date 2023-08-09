@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS `StdSiteJobs` (
   `date` date NOT NULL,
   `state` tinyint(4) NOT NULL DEFAULT -1,
   `job` int(11) DEFAULT NULL,
+  `tarfile` text DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `U_Site_Date` (`site`,`date`),
   KEY `job` (`job`),
@@ -143,4 +144,5 @@ CREATE OR REPLACE VIEW `v_StdSiteJobs` AS select
   `StdSiteJobs`.`date` AS `date`,
   `StdSiteJobs`.`state` AS `state`,
   `StdSiteJobs`.`job` AS `job`,
+  `StdSiteJobs`.`tarfile` AS `tarfile`,
   `StdSiteList`.`site_id` AS `site_id` from (`StdSiteJobs` left join `StdSiteList` on(`StdSiteJobs`.`site` = `StdSiteList`.`id`));
