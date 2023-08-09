@@ -34,15 +34,141 @@ pub fn date_range(start_date: NaiveDate, end_date: NaiveDate) -> Vec<NaiveDate> 
 /// 
 /// # Returns
 /// `true` if the ranges overlap by at least 1 day, `false` otherwise.
-pub fn date_ranges_overlap(r1_start: NaiveDate, r1_end: Option<NaiveDate>, r2_start: NaiveDate, r2_end: Option<NaiveDate>) -> bool {
-    if let Some(r1_end) = r1_end {
-        if r2_start >= r1_end { return false; }   
-    }
-    if let Some(r2_end) = r2_end {
-        if r2_end <= r1_start { return false; }
-    }
-    return true
+pub fn date_ranges_overlap(r1_start: Option<NaiveDate>, r1_end: Option<NaiveDate>, r2_start: Option<NaiveDate>, r2_end: Option<NaiveDate>) -> bool {
+    DateRangeOverlap::classify(r1_start, r1_end, r2_start, r2_end).has_overlap()
 }
+
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum DateRangeOverlap {
+    /// The second date range is fully within the first, meaning that all dates from the second are also in the first
+    AContainsB,
+
+    /// The first date range is fully within the second, meaning that all dates from the first are also in the second
+    AInsideB,
+
+    /// The end of the first date range overlaps with the start of the second. This does *not* includes the case where
+    /// the start dates are the same in both ranges and the first range ends before the second (that is considered
+    /// `AContainsB`). Note that the end date of the first must be greater than (not equal to) the start date of the 
+    /// second, as date range end dates are assumed to be exclusive.
+    AEndsInB,
+
+    /// The start of the first date range overlaps the end of the second. This does *not* include the case where the
+    /// end dates are the same in both ranges and the first starts after the second (that is considered `AContainsB`). 
+    /// Note that the end date of the second must be greater than (not equal to) the start date of the first, as end 
+    /// dates are assumed to be exclusive.
+    AStartsInB,
+
+    /// The bounds of both date ranges are exactly the same.
+    AEqualsB,
+
+    /// There is no overlap between the two date ranges; if the end date of one range equals the start date
+    /// of another, that is no overlap because date ranges are assumed to be exclusive.
+    None
+}
+
+impl DateRangeOverlap {
+    pub fn has_overlap(&self) -> bool {
+        self != &Self::None
+    }
+
+    pub fn classify(r1_start: Option<NaiveDate>, r1_end: Option<NaiveDate>, r2_start: Option<NaiveDate>, r2_end: Option<NaiveDate>) -> Self {
+        match (r1_start, r1_end, r2_start, r2_end) {
+            (None, None, None, None) => DateRangeOverlap::AEqualsB,
+            (None, None, None, Some(_)) => DateRangeOverlap::AContainsB,
+            (None, None, Some(_), None) => DateRangeOverlap::AContainsB,
+            (None, None, Some(_), Some(_)) => DateRangeOverlap::AContainsB,
+            (None, Some(_), None, None) => DateRangeOverlap::AEndsInB,
+            (None, Some(e1), None, Some(e2)) => {
+                if e1 == e2 {
+                    DateRangeOverlap::AEqualsB
+                } else if e1 < e2 {
+                    DateRangeOverlap::AInsideB
+                } else {
+                    DateRangeOverlap::AContainsB
+                }
+            },
+            (None, Some(e1), Some(s2), None) => {
+                if e1 <= s2 {
+                    DateRangeOverlap::None
+                } else {
+                    DateRangeOverlap::AEndsInB
+                }
+            },
+            (None, Some(e1), Some(s2), Some(e2)) => {
+                if e1 <= s2 {
+                    DateRangeOverlap::None
+                } else if e1 > s2 && e1 < e2 {
+                    DateRangeOverlap::AEndsInB
+                } else {
+                    DateRangeOverlap::AContainsB
+                }
+            },
+            (Some(_), None, None, None) => DateRangeOverlap::AStartsInB,
+            (Some(s1), None, None, Some(e2)) => {
+                if s1 >= e2 {
+                    DateRangeOverlap::None
+                } else {
+                    DateRangeOverlap::AStartsInB
+                }
+            },
+            (Some(s1), None, Some(s2), None) => {
+                if s1 == s2 {
+                    DateRangeOverlap::AEqualsB
+                } else if s1 < s2 {
+                    DateRangeOverlap::AContainsB
+                } else {
+                    DateRangeOverlap::AInsideB
+                }
+            },
+            (Some(s1), None, Some(s2), Some(e2)) => {
+                if s1 <= s2 {
+                    DateRangeOverlap::AContainsB
+                } else if s1 < e2 {
+                    DateRangeOverlap::AStartsInB
+                } else {
+                    DateRangeOverlap::None
+                }
+            },
+            (Some(_), Some(_), None, None) => DateRangeOverlap::AInsideB,
+            (Some(s1), Some(e1), None, Some(e2)) => {
+                if e2 <= s1 {
+                    DateRangeOverlap::None
+                } else if e1 <= e2 {
+                    DateRangeOverlap::AInsideB
+                } else {
+                    DateRangeOverlap::AStartsInB
+                }
+            },
+            (Some(s1), Some(e1), Some(s2), None) => {
+                if s2 >= e1 {
+                    DateRangeOverlap::None
+                } else if s1 >= s2 {
+                    DateRangeOverlap::AInsideB
+                } else {
+                    DateRangeOverlap::AEndsInB
+                }
+            },
+            (Some(s1), Some(e1), Some(s2), Some(e2)) => {
+                if s1 == s2 && e1 == e2 {
+                    DateRangeOverlap::AEqualsB
+                } else if s1 <= s2 && e1 >= e2 {
+                    DateRangeOverlap::AContainsB
+                } else if s1 < s2 && e1 > s2 && e1 <= e2 {
+                    DateRangeOverlap::AEndsInB
+                } else if s1 > s2 && s1 < e2 && e1 > e2 {
+                    DateRangeOverlap::AStartsInB
+                } else if s1 > e2 || s2 > e1 {
+                    DateRangeOverlap::None
+                } else {
+                    DateRangeOverlap::AInsideB
+                }
+            },
+        }
+    }
+}
+
+
 
 
 pub struct DateIterator {
@@ -111,8 +237,12 @@ mod tests {
 
     use super::*;
 
+    fn date(y: i32, m: u32, d: u32) -> Option<NaiveDate> {
+        NaiveDate::from_ymd_opt(y, m, d)
+    }
+
     #[test]
-    fn test_date_range_overlap() -> anyhow::Result<()> {
+    fn test_date_range_overlap_bool() -> anyhow::Result<()> {
         let r1_start = NaiveDate::from_ymd_opt(2010, 1, 1).unwrap();
         let r1_end = NaiveDate::from_ymd_opt(2010, 1, 31).unwrap();
         let r2_before = NaiveDate::from_ymd_opt(2009, 12, 1).unwrap();
@@ -122,38 +252,91 @@ mod tests {
         let r2_after2 = NaiveDate::from_ymd_opt(2010, 3, 1).unwrap();
         
         // Test when both ranges are open ended, making sure that the result is symmetrical
-        assert_eq!(date_ranges_overlap(r1_start, None, r2_before, None), true);
-        assert_eq!(date_ranges_overlap(r1_start, None, r2_between, None), true);
-        assert_eq!(date_ranges_overlap(r1_start, None, r2_after, None), true);
+        assert_eq!(date_ranges_overlap(Some(r1_start), None, Some(r2_before), None), true);
+        assert_eq!(date_ranges_overlap(Some(r1_start), None, Some(r2_between), None), true);
+        assert_eq!(date_ranges_overlap(Some(r1_start), None, Some(r2_after), None), true);
 
-        assert_eq!(date_ranges_overlap(r2_before, None, r1_start, None), true);
-        assert_eq!(date_ranges_overlap(r2_between, None, r1_start, None), true);
-        assert_eq!(date_ranges_overlap(r2_after, None, r1_start, None), true);
+        assert_eq!(date_ranges_overlap(Some(r2_before), None, Some(r1_start), None), true);
+        assert_eq!(date_ranges_overlap(Some(r2_between), None, Some(r1_start), None), true);
+        assert_eq!(date_ranges_overlap(Some(r2_after), None, Some(r1_start), None), true);
         
         // Test when one range has an end date - the only non-overlapping cases should be
         // when the start date of the open ended range is after the end date of the closed
         // range.
-        assert_eq!(date_ranges_overlap(r1_start, Some(r1_end), r2_before, None), true);
-        assert_eq!(date_ranges_overlap(r1_start, Some(r1_end), r2_between, None), true);
-        assert_eq!(date_ranges_overlap(r1_start, Some(r1_end), r2_after, None), false);
+        assert_eq!(date_ranges_overlap(Some(r1_start), Some(r1_end), Some(r2_before), None), true);
+        assert_eq!(date_ranges_overlap(Some(r1_start), Some(r1_end), Some(r2_between), None), true);
+        assert_eq!(date_ranges_overlap(Some(r1_start), Some(r1_end), Some(r2_after), None), false);
 
-        assert_eq!(date_ranges_overlap(r2_before, None, r1_start, Some(r1_end)), true);
-        assert_eq!(date_ranges_overlap(r2_between, None, r1_start, Some(r1_end)), true);
-        assert_eq!(date_ranges_overlap(r2_after, None, r1_start, Some(r1_end)), false);
+        assert_eq!(date_ranges_overlap(Some(r2_before), None, Some(r1_start), Some(r1_end)), true);
+        assert_eq!(date_ranges_overlap(Some(r2_between), None, Some(r1_start), Some(r1_end)), true);
+        assert_eq!(date_ranges_overlap(Some(r2_after), None, Some(r1_start), Some(r1_end)), false);
 
         // Test when both ranges have end dates - the non-overlapping cases should be 
         // when either ranges' start date is after the other one's end date
-        assert_eq!(date_ranges_overlap(r1_start, Some(r1_end), r2_before, Some(r2_before2)), false);
-        assert_eq!(date_ranges_overlap(r1_start, Some(r1_end), r2_before, Some(r2_between)), true);
-        assert_eq!(date_ranges_overlap(r1_start, Some(r1_end), r2_between, Some(r2_after)), true);
-        assert_eq!(date_ranges_overlap(r1_start, Some(r1_end), r2_after, Some(r2_after2)), false);
+        assert_eq!(date_ranges_overlap(Some(r1_start), Some(r1_end), Some(r2_before), Some(r2_before2)), false);
+        assert_eq!(date_ranges_overlap(Some(r1_start), Some(r1_end), Some(r2_before), Some(r2_between)), true);
+        assert_eq!(date_ranges_overlap(Some(r1_start), Some(r1_end), Some(r2_between), Some(r2_after)), true);
+        assert_eq!(date_ranges_overlap(Some(r1_start), Some(r1_end), Some(r2_after), Some(r2_after2)), false);
         
-        assert_eq!(date_ranges_overlap(r2_before, Some(r2_before2), r1_start, Some(r1_end)), false);
-        assert_eq!(date_ranges_overlap(r2_before, Some(r2_between), r1_start, Some(r1_end)), true);
-        assert_eq!(date_ranges_overlap(r2_between, Some(r2_after), r1_start, Some(r1_end)), true);
-        assert_eq!(date_ranges_overlap(r2_after, Some(r2_after2), r1_start, Some(r1_end)), false);
+        assert_eq!(date_ranges_overlap(Some(r2_before), Some(r2_before2), Some(r1_start), Some(r1_end)), false);
+        assert_eq!(date_ranges_overlap(Some(r2_before), Some(r2_between), Some(r1_start), Some(r1_end)), true);
+        assert_eq!(date_ranges_overlap(Some(r2_between), Some(r2_after), Some(r1_start), Some(r1_end)), true);
+        assert_eq!(date_ranges_overlap(Some(r2_after), Some(r2_after2), Some(r1_start), Some(r1_end)), false);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_date_range_overlap_classification() {
+        // A == B
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), date(2010, 1, 31), date(2010, 1, 1), date(2010, 1, 31)), DateRangeOverlap::AEqualsB);
+        assert_eq!(DateRangeOverlap::classify(None, date(2010, 1, 31), None, date(2010, 1, 31)), DateRangeOverlap::AEqualsB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), None, date(2010, 1, 1), None), DateRangeOverlap::AEqualsB);
+        assert_eq!(DateRangeOverlap::classify(None, None, None, None), DateRangeOverlap::AEqualsB);
+
+        // A contains B
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), date(2010, 12, 31), date(2010, 6, 1), date(2010, 6, 30)), DateRangeOverlap::AContainsB);
+        assert_eq!(DateRangeOverlap::classify(None, date(2010, 12, 31), date(2010, 6, 1), date(2010, 6, 30)), DateRangeOverlap::AContainsB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), None, date(2010, 6, 1), date(2010, 6, 30)), DateRangeOverlap::AContainsB);
+        assert_eq!(DateRangeOverlap::classify(None, None, date(2010, 6, 1), date(2010, 6, 30)), DateRangeOverlap::AContainsB);
+        assert_eq!(DateRangeOverlap::classify(None, date(2010, 12, 31), None, date(2010, 6, 30)), DateRangeOverlap::AContainsB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), None, date(2010, 6, 1), None), DateRangeOverlap::AContainsB);
+        assert_eq!(DateRangeOverlap::classify(None, None, None, date(2010, 6, 30)), DateRangeOverlap::AContainsB);
+        assert_eq!(DateRangeOverlap::classify(None, None, date(2010, 6, 1), None), DateRangeOverlap::AContainsB);
+
+        // (edge cases with equal start or end dates)
+        assert_eq!(DateRangeOverlap::classify(None, date(2010, 6, 1), date(2010, 1, 1), date(2010, 6, 1)), DateRangeOverlap::AContainsB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), None, date(2010, 1, 1), date(2010, 6, 1)), DateRangeOverlap::AContainsB);
+
+        // A inside B
+        assert_eq!(DateRangeOverlap::classify(date(2010, 6, 1), date(2010, 6, 30), date(2010, 1, 1), date(2010, 12, 31)), DateRangeOverlap::AInsideB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 6, 1), date(2010, 6, 30), None, date(2010, 12, 31)), DateRangeOverlap::AInsideB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 6, 1), date(2010, 6, 30), date(2010, 1, 1), None), DateRangeOverlap::AInsideB);
+        assert_eq!(DateRangeOverlap::classify(None, date(2010, 6, 30), None, date(2010, 12, 31)), DateRangeOverlap::AInsideB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 6, 1), None, date(2010, 1, 1), None), DateRangeOverlap::AInsideB);
+        
+        // (edge cases with equal start or end dates)
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), date(2010, 6, 1), date(2010, 1, 1), None), DateRangeOverlap::AInsideB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), date(2010, 6, 1), None, date(2010, 6, 1)), DateRangeOverlap::AInsideB);
+
+        // A ends in B
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), date(2010, 9, 1), date(2010, 3, 1), date(2010, 12, 31)), DateRangeOverlap::AEndsInB);
+        assert_eq!(DateRangeOverlap::classify(None, date(2010, 9, 1), date(2010, 3, 1), date(2010, 12, 31)), DateRangeOverlap::AEndsInB);
+        assert_eq!(DateRangeOverlap::classify(None, date(2010, 9, 1), date(2010, 3, 1), None), DateRangeOverlap::AEndsInB);
+        assert_eq!(DateRangeOverlap::classify(None, date(2010, 9, 1), None, None), DateRangeOverlap::AEndsInB);
+
+        // A starts in B
+        assert_eq!(DateRangeOverlap::classify(date(2010, 6, 1), date(2010, 12, 31), date(2010, 1, 1), date(2010, 9, 1)), DateRangeOverlap::AStartsInB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 6, 1), None, date(2010, 1, 1), date(2010, 9, 1)), DateRangeOverlap::AStartsInB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 6, 1), None, None, date(2010, 9, 1)), DateRangeOverlap::AStartsInB);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 6, 1), None, None, None), DateRangeOverlap::AStartsInB);
+
+        // No overlap
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), date(2010, 3, 1), date(2010, 6, 1), date(2010, 9, 1)), DateRangeOverlap::None);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 6, 1), date(2010, 9, 1), date(2010, 1, 1), date(2010, 3, 1)), DateRangeOverlap::None);
+        assert_eq!(DateRangeOverlap::classify(None, date(2010, 3, 1), date(2010, 6, 1), date(2010, 12, 1)), DateRangeOverlap::None);
+        assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), date(2010, 3, 1), date(2010, 6, 1), None), DateRangeOverlap::None);
+
     }
 
 

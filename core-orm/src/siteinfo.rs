@@ -1,10 +1,11 @@
 //! Interface to the standard site information tables
 use std::{collections::HashMap, str::FromStr};
 
-use anyhow;
+use anyhow::{self, Context};
 use chrono::{NaiveDate, Duration};
+use log::error;
 use serde::Serialize;
-use sqlx::{self, FromRow, Type};
+use sqlx::{self, FromRow, Type, Connection};
 
 use crate::utils;
 
@@ -399,30 +400,30 @@ impl SiteInfo {
         }
     }
 
-    pub async fn get_one_site_location_for_date_range(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<SiteInfo> {
+    pub async fn get_site_locations_for_date_range(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<Vec<SiteInfo>> {
         let site_infos = sqlx::query_as!(
             SiteInfo,
             "SELECT * FROM v_StdSiteInfo WHERE site_id = ?",
             site_id
         ).fetch_all(conn)
-        .await?;
+        .await?
+        .into_iter()
+        .filter(|info| utils::date_ranges_overlap(Some(start_date), end_date, Some(info.start_date), info.end_date))
+        .collect();
 
-        let mut matching_info = None;
-        for info in site_infos.into_iter() {
-            if utils::date_ranges_overlap(start_date, end_date, info.start_date, info.end_date) {
-                if matching_info.is_none() { 
-                    matching_info = Some(info); 
-                }
-                else {
-                    anyhow::bail!("Multiple locations defined for site {site_id} between {start_date} and {end_date:?}");
-                }
-            }
-        }
+        Ok(site_infos)
+    }
 
-        if matching_info.is_none() {
+
+    pub async fn get_one_site_location_for_date_range(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<SiteInfo> {
+        let mut site_infos = Self::get_site_locations_for_date_range(conn, site_id, start_date, end_date).await?;
+        if site_infos.is_empty() {
             anyhow::bail!("No location defined for site {site_id} between {start_date} and {end_date:?}");
-        }else{
-            return Ok(matching_info.unwrap())
+        } else if site_infos.len() > 1 {
+            anyhow::bail!("Multiple locations defined for site {site_id} between {start_date} and {end_date:?}");
+        } else {
+            // length == 1
+            Ok(site_infos.pop().unwrap())
         }
     }
 
@@ -491,12 +492,221 @@ impl SiteInfo {
 
         let mut n = 0;
         for info in infos {
-            if utils::date_ranges_overlap(start_date, end_date, info.start_date, info.end_date) {
+            if utils::date_ranges_overlap(Some(start_date), end_date, Some(info.start_date), info.end_date) {
                 n += 1;
             }
         }
         
         return Ok(n)
+    }
+
+    pub async fn set_site_location_for_dates(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>, location: Option<String>, longitude: Option<f32>, latitude: Option<f32>) -> anyhow::Result<()> {
+        let overlapped_locs = Self::get_site_locations_for_date_range(conn, site_id, start_date, end_date).await?;
+
+        // Get the location string, longitude, and latitude from existing overlapped site information if these
+        // values are not provided as inputs.
+        let location = location
+            .map(|loc| Ok(loc))
+            .unwrap_or_else(|| {
+                get_consistent_value_from_infos(&overlapped_locs, |info| {info.location.clone()}, |a, b| a == b)
+            }).with_context(|| "Could not infer location from overlapped site information ranges")?;
+
+        let longitude = longitude
+            .map(|lon| Ok(lon))
+            .unwrap_or_else(|| {
+                get_consistent_value_from_infos(&overlapped_locs, |info| info.longitude, |a, b| (a - b).abs() < 1e-6)
+            }).with_context(|| "Could not infer longitude from overlapped site information ranges")?;
+
+        let latitude = latitude
+            .map(|lat| Ok(lat))
+            .unwrap_or_else(|| {
+                get_consistent_value_from_infos(&overlapped_locs, |info| info.latitude, |a, b| (a - b).abs() < 1e-6)
+            }).with_context(|| "Could not infer latitude from overlapped site information ranges")?;
+
+        let mut trans = conn.begin().await?;
+
+        for mut oloc in overlapped_locs {
+            match utils::DateRangeOverlap::classify(Some(start_date), end_date, Some(oloc.start_date), oloc.end_date) {
+                // The old site info is entirely inside the new one, so delete the old one
+                utils::DateRangeOverlap::AContainsB => oloc.delete(&mut trans).await?,
+
+                // Split the previous standard site information block and insert the new one in the middle
+                utils::DateRangeOverlap::AInsideB => {
+                    if let Some(end) = end_date {
+                        // It's possible that the new range has no end date, in which case we don't need to create a second
+                        // copy of the original info range being split
+                        oloc.duplicate_with_new_dates(&mut trans, end, oloc.end_date).await?;
+                    }
+                    oloc.set_end_date(&mut trans, Some(start_date)).await?;
+                },
+
+                // Need to change the start date for the previous info range
+                utils::DateRangeOverlap::AEndsInB => {
+                    if let Some(end) = end_date {
+                        oloc.set_start_date(&mut trans, end).await?;
+                    } else {
+                        error!("New site info range ends inside a preexisting one, but the new range has no end date!");
+                    }
+                },
+
+                // Need to change the end date for the overlapped info range so that it ends when we start
+                utils::DateRangeOverlap::AStartsInB => oloc.set_end_date(&mut trans, Some(start_date)).await?,
+
+                // Complete overwrite - just remove the old one
+                utils::DateRangeOverlap::AEqualsB => {
+                    oloc.delete(&mut trans).await?;
+                },
+
+                // No overlap - nothing to do
+                utils::DateRangeOverlap::None => (),
+            }
+        }
+
+        // Self::create_from_site_id(
+        //     conn,
+        //     site_id, name, location, latitude, longitude, start_date, end_date, comment)
+
+        trans.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn create(conn: &mut MySqlConn, site: i32, name: &str, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<Self> {
+        let q = sqlx::query!(
+            r#"INSERT INTO StdSiteInfo(site, name, location, latitude, longitude, start_date, end_date, comment)
+               VALUES(?, ?, ?, ?, ?, ?, ?, ?)"#,
+            site,
+            name,
+            location,
+            latitude,
+            longitude,
+            start_date,
+            end_date,
+            comment.unwrap_or("")
+        ).execute(&mut *conn)
+        .await?;
+
+        let new = sqlx::query_as!(
+            SiteInfo,
+            "SELECT * FROM v_StdSiteInfo WHERE site_id = ?",
+            q.last_insert_id()
+        ).fetch_one(conn)
+        .await?;
+
+        Ok(new)
+    }
+
+    pub async fn create_from_site_id(conn: &mut MySqlConn, site_id: &str, name: &str, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<Self> {
+        let site = sqlx::query!(
+            "SELECT id FROM StdSiteList WHERE site_id = ?",
+            site_id
+        ).fetch_optional(&mut *conn)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("No site known matching site ID '{site_id}'"))?
+        .id;
+
+        Self::create(conn, site, name, location, latitude, longitude, start_date, end_date, comment).await
+    }
+
+    pub async fn set_location(&mut self, conn: &mut MySqlConn, location: String) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE StdSiteInfo SET location = ? WHERE id = ?",
+            location,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.location = location;
+
+        Ok(())
+    }
+
+    pub async fn set_longitude(&mut self, conn: &mut MySqlConn, longitude: f32) -> anyhow::Result<()> {
+        let longitude = if longitude > 180.0 && longitude <= 360.0 {
+            longitude - 360.0
+        } else if longitude >= -180.0 && longitude <= 180.0 {
+            longitude
+        } else {
+            anyhow::bail!("Longitude must be in the range -180 to +360")
+        };
+
+        sqlx::query!(
+            "UPDATE StdSiteInfo SET longitude = ? WHERE id = ?",
+            longitude,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.longitude = longitude;
+
+        Ok(())
+    }
+
+    pub async fn set_latitude(&mut self, conn: &mut MySqlConn, latitude: f32) -> anyhow::Result<()> {
+        let latitude = if latitude >= -90.0 && latitude <= 90.0 {
+            latitude
+        } else {
+            anyhow::bail!("Latitude must be in the range -90 to +90")
+        };
+
+        sqlx::query!(
+            "UPDATE StdSiteInfo SET latitude = ? WHERE id = ?",
+            latitude,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.latitude = latitude;
+
+        Ok(())
+    }
+
+    pub async fn set_start_date(&mut self, conn: &mut MySqlConn, start_date: NaiveDate) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE StdSiteInfo SET start_date = ? WHERE id = ?",
+            start_date,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.start_date = start_date;
+        Ok(())
+    }
+
+    pub async fn set_end_date(&mut self, conn: &mut MySqlConn, end_date: Option<NaiveDate>) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE StdSiteInfo SET end_date = ? WHERE id = ?",
+            end_date,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.end_date = end_date;
+        Ok(())
+    }
+
+    pub async fn duplicate_with_new_dates(&self, conn: &mut MySqlConn, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<Self> {
+        Self::create(
+            conn,
+            self.site,
+            &self.name,
+            &self.location,
+            self.latitude,
+            self.longitude,
+            start_date,
+            end_date, 
+            self.comment.as_deref()
+        ).await
+    }
+
+    pub async fn delete(self, conn: &mut MySqlConn) -> anyhow::Result<()> {
+        sqlx::query!(
+            "DELETE FROM StdSiteInfo WHERE id = ?",
+            self.id
+        ).execute(conn)
+        .await?;
+
+        Ok(())
     }
 }
 
@@ -523,4 +733,29 @@ fn new_info_closer_in_time(date: NaiveDate, curr: &SiteInfo, new: &SiteInfo) -> 
     };
 
     return new_delta < curr_delta
+}
+
+fn get_consistent_value_from_infos<T, F, G>(infos: &[SiteInfo], getter: F, is_same: G) -> anyhow::Result<T>
+where
+    F: Fn(&SiteInfo) -> T,
+    G: Fn(&T, &T) -> bool,
+{
+    let mut val: Option<T> = None;
+    for info in infos {
+        let new_val = getter(info);
+        if let Some(v) = &val {
+            if !is_same(&v, &new_val) {
+                anyhow::bail!("overlapping site info ranges have different values")
+            }
+        } else {
+            val = Some(new_val);
+        }
+    }
+
+    if let Some(v) = val {
+        Ok(v)
+    } else {
+        anyhow::bail!("no overlapping site info ranges")
+    }
+    
 }

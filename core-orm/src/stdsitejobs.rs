@@ -299,6 +299,7 @@ pub struct AddStdJobSummary {
 #[derive(Debug, FromRow)]
 struct QStdSiteJob {
     id: i32,
+    #[allow(dead_code)]
     site: i32,
     site_id: Option<String>,
     date: NaiveDate,
