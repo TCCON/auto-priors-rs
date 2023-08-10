@@ -1,8 +1,9 @@
 use std::str::FromStr;
 use anyhow;
 use chrono::NaiveDate;
-use clap::{self,Args};
-use orm;
+use clap::{self,Args, Subcommand};
+use orm::{self, siteinfo::{SiteType, StdSite, SiteInfo}, MySqlConn};
+use sqlx::Connection;
 
 
 #[derive(Debug)]
@@ -70,4 +71,120 @@ pub async fn site_info_json(db: &mut orm::MySqlConn, clargs: &InfoJsonCli) -> an
     }
 
     Ok(())
+}
+
+#[derive(Debug, Args)]
+pub struct StdSiteCli {
+    #[clap(subcommand)]
+    pub command: Actions
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Actions {
+    AddSite(AddNewStdSiteCli),
+    EditSite(EditSiteCli),
+    AddInfo(AddSiteInfoCli)
+}
+
+#[derive(Debug, Args)]
+pub struct AddNewStdSiteCli {
+    site_id: String,
+    site_name: String,
+    site_type: SiteType
+}
+
+pub async fn add_new_std_site_cli(conn: &mut MySqlConn, args: AddNewStdSiteCli) -> anyhow::Result<()> {
+    add_new_std_site(conn, &args.site_id, &args.site_name, args.site_type).await
+}
+
+
+pub async fn add_new_std_site(conn: &mut MySqlConn, site_id: &str, site_name: &str, site_type: SiteType) -> anyhow::Result<()> {
+    StdSite::create(conn, site_id, site_name, site_type).await?;
+    Ok(())
+}
+
+
+#[derive(Debug, Args)]
+pub struct EditSiteCli {
+    site_id: String,
+    #[clap(long="name")]
+    site_name: Option<String>,
+    #[clap(long="type")]
+    site_type: Option<SiteType>
+}
+
+pub async fn edit_std_site_cli(conn: &mut MySqlConn, args: EditSiteCli) -> anyhow::Result<()> {
+    edit_std_site(conn, &args.site_id, args.site_name, args.site_type).await
+}
+
+pub async fn edit_std_site(conn: &mut MySqlConn, site_id: &str, site_name: Option<String>, site_type: Option<SiteType>) -> anyhow::Result<()> {
+    let mut trans = conn.begin().await?;
+
+    let mut site = if let Some(s) = StdSite::get_by_site_id(&mut trans, site_id).await? {
+        s
+    } else {
+        anyhow::bail!("No site with site ID '{site_id}'");
+    };
+
+    if let Some(name) = site_name {
+        site.set_name(&mut trans, name).await?;
+    }
+
+    if let Some(typ) = site_type {
+        site.set_type(&mut trans, typ).await?;
+    }
+
+    trans.commit().await?;
+    Ok(())
+}
+
+
+#[derive(Debug, Args)]
+pub struct AddSiteInfoCli {
+    site_id: String,
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>,
+    #[clap(short = 'l', long)]
+    location: Option<String>,
+    #[clap(short = 'x', long)]
+    longitude: Option<f32>,
+    #[clap(short = 'y', long)]
+    latitude: Option<f32>,
+    #[clap(short = 'c', long)]
+    comment: Option<String>,
+}
+
+pub async fn add_std_site_info_range_cli(conn: &mut MySqlConn, args: AddSiteInfoCli) -> anyhow::Result<()> {
+    add_std_site_info_range(
+        conn,
+        &args.site_id,
+        args.start_date,
+        args.end_date,
+        args.location,
+        args.longitude,
+        args.latitude,
+        args.comment.as_deref()
+    ).await
+}
+
+pub async fn add_std_site_info_range(
+    conn: &mut MySqlConn, 
+    site_id: &str, 
+    start_date: NaiveDate, 
+    end_date: Option<NaiveDate>, 
+    location: Option<String>, 
+    longitude: Option<f32>, 
+    latitude: Option<f32>, 
+    comment: Option<&str>
+) -> anyhow::Result<()> {
+    SiteInfo::set_site_location_for_dates(
+        conn, 
+        site_id, 
+        start_date, 
+        end_date, 
+        location, 
+        longitude, 
+        latitude, 
+        comment
+    ).await
 }

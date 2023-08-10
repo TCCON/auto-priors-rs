@@ -7,20 +7,20 @@ use log::error;
 use serde::Serialize;
 use sqlx::{self, FromRow, Type, Connection};
 
-use crate::utils;
+use crate::{utils, stdsitejobs::StdSiteJob};
 
 use super::MySqlConn;
 
 /// An enum describing the type of site
-#[derive(Debug, Type)]
-#[repr(i8)]
+#[derive(Debug, Type, Clone, Copy)]
+#[repr(i8)]  // NB: SQL enums start at 1
 pub enum SiteType {
     /// This site is neither TCCON nor an EM27. (`i8` value = `0`.)
-    Unknown = 0,
+    Unknown = 1,
     /// This is a TCCON site. (`i8` value = `1`.)
-    TCCON = 1,
+    TCCON = 2,
     /// This is a permanent EM27 site. (`i8` value = `2`.)
-    EM27 = 2
+    EM27 = 3
 }
 
 impl From<String> for SiteType {
@@ -55,6 +55,8 @@ pub struct StdSite {
     pub id: i32,
     /// The (generally) two-character site ID for this site
     pub site_id: String,
+    /// The long form name for this site
+    pub name: String,
     /// Whether this is a TCCON, EM27, or other site type.
     pub site_type: SiteType
 }
@@ -74,7 +76,7 @@ pub struct StdSite {
 
 impl From<QStdSite> for StdSite {
     fn from(obj: QStdSite) -> Self {
-        StdSite { id: obj.id, site_id: obj.site_id, site_type: SiteType::from(obj.site_type) }
+        StdSite { id: obj.id, site_id: obj.site_id, name: obj.name, site_type: SiteType::from(obj.site_type) }
     }
 }
 
@@ -126,6 +128,63 @@ impl StdSite {
         let site_ids = sites.into_iter().map(|s| s.site_id).collect();
         return Ok(site_ids)
     }
+
+    pub async fn create(conn: &mut MySqlConn, site_id: &str, site_name: &str, site_type: SiteType) -> anyhow::Result<Self> {
+        let q = sqlx::query!(
+            "INSERT INTO StdSiteList(site_id, name, site_type) VALUES (?, ?, ?)",
+            site_id,
+            site_name,
+            site_type
+        ).execute(&mut *conn)
+        .await?;
+
+        let new_id = q.last_insert_id();
+
+        let new_site = sqlx::query_as!(
+            QStdSite,
+            "SELECT * FROM StdSiteList WHERE id = ?",
+            new_id
+        ).fetch_one(conn)
+        .await?;
+        
+        Ok(Self::from(new_site))
+    }
+
+    pub async fn get_by_site_id(conn: &mut MySqlConn, site_id: &str) -> anyhow::Result<Option<Self>> {
+        let site = sqlx::query_as!(
+            QStdSite,
+            "SELECT * FROM StdSiteList WHERE site_id = ?",
+            site_id
+        ).fetch_optional(conn)
+        .await?
+        .map(StdSite::from);
+
+        Ok(site)
+    }
+
+    pub async fn set_name(&mut self, conn: &mut MySqlConn, site_name: String) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE StdSiteList SET name = ? WHERE id = ?",
+            site_name,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.name = site_name;
+        Ok(())
+    }
+
+    pub async fn set_type(&mut self, conn: &mut MySqlConn, site_type: SiteType) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE StdSiteList SET site_type = ? WHERE id = ?",
+            site_type,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.site_type = site_type;
+        Ok(())
+    }
 }
 
 
@@ -136,7 +195,6 @@ impl StdSite {
 struct QStdSite {
     id: i32,
     site_id: String,
-    #[allow(dead_code)]
     name: String,
     site_type: String
 }
@@ -502,7 +560,16 @@ impl SiteInfo {
         return Ok(n)
     }
 
-    pub async fn set_site_location_for_dates(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>, location: Option<String>, longitude: Option<f32>, latitude: Option<f32>) -> anyhow::Result<()> {
+    pub async fn set_site_location_for_dates(
+        conn: &mut MySqlConn, 
+        site_id: &str, 
+        start_date: NaiveDate, 
+        end_date: Option<NaiveDate>, 
+        location: Option<String>, 
+        longitude: Option<f32>, 
+        latitude: Option<f32>, 
+        comment: Option<&str>
+    ) -> anyhow::Result<()> {
         let overlapped_locs = Self::get_site_locations_for_date_range(conn, site_id, start_date, end_date).await?;
 
         // Get the location string, longitude, and latitude from existing overlapped site information if these
@@ -525,8 +592,24 @@ impl SiteInfo {
                 get_consistent_value_from_infos(&overlapped_locs, |info| info.latitude, |a, b| (a - b).abs() < 1e-6)
             }).with_context(|| "Could not infer latitude from overlapped site information ranges")?;
 
+        
+        // Begin modifying the tables
         let mut trans = conn.begin().await?;
 
+        // Go ahead and create our new info range first; if something later fails, the transaction will roll it back.
+        Self::create_from_site_id(
+            &mut trans,
+            site_id,
+            &location,
+            latitude,
+            longitude,
+            start_date,
+            end_date,
+            comment
+        ).await
+        .with_context(|| "Error creating new site info range")?;
+
+        // Now modify any overlapped ranges
         for mut oloc in overlapped_locs {
             match utils::DateRangeOverlap::classify(Some(start_date), end_date, Some(oloc.start_date), oloc.end_date) {
                 // The old site info is entirely inside the new one, so delete the old one
@@ -564,16 +647,16 @@ impl SiteInfo {
             }
         }
 
-        // Self::create_from_site_id(
-        //     conn,
-        //     site_id, name, location, latitude, longitude, start_date, end_date, comment)
+        // Finally, mark any past or pending job as needed regenerated
+        // TODO: make sure that when a job runs, it doesn't set the state to "complete" if it was marked as "regen needed", since presumably the job was launched before that regen needed flag was set
+        StdSiteJob::set_regen_flag(&mut trans, site_id, start_date, end_date).await?;
 
         trans.commit().await?;
 
         Ok(())
     }
 
-    pub async fn create(conn: &mut MySqlConn, site: i32, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<Self> {
+    pub async fn create(conn: &mut MySqlConn, site: i32, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<u64> {
         let q = sqlx::query!(
             r#"INSERT INTO StdSiteInfo(site, location, latitude, longitude, start_date, end_date, comment)
                VALUES(?, ?, ?, ?, ?, ?, ?)"#,
@@ -587,17 +670,10 @@ impl SiteInfo {
         ).execute(&mut *conn)
         .await?;
 
-        let new = sqlx::query_as!(
-            SiteInfo,
-            "SELECT * FROM v_StdSiteInfo WHERE site_id = ?",
-            q.last_insert_id()
-        ).fetch_one(conn)
-        .await?;
-
-        Ok(new)
+        Ok(q.last_insert_id())
     }
 
-    pub async fn create_from_site_id(conn: &mut MySqlConn, site_id: &str, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<Self> {
+    pub async fn create_from_site_id(conn: &mut MySqlConn, site_id: &str, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<u64> {
         let site = sqlx::query!(
             "SELECT id FROM StdSiteList WHERE site_id = ?",
             site_id
@@ -686,7 +762,7 @@ impl SiteInfo {
         Ok(())
     }
 
-    pub async fn duplicate_with_new_dates(&self, conn: &mut MySqlConn, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<Self> {
+    pub async fn duplicate_with_new_dates(&self, conn: &mut MySqlConn, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<u64> {
         Self::create(
             conn,
             self.site,

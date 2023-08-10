@@ -25,7 +25,9 @@ pub enum StdSiteJobState {
     /// Indicates that priors will need to be generated for this site
     Pending = 0,
     /// Indicates that priors have been generated for this site
-    Complete = 1
+    Complete = 1,
+    /// Indicates that the priors for this day need regenerated (old files will be removed if needed)
+    RegenNeeded = 2,
 }
 
 impl Default for StdSiteJobState {
@@ -288,6 +290,29 @@ impl StdSiteJob {
         }
 
         return Ok(added)
+    }
+
+    pub async fn set_regen_flag(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<u64> {
+        let q = if let Some(end) = end_date {
+            sqlx::query!(
+                "UPDATE v_StdSiteJobs SET state = ? WHERE site_id = ? AND date >= ? AND date < ?",
+                StdSiteJobState::RegenNeeded,
+                site_id,
+                start_date,
+                end
+            ).execute(conn)
+            .await?
+        } else {
+            sqlx::query!(
+                "UPDATE v_StdSiteJobs SET state = ? WHERE site_id = ? AND date >= ?",
+                StdSiteJobState::RegenNeeded,
+                site_id,
+                start_date
+            ).execute(conn)
+            .await?
+        };
+
+        Ok(q.rows_affected())
     }
 }
 

@@ -21,6 +21,7 @@ use env_logger;
 use log::{self, debug};
 use orm;
 use orm::MySqlConn;
+use tccon_priors_cli::siteinfo::StdSiteCli;
 use tokio;
 
 use tccon_priors_cli::utils;
@@ -53,7 +54,9 @@ enum Commands {
     ParseInputFilesManually(input_files::ParseInputFilesManualCli),
     AddJob(jobs::AddJobCli),
     DeleteJob(jobs::DeleteJobCli),
-    StdSites(stdsites::StdSiteJobCli),
+    StdSites(siteinfo::StdSiteCli),
+    #[clap(alias="ssj")]
+    StdSiteJobs(stdsites::StdSiteJobCli),
     SiteInfoJson(siteinfo::InfoJsonCli),
     GenConfig(GenConfigCli)
 }
@@ -195,7 +198,23 @@ async fn main() -> anyhow::Result<()> {
             jobs::delete_job(&mut conn, subargs).await?
         },
 
-        Commands::StdSites(subargs) => {
+
+        Commands::StdSites(StdSiteCli { command: siteinfo::Actions::AddSite(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            siteinfo::add_new_std_site_cli(&mut conn, subargs).await?;
+        }
+
+        Commands::StdSites(StdSiteCli { command: siteinfo::Actions::EditSite(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            siteinfo::edit_std_site_cli(&mut conn, subargs).await?;
+        }
+
+        Commands::StdSites(StdSiteCli { command: siteinfo::Actions::AddInfo(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            siteinfo::add_std_site_info_range_cli(&mut conn, subargs).await?;
+        }
+
+        Commands::StdSiteJobs(subargs) => {
             let mut conn = db.get_connection().await?;
             stdsites::standard_site_driver(&mut conn, subargs, &config).await?
         },
