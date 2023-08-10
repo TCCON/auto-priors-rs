@@ -177,7 +177,7 @@ pub async fn add_std_site_info_range(
     latitude: Option<f32>, 
     comment: Option<&str>
 ) -> anyhow::Result<()> {
-    SiteInfo::set_site_location_for_dates(
+    SiteInfo::set_site_info_for_dates(
         conn, 
         site_id, 
         start_date, 

@@ -560,7 +560,35 @@ impl SiteInfo {
         return Ok(n)
     }
 
-    pub async fn set_site_location_for_dates(
+    /// Adds a new entry in the `StdSiteInfo` table for a given range of dates
+    /// 
+    /// If the new entry overlaps existing entries for the same site in time, then
+    /// the existing entries are truncated in time to fit this entry. Should any
+    /// existing entrys be completely covered by the new entry, those existing existing
+    /// entries are deleted from the table.
+    /// 
+    /// A start date is always required, as any site will have started observing at a
+    /// definite date, and priors cannot be generated infinitely far back in time. An
+    /// end date is optional; if not given, the time period will be open-ended (i.e.
+    /// will always extend to the current date).
+    /// 
+    /// When adding the first entry for a given site, location, longitude, and latitude
+    /// must all be given. When adding other entries, any or all of these values can be
+    /// omitted. Omitted values are copied from the existing entries overlapped in time
+    /// by the new entry. If the overlapped entries have different values for an omitted
+    /// value, an error is returned.
+    /// 
+    /// A comment is always optional; comments are *not* copied from extisting overlapped 
+    /// entries.
+    /// 
+    /// If priors were already generated or queued for the site/time period modified,
+    /// those rows in the `StdSiteJobs` table will be flagged for regeneration.
+    /// 
+    /// This is the only method that should be used to add new site information entries
+    /// in order to ensure that overlapping entries are not inadvertently created. Hence
+    /// there is no public interface to change the start/end dates of a `SiteInfo` instance
+    /// directly.
+    pub async fn set_site_info_for_dates(
         conn: &mut MySqlConn, 
         site_id: &str, 
         start_date: NaiveDate, 
@@ -592,7 +620,8 @@ impl SiteInfo {
                 get_consistent_value_from_infos(&overlapped_locs, |info| info.latitude, |a, b| (a - b).abs() < 1e-6)
             }).with_context(|| "Could not infer latitude from overlapped site information ranges")?;
 
-        
+        // We do not want to copy comments; we assume that comments are unique to each time period
+
         // Begin modifying the tables
         let mut trans = conn.begin().await?;
 
@@ -630,7 +659,9 @@ impl SiteInfo {
                     if let Some(end) = end_date {
                         oloc.set_start_date(&mut trans, end).await?;
                     } else {
-                        error!("New site info range ends inside a preexisting one, but the new range has no end date!");
+                        // This really should not happen, but log just in case it does.
+                        // Don't want to panic, since that would cause the service to crash.
+                        error!("New site info range ends inside a preexisting one, but the new range has no end date! (This should not happen.)");
                     }
                 },
 
@@ -656,7 +687,12 @@ impl SiteInfo {
         Ok(())
     }
 
-    pub async fn create(conn: &mut MySqlConn, site: i32, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<u64> {
+    /// Create a new entry in the standard site information table
+    /// 
+    /// Returns the row ID of the newly created row. Note that `site` must be the 
+    /// foreign key to the `StdSiteList` table. To add by the more standard two-character
+    /// site ID, see [`SiteInfo::create_from_site_id`].
+    async fn create(conn: &mut MySqlConn, site: i32, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<u64> {
         let q = sqlx::query!(
             r#"INSERT INTO StdSiteInfo(site, location, latitude, longitude, start_date, end_date, comment)
                VALUES(?, ?, ?, ?, ?, ?, ?)"#,
@@ -670,10 +706,16 @@ impl SiteInfo {
         ).execute(&mut *conn)
         .await?;
 
+        // Originally tried to query the newly added row and actually return an instance of `Self`,
+        // but the row didn't seem to be in place at this point, so that failed.
         Ok(q.last_insert_id())
     }
 
-    pub async fn create_from_site_id(conn: &mut MySqlConn, site_id: &str, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<u64> {
+    /// Create a new entry in the standard site table with the given two-character site ID
+    /// 
+    /// This will look up the correct foreign key from the `StdSiteList` table for the given
+    /// `site_id`. If `site_id` does not exist in that table, this returns an error.
+    async fn create_from_site_id(conn: &mut MySqlConn, site_id: &str, location: &str, latitude: f32, longitude: f32, start_date: NaiveDate, end_date: Option<NaiveDate>, comment: Option<&str>) -> anyhow::Result<u64> {
         let site = sqlx::query!(
             "SELECT id FROM StdSiteList WHERE site_id = ?",
             site_id
@@ -685,6 +727,7 @@ impl SiteInfo {
         Self::create(conn, site, location, latitude, longitude, start_date, end_date, comment).await
     }
 
+    /// Set the location string of this instance and the corresponding row in the database table.
     pub async fn set_location(&mut self, conn: &mut MySqlConn, location: String) -> anyhow::Result<()> {
         sqlx::query!(
             "UPDATE StdSiteInfo SET location = ? WHERE id = ?",
@@ -698,6 +741,10 @@ impl SiteInfo {
         Ok(())
     }
 
+    /// Set the longitude of this instance and the corresponding row in the database table.
+    /// 
+    /// Longitudes must be between -180 and 360 or this returns an error. Values between
+    /// 180 and 360 are rectified to -180 to 0.
     pub async fn set_longitude(&mut self, conn: &mut MySqlConn, longitude: f32) -> anyhow::Result<()> {
         let longitude = if longitude > 180.0 && longitude <= 360.0 {
             longitude - 360.0
@@ -719,6 +766,9 @@ impl SiteInfo {
         Ok(())
     }
 
+    /// Set the latitude of this instance and the corresponding row in the database table.
+    /// 
+    /// Latitudes must be between -90 and +90 or this returns an error.
     pub async fn set_latitude(&mut self, conn: &mut MySqlConn, latitude: f32) -> anyhow::Result<()> {
         let latitude = if latitude >= -90.0 && latitude <= 90.0 {
             latitude
@@ -738,7 +788,8 @@ impl SiteInfo {
         Ok(())
     }
 
-    pub async fn set_start_date(&mut self, conn: &mut MySqlConn, start_date: NaiveDate) -> anyhow::Result<()> {
+    /// Set the start date of this instance and the corresponding row in the database table.
+    async fn set_start_date(&mut self, conn: &mut MySqlConn, start_date: NaiveDate) -> anyhow::Result<()> {
         sqlx::query!(
             "UPDATE StdSiteInfo SET start_date = ? WHERE id = ?",
             start_date,
@@ -750,7 +801,8 @@ impl SiteInfo {
         Ok(())
     }
 
-    pub async fn set_end_date(&mut self, conn: &mut MySqlConn, end_date: Option<NaiveDate>) -> anyhow::Result<()> {
+    /// Set the end date of this instance and the corresponding row in the database table.
+    async fn set_end_date(&mut self, conn: &mut MySqlConn, end_date: Option<NaiveDate>) -> anyhow::Result<()> {
         sqlx::query!(
             "UPDATE StdSiteInfo SET end_date = ? WHERE id = ?",
             end_date,
@@ -762,7 +814,11 @@ impl SiteInfo {
         Ok(())
     }
 
-    pub async fn duplicate_with_new_dates(&self, conn: &mut MySqlConn, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<u64> {
+
+    /// Create a new entry that has the same attributes as this instance except for the start and end dates.
+    /// 
+    /// The new entry is also added to the database table.
+    async fn duplicate_with_new_dates(&self, conn: &mut MySqlConn, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<u64> {
         Self::create(
             conn,
             self.site,
@@ -775,6 +831,10 @@ impl SiteInfo {
         ).await
     }
 
+    /// Delete this entry from the database table.
+    /// 
+    /// The instance is consumed by this method, as once it is deleted from the table it
+    /// is no longer a valid instance.
     pub async fn delete(self, conn: &mut MySqlConn) -> anyhow::Result<()> {
         sqlx::query!(
             "DELETE FROM StdSiteInfo WHERE id = ?",
@@ -786,7 +846,7 @@ impl SiteInfo {
     }
 }
 
-
+/// Check if a date range of a `SiteInfo` instance brackets a given date.
 fn info_brackets_date(date: NaiveDate, start_date: NaiveDate, end_date: Option<NaiveDate>) -> bool {
     if let Some(end) = end_date {
         return (date >= start_date) && (date < end)
@@ -795,6 +855,12 @@ fn info_brackets_date(date: NaiveDate, start_date: NaiveDate, end_date: Option<N
     }
 }
 
+
+/// Return `true` if `new` defines a date range closer to `date` than `curr` does.
+/// 
+/// This assumes that `date` is outside the date range of both `curr` and `new`; it
+/// is intended to help identify a `SiteInfo` instance closest to `date` when no
+/// other instance is available that actually contains `date` in its date range.
 fn new_info_closer_in_time(date: NaiveDate, curr: &SiteInfo, new: &SiteInfo) -> bool {
     let curr_delta = if date < curr.start_date {
         curr.start_date - date
@@ -811,6 +877,16 @@ fn new_info_closer_in_time(date: NaiveDate, curr: &SiteInfo, new: &SiteInfo) -> 
     return new_delta < curr_delta
 }
 
+/// Given a slice of `SiteInfo` instances, get a particular value from all of them and return it if it is the same for all instances.
+/// 
+/// This is a helper function for copying `SiteInfo` values from existing instances to a new instance
+/// that overlaps 1 or more existing instances. `getter` is a function that, given a reference to a `SiteInfo`
+/// instance, returns an owned version of the desired value from that instance. `is_same` is a function that,
+/// given references to two of the values returned by `getter`, returns `true` if both values are the same
+/// and `false` otherwise.
+/// 
+/// This returns an error if either (a) `infos` is an empty slice (meaning there are no existing values to extract)
+/// or (b) `infos` returns 2 or more different values.
 fn get_consistent_value_from_infos<T, F, G>(infos: &[SiteInfo], getter: F, is_same: G) -> anyhow::Result<T>
 where
     F: Fn(&SiteInfo) -> T,
