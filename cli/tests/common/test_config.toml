@@ -8,6 +8,7 @@ std_sites_tar_output = ''
 std_sites_output_base = ''
 start_jobs_freq = 5.0
 simulation = true
+input_file_pattern = ""
 
 [execution.ginput.v1p0p6]
 entry_point_path = "./run_ginput.py"
@@ -93,7 +94,6 @@ ginput = "v1.0.6"
 met = "geosit"
 
 [admin]
-admin_emails = []
 soft_job_limit = 100 
 hard_job_limit = 100 
 acknowledgement_message = 'Hi there!'

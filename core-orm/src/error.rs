@@ -93,3 +93,20 @@ impl From<serde_json::Error> for JobError {
         Self::InvalidJson(value)
     }
 }
+
+
+pub enum EmailError {
+    UnparsableEmail(String),
+    UnencodableBody(String),
+    SendFailure(String)
+}
+
+impl Display for EmailError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EmailError::UnparsableEmail(email) => write!(f, "Email '{email}' is not a valid email"),
+            EmailError::UnencodableBody(reason) => write!(f, "Could not encode body: {reason}"),
+            EmailError::SendFailure(reason) => write!(f, "Could not send email: {reason}")
+        }
+    }
+}

@@ -13,27 +13,37 @@ use anyhow::{self, Context};
 use chrono::{NaiveDate, NaiveDateTime, Duration};
 use hostname;
 use itertools::Itertools;
+use lettre::message::{Mailbox, Mailboxes};
 use log::{debug, warn, info};
 use serde::{Serialize, Deserialize};
 use toml;
 use url::Url;
 
-use crate::{met::{self, MetDataType}, error::{DefaultOptsQueryError, JobResult}, MySqlConn};
+use crate::{met::{self, MetDataType}, error::{DefaultOptsQueryError, JobResult, EmailError}, MySqlConn, email::SendMail};
 
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
 
 
-/// Top level configuration structure.
+/// Top level configuration structure, comprised of subsections represented by other structures:
 /// 
-/// [`ExecutionConfig`], [`DataConfig`], [`AdminConfig`], and a `Vec` of 
-/// [`DefaultOptions`] objects comprise subsections.
+/// - `execution`: an [`ExecutionConfig`] containing options about how the automation runs
+/// - `data`: a [`DataConfig`] containing options about where input data is located
+/// - `default_options`: a `Vec` of [`DefaultOptions`] that specify which ginput and met version
+///   to use by default for different time periods.
+/// - `email`: an [`EmailConfig`] that determines how emails are sent (both for usual operation and
+///   if something goes wrong)
+/// - `admin`: an [`AdminConfig`] that contains settings about how use of this service is controlled
+/// - `timing`: a [`ServiceTimingOptions`] that controls how often different parts of the service run.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub execution: ExecutionConfig,
     pub data: DataConfig,
     pub default_options: Vec<DefaultOptions>,
+    #[serde(default)]
+    pub email: EmailConfig,
     pub admin: AdminConfig,
+    #[serde(default)]
     pub timing: ServiceTimingOptions
 }
 
@@ -221,6 +231,7 @@ impl Config {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ExecutionConfig {
     /// Maximum number of jobs to run simultaneously
+    #[serde(default)]
     pub queues: HashMap<String, JobQueueOptions>,
 
     /// Maximum number of threads to let numpy use
@@ -455,9 +466,6 @@ impl DownloadConfig {
 /// Configuration section dealing with error reporting and job limits
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AdminConfig {
-    /// A list of email addresses to contact if an unexpected error occurs.
-    pub admin_emails: Vec<String>,
-
     /// Number of jobs any one user may have pending at a given moment before 
     /// a note is sent to the admins informing them of excessive usage.
     pub soft_job_limit: u32,
@@ -473,7 +481,6 @@ pub struct AdminConfig {
 impl Default for AdminConfig {
     fn default() -> Self {
         Self { 
-            admin_emails: Default::default(), 
             soft_job_limit: 100,
             hard_job_limit: 100,
             acknowledgement_message: Default::default() 
@@ -539,8 +546,10 @@ impl Display for DefaultOptions {
 }
 
 
+/// A structure describing configuration of a job queue.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobQueueOptions {
+    /// The maximum number of processors that this queue can use (default = 1)
     pub max_num_procs: usize
 }
 
@@ -554,12 +563,32 @@ impl Default for JobQueueOptions {
 /// Configuration for how frequently elements of the systemd service run
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceTimingOptions {
+    /// How many hours between attempts to download the met data. 
+    /// The met download will run on even multiples of that hour,
+    /// e.g. if this is 6, then the met download will run at 00:00,
+    /// 06:00, 12:00, and 18:00
     pub met_download_hours: u32,
+
+    /// How many seconds between attempts to start jobs. As with met,
+    /// the attempts run on even multiples of this value.
     pub job_start_seconds: u32,
-    pub lut_regen_hours: u32,
+
+    /// How frequently (in days) to insert jobs to regenerate the stratosphere
+    /// look up tables for ginput. 
+    pub lut_regen_days: u32,
+
+    /// What time of the day, in HH:MM format, to run the LUT regen. If
+    /// omitted, then that will run at midnight.
     pub lut_regen_at: Option<String>,
+
+    /// How frequently (in hours) to check for new days to generate standard
+    /// site priors and submit jobs.
     pub std_site_gen_hours: u32,
-    pub std_site_gen_at: Option<String>
+
+    /// How many minutes to add to the hours when determining when to run the
+    /// standard sites. E.g., setting this to 180 when `std_site_gen_hours` is 24
+    /// would run the standard sites at 03:00 every day.
+    pub std_site_gen_offset_minutes: Option<u32>
 }
 
 impl Default for ServiceTimingOptions {
@@ -567,13 +596,92 @@ impl Default for ServiceTimingOptions {
         Self { 
             met_download_hours: 6, 
             job_start_seconds: 60, 
-            lut_regen_hours: 24, 
+            lut_regen_days: 24, 
             lut_regen_at: Some("00:00".to_string()), 
             std_site_gen_hours: 24, 
-            std_site_gen_at: Some("03:00".to_string()) 
+            std_site_gen_offset_minutes: Some(180) 
         }
     }
 }
+
+/// Configuration for how to send emails and who to contact if there is a severe problem
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailConfig {
+    /// The email address that emails from this system come from.
+    /// The default is "noreplay@<hostname>", where <hostname> is
+    /// the host name of the system.
+    from_address: Mailbox,
+
+    /// A list of emails to contact in the event of a severe error
+    /// that needs addressed by the administrators.
+    admin_emails: Mailboxes,
+
+    /// Which email backend to use to send the emails.
+    backend: EmailBackend
+}
+
+impl Default for EmailConfig {
+    fn default() -> Self {
+        let user = "noreply";
+        let host = whoami::hostname();
+        let email = lettre::Address::new(user, host)
+            .expect("user@hostname cannot be used as a valid email address, you will need to configure the 'from_address' in the 'email' section of the config");
+        let from_addr = Mailbox::new(None, email);
+        Self { 
+            from_address: from_addr, 
+            admin_emails: Default::default(), 
+            backend: Default::default() 
+        }
+    }
+}
+
+impl EmailConfig {
+    /// Send an email, using the configured backend, from the configured address.
+    pub fn send_mail(&self, to: &[&str], cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError> {
+        let from = self.from_address.to_string();
+        match &self.backend {
+            EmailBackend::Internal(backend) => {
+                backend.send_mail(to, &from, cc, bcc, subject, message)
+            },
+            EmailBackend::Mailx(backend) => {
+                backend.send_mail(to, &from, cc, bcc, subject, message)
+            },
+        }
+    }
+
+    /// Send an email to the admins, using the configured backed and from address
+    pub fn send_mail_to_admins(&self, subject: &str, message: &str) -> Result<(), EmailError> {
+        let to_strings: Vec<_> = self.admin_emails.iter()
+            .map(|e| e.to_string())
+            .collect();
+        let to: Vec<_> = to_strings.iter()
+            .map(|s| s.as_str())
+            .collect();
+        self.send_mail(to.as_slice(), None, None, subject, message)
+    }
+}
+
+/// An enum specifying which method to use to send emails
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum EmailBackend {
+    /// Uses the `Lettre` crate to connect to a local SMTP server
+    /// Note that this is *unencrypted*, but that is assumed to be acceptible
+    /// since the connection is on the local machine. This is the default.
+    Internal(crate::email::Lettre),
+
+    /// Calls the `mailx` command line client via the shell to send
+    /// emails.
+    Mailx(crate::email::Mailx)
+}
+
+impl Default for EmailBackend {
+    fn default() -> Self {
+        Self::Internal(crate::email::Lettre::default())
+    }
+}
+
+
 
 
 /// Generate a default configuration .toml file at `path`

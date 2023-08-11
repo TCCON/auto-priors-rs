@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 // TODOs:
 //  * Commands:
 //      - Status of jobs
@@ -21,10 +19,14 @@ use env_logger;
 use log::{self, debug};
 use orm;
 use orm::MySqlConn;
+use tccon_priors_cli::config::ConfigActions;
+use tccon_priors_cli::config::ConfigCli;
+use tccon_priors_cli::siteinfo::StdSiteActions;
 use tccon_priors_cli::siteinfo::StdSiteCli;
 use tokio;
 
 use tccon_priors_cli::utils;
+use tccon_priors_cli::config;
 use tccon_priors_cli::met_download;
 use tccon_priors_cli::jobs;
 use tccon_priors_cli::input_files;
@@ -58,7 +60,7 @@ enum Commands {
     #[clap(alias="ssj")]
     StdSiteJobs(stdsites::StdSiteJobCli),
     SiteInfoJson(siteinfo::InfoJsonCli),
-    GenConfig(GenConfigCli)
+    Config(config::ConfigCli)
 }
 
 #[derive(Debug, Args)]
@@ -74,17 +76,6 @@ pub struct UnmigrateCli {
     yes: bool,
     /// Use this to determine which is the earliest migration to revert to
     target: Option<i64>
-}
-
-#[derive(Debug, Args)]
-/// Generate a default configuration file from the command line
-struct GenConfigCli {
-    /// Path to write the default TOML file as.
-    path: PathBuf
-}
-
-fn generate_config_file(clargs: GenConfigCli) -> anyhow::Result<()> {
-    orm::config::generate_config_file(&clargs.path)
 }
 
 async fn run_migrations(conn: &mut MySqlConn, db_url: &str, yes: bool) -> anyhow::Result<()> {
@@ -199,17 +190,17 @@ async fn main() -> anyhow::Result<()> {
         },
 
 
-        Commands::StdSites(StdSiteCli { command: siteinfo::Actions::AddSite(subargs) }) => {
+        Commands::StdSites(StdSiteCli { command: StdSiteActions::AddSite(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::add_new_std_site_cli(&mut conn, subargs).await?;
         }
 
-        Commands::StdSites(StdSiteCli { command: siteinfo::Actions::EditSite(subargs) }) => {
+        Commands::StdSites(StdSiteCli { command: StdSiteActions::EditSite(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::edit_std_site_cli(&mut conn, subargs).await?;
         }
 
-        Commands::StdSites(StdSiteCli { command: siteinfo::Actions::AddInfo(subargs) }) => {
+        Commands::StdSites(StdSiteCli { command: StdSiteActions::AddInfo(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::add_std_site_info_range_cli(&mut conn, subargs).await?;
         }
@@ -224,8 +215,12 @@ async fn main() -> anyhow::Result<()> {
             siteinfo::site_info_json(&mut conn, &subargs).await?;
         },
 
-        Commands::GenConfig(subargs) => {
-            generate_config_file(subargs)?;
+        Commands::Config(ConfigCli { command: ConfigActions::GenConfig(subargs)}) => {
+            config::generate_config_file(subargs)?;
+        },
+
+        Commands::Config(ConfigCli { command: ConfigActions::DebugConfig }) => {
+            config::debug_config(config);
         }
     };
 

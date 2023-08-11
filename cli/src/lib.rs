@@ -1,4 +1,5 @@
 pub mod utils;
+pub mod config;
 pub mod met_download;
 pub mod input_files;
 pub mod jobs;

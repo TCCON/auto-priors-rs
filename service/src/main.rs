@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         });
 
     let lut_job = scheduler
-        .every(timing_config.lut_regen_hours.hours())
+        .every(timing_config.lut_regen_days.days())
         .run(|| async { 
             // Should be safe to unwrap, will only be None if JOBS_MANAGER wasn't set, and 
             // we did that above

@@ -76,11 +76,11 @@ pub async fn site_info_json(db: &mut orm::MySqlConn, clargs: &InfoJsonCli) -> an
 #[derive(Debug, Args)]
 pub struct StdSiteCli {
     #[clap(subcommand)]
-    pub command: Actions
+    pub command: StdSiteActions
 }
 
 #[derive(Debug, Subcommand)]
-pub enum Actions {
+pub enum StdSiteActions {
     AddSite(AddNewStdSiteCli),
     EditSite(EditSiteCli),
     AddInfo(AddSiteInfoCli)
