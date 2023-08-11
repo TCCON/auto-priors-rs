@@ -1,6 +1,7 @@
 use clap::{self, Subcommand, Args};
 use orm::{stdsitejobs,MySqlConn};
 
+/// Manage jobs for the standard sites
 #[derive(Debug, Args)]
 pub struct StdSiteJobCli {
     #[clap(subcommand)]
@@ -9,7 +10,12 @@ pub struct StdSiteJobCli {
 
 #[derive(Debug, Subcommand)]
 pub enum Actions {
+    /// Add jobs to generate standard sites' priors for days in need of priors
+    /// for which met data is available.
     AddJobs,
+
+    /// Collect completed standard site jobs outputs into the standard sites'
+    /// tar files.
     TarFiles
 }
 

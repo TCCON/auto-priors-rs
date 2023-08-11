@@ -73,6 +73,7 @@ pub async fn site_info_json(db: &mut orm::MySqlConn, clargs: &InfoJsonCli) -> an
     Ok(())
 }
 
+/// Manage definition of standard sites and their locations
 #[derive(Debug, Args)]
 pub struct StdSiteCli {
     #[clap(subcommand)]
@@ -86,10 +87,14 @@ pub enum StdSiteActions {
     AddInfo(AddSiteInfoCli)
 }
 
+/// Define a new standard site
 #[derive(Debug, Args)]
 pub struct AddNewStdSiteCli {
+    /// The two character ID for the new site
     site_id: String,
+    /// The long, human-readable name for this site
     site_name: String,
+    /// Whether this is a TCCON or EM27 site
     site_type: SiteType
 }
 
@@ -103,12 +108,17 @@ pub async fn add_new_std_site(conn: &mut MySqlConn, site_id: &str, site_name: &s
     Ok(())
 }
 
-
+/// Modify an existing standard site
 #[derive(Debug, Args)]
 pub struct EditSiteCli {
+    /// The current two-letter ID for the site
     site_id: String,
+
+    /// If given, the new name to assign for this site
     #[clap(long="name")]
     site_name: Option<String>,
+
+    /// If given, the new type (TCCON or EM27) for this site
     #[clap(long="type")]
     site_type: Option<SiteType>
 }
@@ -126,6 +136,7 @@ pub async fn edit_std_site(conn: &mut MySqlConn, site_id: &str, site_name: Optio
         anyhow::bail!("No site with site ID '{site_id}'");
     };
 
+    // TODO: allow changing the site id?
     if let Some(name) = site_name {
         site.set_name(&mut trans, name).await?;
     }
@@ -139,17 +150,42 @@ pub async fn edit_std_site(conn: &mut MySqlConn, site_id: &str, site_name: Optio
 }
 
 
+/// Add a new date range defining the location of a standard site.
+/// 
+/// If this is the first date range added for this site, then location,
+/// latitude, and longitude must all be given. If you are adding a new date
+/// range that overlaps an existing date range, then location, latitude, and/or
+/// longitude may be omitted so long as their values are consistent in
+/// all of the date ranges overlapped. In that case, any omitted values are copied 
+/// from the overlapped existing periods.
 #[derive(Debug, Args)]
 pub struct AddSiteInfoCli {
+    /// The two letter ID of the site
     site_id: String,
+
+    /// The first date, in YYYY-MM-DD format, that this location applies.
     start_date: NaiveDate,
+
+    /// The final date (exclusive) in YYYY-MM-DD format, that this location applies.
+    /// If not given, this location is assumed to have no end date.
     end_date: Option<NaiveDate>,
+
+    /// A human-readable description of the site's location, e.g. "Park Fall, WI, USA".
     #[clap(short = 'l', long)]
     location: Option<String>,
+
+    /// The longitude of the site. Must be between -180 and +360 and will be rectified to
+    /// be within -180 to +180. When giving a negative value, using the = format, i.e.
+    /// `--longitude=-90` may work better than `--longitude -90`.
     #[clap(short = 'x', long)]
     longitude: Option<f32>,
+
+    /// The latitude of the site. Must be between -90 and +90. See note on longitude for
+    /// entering negative values.
     #[clap(short = 'y', long)]
     latitude: Option<f32>,
+
+    /// An optional comment giving more information about this date range.
     #[clap(short = 'c', long)]
     comment: Option<String>,
 }

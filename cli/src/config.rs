@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 
+/// Generate or check a configuration
 #[derive(Debug, Args)]
 pub struct ConfigCli {
     #[clap(subcommand)]
@@ -11,6 +12,10 @@ pub struct ConfigCli {
 #[derive(Debug, Subcommand)]
 pub enum ConfigActions {
     GenConfig(GenConfigCli),
+    /// Read the configuration file pointed to by the PRIOR_CONFIG_FILE environment variable
+    /// and print the internal representation to the screen. (Useful for checking that a config
+    /// file is being parsed as you expect.) If the PRIOR_CONFIG_FILE variable is not set,
+    /// then the default configuration is displayed.
     DebugConfig
 }
 

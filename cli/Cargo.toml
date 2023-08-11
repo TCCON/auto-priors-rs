@@ -15,6 +15,7 @@ sqlx.workspace = true
 tokio.workspace = true
 
 orm = {path = "../core-orm", package = "tccon_priors_orm"}
+termsize = "0.1.6"
 
 [dev-dependencies]
 hex-literal = "0.4"
