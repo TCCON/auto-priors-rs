@@ -1,11 +1,12 @@
 //! Interface to the standard site information tables
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, borrow::Cow};
 
 use anyhow::{self, Context};
 use chrono::{NaiveDate, Duration};
 use log::error;
 use serde::Serialize;
 use sqlx::{self, FromRow, Type, Connection};
+use tabled::Tabled;
 
 use crate::{utils, stdsitejobs::StdSiteJob};
 
@@ -224,6 +225,40 @@ pub struct SiteInfo {
     pub end_date: Option<NaiveDate>,
     /// A comment to describe any special considerations with this site.
     pub comment: Option<String>
+}
+
+impl Tabled for SiteInfo {
+    const LENGTH: usize = 6;
+
+    fn fields(&self) -> Vec<std::borrow::Cow<'_, str>> {
+        let start_date = self.start_date.to_string();
+        let end_date = self.end_date
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "".to_string());
+        let comment = self.comment
+            .as_deref()
+            .unwrap_or("");
+
+        vec![
+            Cow::from(start_date),
+            Cow::from(end_date),
+            Cow::from(self.location.clone()),
+            Cow::from(format!("{:.3}", self.longitude)),
+            Cow::from(format!("{:.3}", self.latitude)),
+            Cow::from(comment)
+        ]
+    }
+
+    fn headers() -> Vec<std::borrow::Cow<'static, str>> {
+        vec![
+            Cow::from("start_date"),
+            Cow::from("end_date"),
+            Cow::from("location"),
+            Cow::from("longitude"),
+            Cow::from("latitude"),
+            Cow::from("comment")
+        ]
+    }
 }
 
 impl SiteInfo {
@@ -458,6 +493,17 @@ impl SiteInfo {
             }
             return Ok(infos)
         }
+    }
+
+    pub async fn get_site_locations(conn: &mut MySqlConn, site_id: &str) -> anyhow::Result<Vec<SiteInfo>> {
+        let site_infos = sqlx::query_as!(
+            SiteInfo,
+            "SELECT * FROM v_StdSiteInfo WHERE site_id = ?",
+            site_id
+        ).fetch_all(conn)
+        .await?;
+
+        Ok(site_infos)
     }
 
     pub async fn get_site_locations_for_date_range(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<Vec<SiteInfo>> {

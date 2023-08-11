@@ -4,6 +4,7 @@ use chrono::NaiveDate;
 use clap::{self,Args, Subcommand};
 use orm::{self, siteinfo::{SiteType, StdSite, SiteInfo}, MySqlConn};
 use sqlx::Connection;
+use tabled::Table;
 
 
 #[derive(Debug)]
@@ -84,7 +85,8 @@ pub struct StdSiteCli {
 pub enum StdSiteActions {
     AddSite(AddNewStdSiteCli),
     EditSite(EditSiteCli),
-    AddInfo(AddSiteInfoCli)
+    AddInfo(AddSiteInfoCli),
+    PrintInfo(PrintLocsArgs),
 }
 
 /// Define a new standard site
@@ -223,4 +225,31 @@ pub async fn add_std_site_info_range(
         latitude, 
         comment
     ).await
+}
+
+
+/// Print currently defined location info for a given site
+#[derive(Debug, Args)]
+pub struct PrintLocsArgs {
+    /// The two-letter ID for the site to print information about
+    site_id: String
+}
+
+pub async fn print_locations_for_site_cli(conn: &mut MySqlConn, args: PrintLocsArgs) -> anyhow::Result<()> {
+    print_locations_for_site(conn, &args.site_id).await
+}
+
+pub async fn print_locations_for_site(
+    conn: &mut MySqlConn,
+    site_id: &str
+) -> anyhow::Result<()> {
+    let infos = SiteInfo::get_site_locations(conn, site_id).await?;
+    let table_config = tabled::settings::Settings::default()
+        .with(tabled::settings::Style::markdown());
+    let table = Table::new(infos)
+        .with(table_config)
+        .to_string();
+    println!("{table}");
+
+    Ok(())
 }

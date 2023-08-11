@@ -205,6 +205,11 @@ async fn main() -> anyhow::Result<()> {
             siteinfo::add_std_site_info_range_cli(&mut conn, subargs).await?;
         }
 
+        Commands::StdSites(StdSiteCli { command: StdSiteActions::PrintInfo(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            siteinfo::print_locations_for_site_cli(&mut conn, subargs).await?;
+        }
+
         Commands::StdSiteJobs(subargs) => {
             let mut conn = db.get_connection().await?;
             stdsites::standard_site_driver(&mut conn, subargs, &config).await?

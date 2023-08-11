@@ -19,5 +19,6 @@ serde_json = "1.0"
 sqlx = {workspace = true, features = ["macros"]}
 toml = "0.5"
 url = {version = "2.2", features = ["serde"]}
+tabled.workspace = true
 tokio.workspace = true
 whoami = "1.4.1"
