@@ -261,11 +261,11 @@ pub struct ExecutionConfig {
     pub hours_to_keep: u32,
 
     /// The base URL of the the FTP server from which users download jobs
-    pub download_server: Url,
+    pub ftp_download_server: Url,
 
     /// The root path for the FTP server, i.e. where users start when they log in.
     /// Used to map file paths to FTP URLs.
-    pub download_root: PathBuf,
+    pub ftp_download_root: PathBuf,
 
     /// The path to write requested job output files to, must be somewhere that users
     /// can download them from.
@@ -313,8 +313,8 @@ impl Default for ExecutionConfig {
             max_numpy_threads: 2, 
             hours_to_keep: 168,
             input_file_pattern: "input_file_2020*.txt".to_owned(),
-            download_server: Url::parse(&format!("ftp://{host}/")).unwrap_or_else(|_| Url::parse("ftp://localhost/").unwrap()), 
-            download_root: Default::default(), 
+            ftp_download_server: Url::parse(&format!("ftp://{host}/")).unwrap_or_else(|_| Url::parse("ftp://localhost/").unwrap()), 
+            ftp_download_root: Default::default(), 
             output_path: Default::default(), 
             std_sites_tar_output: Default::default(), 
             std_sites_output_base: Default::default(),

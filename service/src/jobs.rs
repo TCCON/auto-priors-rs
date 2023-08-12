@@ -157,6 +157,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         // and update if needed. Alternatively, pop any empty queues from the HashMap
         // so that they eventually get updated. The former approach would benefit from
         // switching the config to a tokio watcher tunnel.
+
         self.scan_for_job_submissions()
             .await
             .unwrap_or_else(|e| {
@@ -222,7 +223,8 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
 
         info!("{} new input files found", input_files.len());
         
-        orm::input_files::add_jobs_from_input_files(&mut self.pool.get_connection().await?.detach(), &input_files, &save_dir).await
+        let config = &self.shared_config.read().await;
+        orm::input_files::add_jobs_from_input_files(&mut self.pool.get_connection().await?.detach(), &config, &input_files, &save_dir).await
     }
 
     /// Insert the next highest priority job(s) from the database into the internal queues.

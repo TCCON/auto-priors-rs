@@ -3,7 +3,7 @@ use std::{path::{PathBuf, Path}, ffi::OsStr, io::BufRead, str::FromStr};
 use chrono::NaiveDate;
 use log::{debug, info};
 
-use crate::jobs::{ModFmt, VmrFmt, MapFmt};
+use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::Config};
 
 
 struct FailedParsingError {
@@ -308,6 +308,7 @@ impl InputJobBuilder {
 
 pub async fn add_jobs_from_input_files(
     conn: &mut crate::MySqlConn, 
+    config: &Config,
     input_files: &[PathBuf],
     save_dir: &Path
 ) -> anyhow::Result<()> {
@@ -338,6 +339,7 @@ pub async fn add_jobs_from_input_files(
             Some(job.email),
             job.lat,
             job.lon,
+            &config.execution.submitted_job_queue,
             Some(job.mod_fmt),
             Some(job.vmr_fmt),
             Some(job.map_fmt),

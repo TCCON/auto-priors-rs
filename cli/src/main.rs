@@ -182,7 +182,7 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::AddJob(subargs) => {
             let mut conn = db.get_connection().await?;
-            jobs::add_job(&mut conn, subargs).await?;
+            jobs::add_job(&mut conn, subargs, &config).await?;
         },
 
         Commands::DeleteJob(subargs) => {

@@ -7,6 +7,7 @@ use log::{warn, info};
 use serde::Serialize;
 use sqlx::{self, FromRow, Type, Acquire};
 
+use crate::config::Config;
 use crate::{MySqlConn, config};
 use crate::{utils,met,jobs,siteinfo};
 
@@ -160,7 +161,7 @@ impl StdSiteJob {
     /// # Errors
     /// Returns an `Err` if any of the database queries fail. Should any of the queries to create
     /// the job or the new standard site job rows fail, all of the insert queries should be rolled back.
-    pub async fn add_new_std_jobs_for_date(conn: &mut MySqlConn, date: NaiveDate, save_dir: &Path) -> anyhow::Result<Option<AddStdJobSummary>> {
+    pub async fn add_new_std_jobs_for_date(conn: &mut MySqlConn, config: &Config, date: NaiveDate, save_dir: &Path) -> anyhow::Result<Option<AddStdJobSummary>> {
         // First check if this date already has any sites - if so, return None (this function is not intended for backfilling)
         let date_count = sqlx::query!("SELECT COUNT(*) as count FROM StdSiteJobs WHERE date = ?", date)
             .fetch_one(&mut *conn)
@@ -210,6 +211,7 @@ impl StdSiteJob {
             None,
             latlon.clone(),
             latlon,
+            &config.execution.std_site_job_queue,
             Some(jobs::ModFmt::Text),
             Some(jobs::VmrFmt::Text),
             Some(jobs::MapFmt::None), // TODO: will need to be text for EM27s potentially
@@ -284,7 +286,7 @@ impl StdSiteJob {
 
         let mut added = vec![];
         for date in utils::date_range(last_std_site_date + Duration::days(1), last_date + Duration::days(1)) {
-            if let Some(res) = Self::add_new_std_jobs_for_date(conn, date, save_dir).await? {
+            if let Some(res) = Self::add_new_std_jobs_for_date(conn, cfg, date, save_dir).await? {
                 added.push(res);
             }
         }

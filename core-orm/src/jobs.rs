@@ -1009,6 +1009,7 @@ impl Job {
         email: Option<String>,
         lat: Vec<Option<f32>>,
         lon: Vec<Option<f32>>,
+        queue: &str,
         mod_fmt: Option<ModFmt>,
         vmr_fmt: Option<VmrFmt>,
         map_fmt: Option<MapFmt>,
@@ -1057,8 +1058,8 @@ impl Job {
         let output_file: Option<String> = None;
 
         let new_id = sqlx::query!(
-            r#"INSERT INTO Jobs (state, site_id, start_date, end_date, lat, lon, email, delete_time, priority, save_dir, save_tarball, mod_fmt, vmr_fmt, map_fmt, submit_time, complete_time, output_file)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            r#"INSERT INTO Jobs (state, site_id, start_date, end_date, lat, lon, email, queue, delete_time, priority, save_dir, save_tarball, mod_fmt, vmr_fmt, map_fmt, submit_time, complete_time, output_file)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
             JobState::Pending as i8, // state
             serde_json::to_string(&site_id)?, // site_id
             start_date, // start_date
@@ -1066,6 +1067,7 @@ impl Job {
             serde_json::to_string(&lat)?, // lat
             serde_json::to_string(&lon)?, // lon
             email, // email
+            queue,
             delete_time, // delete_time
             priority.unwrap_or(0), // priority
             save_dir.to_str().ok_or(anyhow::anyhow!("Could not convert save_dir to UTF string"))?, // save_dir

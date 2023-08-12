@@ -4,7 +4,7 @@ use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use clap::{self, Args};
 // use clap::builder::AppSettings;
-use orm::{jobs::{Job, ModFmt, VmrFmt, MapFmt, TarChoice}, MySqlConn};
+use orm::{jobs::{Job, ModFmt, VmrFmt, MapFmt, TarChoice}, MySqlConn, config::Config};
 use tabled::Table;
 
 
@@ -35,6 +35,11 @@ pub struct AddJobCli {
     /// Pack the output files from this job into a single tarball.
     to_tarball: bool,
 
+    /// Which queue to add the job to, if not given, then will use the submitted
+    /// job queue defined in the config.
+    #[clap(short = 'q', long)]
+    queue: Option<String>,
+
     /// The two-letter site IDs used to identify the output in this job. 
     /// Pass multiple site IDs as a comma-separated list. If multiple lat/lons
     /// are given, the number of site IDs must be 1 or equal to the number of
@@ -50,6 +55,7 @@ pub struct AddJobCli {
 
     /// The email address to contact when the priors are ready
     email: String,
+
 
     #[clap(allow_hyphen_values = true)]
     /// The latitudes to generate priors for. May be omitted if all SITE_ID values are standard sites.
@@ -72,6 +78,7 @@ pub struct AddJobArgs {
     email: String,
     lat: Vec<Option<f32>>,
     lon: Vec<Option<f32>>,
+    queue: Option<String>,
     mod_fmt: Option<ModFmt>,
     vmr_fmt: Option<VmrFmt>,
     map_fmt: Option<MapFmt>,
@@ -125,6 +132,7 @@ impl TryFrom<AddJobCli> for AddJobArgs {
             email: clargs.email,
             lat: lat,
             lon: lon,
+            queue: clargs.queue,
             mod_fmt: clargs.mod_fmt,
             vmr_fmt: clargs.vmr_fmt,
             map_fmt: clargs.map_fmt,
@@ -136,7 +144,7 @@ impl TryFrom<AddJobCli> for AddJobArgs {
     }
 }
 
-pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli) -> anyhow::Result<()> {
+pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli, config: &Config) -> anyhow::Result<()> {
     let args = AddJobArgs::try_from(clargs)?;
     let id = Job::add_job_from_args(db, 
         args.site_id,
@@ -146,6 +154,7 @@ pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli) -> anyhow::Resu
         Some(args.email), 
         args.lat,
         args.lon,
+        &args.queue.unwrap_or_else(|| config.execution.submitted_job_queue.clone()),
         args.mod_fmt, 
         args.vmr_fmt, 
         args.map_fmt, 
