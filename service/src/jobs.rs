@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use anyhow::Context;
 use log::{warn, info, debug};
-use orm::{jobs::{Job, JobState, GinputRunner}, MySqlConn, config::Config, MySqlPC};
+use orm::{jobs::{Job, JobState, start_priors_gen_job, GinputHandle, start_lut_regen_job}, config::Config, MySqlPC, PoolWrapper};
 use tokio::sync::RwLock;
 
 use crate::{ExitCommand, error::ErrorHandler};
@@ -97,7 +97,7 @@ static LUT_QUEUE_NAME: &'static str = "LUT_REGEN";
 /// This approach can be extended to other tasks that are mutually exclusive with each other.
 #[derive(Debug)]
 pub(crate) struct JobManager<T: Queueable, H: ErrorHandler> {
-    pub(crate) db_conn: MySqlPC,
+    pub(crate) pool: PoolWrapper,
     pub(crate) shared_config: Arc<RwLock<Config>>,
     pub(crate) job_queues: HashMap<String, Queue<T>>,
     pub(crate) error_handler: H,
@@ -120,27 +120,29 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     ) -> anyhow::Result<Self> {
         let db_url = orm::get_database_url(None)?;
         let db = orm::get_database_pool(Some(db_url.clone())).await?;
-        Self::new_from_pool(&db, shared_config, error_handler).await
+        Self::new_from_pool(db, shared_config, error_handler).await
     }
 
     /// Create a new instance of `JobManager`, taking a database connection from an existing database pool.
     /// 
-    /// See the struct help for example usage.
+    /// See the struct help for example usage. This also schedules a job to regenerate the ginput stratospheric
+    /// LUTs to ensure that they are ready for the first jobs to run.
     /// 
     /// # Returns
     /// The `JobManager` instance, only returns an `Err` if getting the database connection failed.
     pub(crate) async fn new_from_pool(
-        db: &orm::PoolWrapper, 
+        pool: PoolWrapper, 
         shared_config: Arc<RwLock<Config>>, 
         error_handler: H,
     ) -> anyhow::Result<Self> {
-        let db_conn = db.get_connection().await?;
-        Ok(Self { 
-            db_conn,
+        let mut me = Self { 
+            pool,
             shared_config,
             job_queues: HashMap::new(), 
             error_handler
-        })
+        };
+        me.schedule_lut_regen().await;
+        Ok(me)
     }
 
     /// The main driver function to be called in a loop or frequently scheduled task.
@@ -220,7 +222,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
 
         info!("{} new input files found", input_files.len());
         
-        orm::input_files::add_jobs_from_input_files(&mut self.db_conn, &input_files, &save_dir).await
+        orm::input_files::add_jobs_from_input_files(&mut self.pool.get_connection().await?.detach(), &input_files, &save_dir).await
     }
 
     /// Insert the next highest priority job(s) from the database into the internal queues.
@@ -246,10 +248,11 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                 self.job_queues.get_mut(&name).unwrap()
             };
 
-            this_queue.clean_up_finished(&mut self.db_conn, &self.error_handler).await;
+            let mut conn = self.pool.get_connection().await?;
+            this_queue.clean_up_finished(&mut conn, &self.error_handler).await;
             let mut n_to_add = this_queue.num_can_add();
             while n_to_add > 0 {
-                let next_job = Job::claim_next_job_in_queue(&mut self.db_conn, &name)
+                let next_job = Job::claim_next_job_in_queue(&mut conn, &name)
                     .await
                     .with_context(|| format!("Error occurred while trying to claim the next job in queue '{name}'"))?;
 
@@ -269,11 +272,11 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                     // Really we should not enter this block; the loop over n_to_add should ensure we only
                     // add as many jobs as we are allow to. But just in case, we should ensure that a job not
                     // added to the queue gets reset to 'pending'
-                    let mut job = Job::get_job_with_id(&mut self.db_conn, job_id)
+                    let mut job = Job::get_job_with_id(&mut conn, job_id)
                         .await
                         .with_context(|| format!("Could not add job ID {job_id} to queue {name} and failed get it from the database to reset its state to 'pending'!"))?;
 
-                    job.set_state(&mut self.db_conn, JobState::Pending)
+                    job.set_state(&mut conn, JobState::Pending)
                         .await
                         .with_context(|| format!("Could not add job ID {job_id} to queue {name} and failed to reset its state to 'pending'!"))?;
 
@@ -307,10 +310,9 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
 
         for queue_name in pending_queues.iter() {
             if self.can_queue_start_jobs(queue_name).await {
-                let conn = &mut self.db_conn;
                 let config = self.shared_config.read().await;
                 if let Some(queue) = self.job_queues.get_mut(queue_name) {
-                    queue.start(conn, &config, &self.error_handler).await;
+                    queue.start(&self.pool, &config, &self.error_handler).await;
                 }
             } 
         }
@@ -324,7 +326,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     /// any queues listed in the `Jobs` database table. Will return an error
     /// if querying the database for queue names failed.
     async fn get_all_queue_names(&mut self) -> anyhow::Result<Vec<String>> {
-        let mut queue_names = Job::get_queues_with_pending_jobs(&mut self.db_conn)
+        let mut queue_names = Job::get_queues_with_pending_jobs(&mut self.pool.get_connection().await?.detach())
             .await
             .with_context(|| "Error occurred while trying to retrieve the list of queues with pending jobs")?;
 
@@ -370,10 +372,21 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     /// 
     /// This is used for the [`ExitCommand::Graceful`] case.
     async fn wait_for_jobs_to_finish(&mut self) {
+        let mut conn = match self.pool.get_connection().await {
+            Ok(c) => c,
+            Err(e) => {
+                self.error_handler.report_error_with_context(
+                    e.as_ref(),
+                    "Failed to acquire database connect while trying to cancel jobs"
+                );
+
+                return ;
+            }
+        };
         loop {
             let mut njobs = 0;
             for (name, queue) in self.job_queues.iter_mut() {
-                queue.clean_up_finished(&mut self.db_conn, &self.error_handler).await;
+                queue.clean_up_finished(&mut conn, &self.error_handler).await;
                 njobs += queue.num_jobs_running();
                 debug!("Jobs remaining in {name}: {}", queue.num_jobs_left());
             }
@@ -391,8 +404,18 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     /// 
     /// This is used for the [`ExitCommand::Rapid`] case.
     async fn stop_and_reset_jobs(&mut self) {
+        let mut conn = match self.pool.get_connection().await {
+            Ok(c) => c,
+            Err(e) => {
+                self.error_handler.report_error_with_context(
+                    e.as_ref(),
+                    "Failed to acquire database connection while trying to stop and reset jobs"
+                );
+                return;
+            }
+        };
         for (name, queue) in self.job_queues.iter_mut() {
-            queue.cancel_running_jobs(&mut self.db_conn, &self.error_handler).await;
+            queue.cancel_running_jobs(&mut conn, &self.error_handler).await;
             info!("Stopped and reset all jobs in {name} queue");
         }
     }
@@ -414,18 +437,21 @@ pub(crate) trait Queueable {
     fn new_lut_job(ginput_key: String) -> Self;
 
     /// Start the job, updating the database if needed.
-    async fn start(&mut self, conn: &mut MySqlConn, config: &Config) -> anyhow::Result<()>;
+    async fn start(&mut self, mut conn: MySqlPC, config: &Config) -> anyhow::Result<()>;
 
     /// Return whether this job has started yet. It can be `true` even if the job is complete,
     /// use `is_done` instead to check if a previously started job is complete or errored.
     fn has_started(&self) -> bool;
 
+    /// Mark that this item should be cleaned up the next time the queue is tidied up.
+    fn make_for_cleanup(&mut self);
+
     /// Return whether a job is waiting to start/actively running (`false`) or completed/errored (`true`).
     /// This should also do any finalization 
-    async fn is_done(&mut self, conn: &mut MySqlConn) -> anyhow::Result<bool>;
+    async fn is_done(&mut self, conn: &mut MySqlPC) -> anyhow::Result<bool>;
 
     /// Stop this job prematurely, do whatever cleanup is required.
-    async fn cancel(&mut self, conn: &mut MySqlConn) -> anyhow::Result<bool>;
+    async fn cancel(&mut self, conn: &mut MySqlPC) -> anyhow::Result<bool>;
 }
 
 #[derive(Debug)]
@@ -483,9 +509,20 @@ impl<T: Queueable> Queue<T> {
     }
 
     /// Start running any items in the queue not already in progrees.
-    pub async fn start<H: ErrorHandler>(&mut self, conn: &mut MySqlConn, config: &Config, error_handler: &H) {
+    pub async fn start<H: ErrorHandler>(&mut self, pool: &PoolWrapper, config: &Config, error_handler: &H) {
         for item in self.items.iter_mut() {
             if !item.has_started() {
+                let conn = match pool.get_connection().await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        item.make_for_cleanup();
+                        error_handler.report_error_with_context(
+                            e.as_ref(),
+                            "Failed to acquire database connection while trying to start a job"
+                        );
+                        continue;
+                    }
+                };
                 item.start(conn, config).await
                 .unwrap_or_else(|e| error_handler.report_error(e.as_ref()));
             }
@@ -497,7 +534,7 @@ impl<T: Queueable> Queue<T> {
     /// Typically, you would call this method before `add`
     /// or `num_can_add` to remove any completed jobs to
     /// make room for new ones.
-    pub async fn clean_up_finished<H: ErrorHandler>(&mut self, conn: &mut MySqlConn, error_handler: &H) {
+    pub async fn clean_up_finished<H: ErrorHandler>(&mut self, conn: &mut MySqlPC, error_handler: &H) {
         let old_items = std::mem::take(&mut self.items);
         for mut item in old_items {
             let still_running = match item.is_done(conn).await {
@@ -542,7 +579,7 @@ impl<T: Queueable> Queue<T> {
     }
 
     /// Stop and clean up any jobs running in this queue.
-    pub async fn cancel_running_jobs<H: ErrorHandler>(&mut self, conn: &mut MySqlConn, error_handler: &H) {
+    pub async fn cancel_running_jobs<H: ErrorHandler>(&mut self, conn: &mut MySqlPC, error_handler: &H) {
         for item in self.items.iter_mut() {
             item.cancel(conn).await
                 .map(|_| ()) // need this to avoid a type error on the unwrap; don't care if there was a task to cancel
@@ -564,134 +601,105 @@ impl<T: Queueable> Queue<T> {
 ///    calling `ginput`. Right now, there is only a [`ShellGinputRunner`].
 #[derive(Debug)]
 pub enum ServiceJobRunner {
-    GinputJob{job: Job, inner_runner: Option<GinputRunner>},
-    LutRegenJob{ginput_key: String, inner_runner: Option<GinputRunner>}
+    GinputJob{job: Job, join_handle: Option<GinputHandle>},
+    LutRegenJob{ginput_key: String, join_handle: Option<GinputHandle>}
 }
 
 impl ServiceJobRunner {
 
-    async fn is_ginput_job_done(job: &mut Job, inner_runner: &mut Option<GinputRunner>, conn: &mut MySqlConn) -> anyhow::Result<bool> {
-        let task = if let Some(runner) = inner_runner {
+    async fn is_ginput_job_done(job: &mut Job, join_handle: &mut Option<GinputHandle>, conn: &mut MySqlPC) -> anyhow::Result<bool> {
+        let task = if let Some(runner) = join_handle {
             runner
         } else {
             return Ok(false)
         };
 
-        let res = task.is_done()
-            .with_context(|| format!(
-                "Error checking if job #{} is done", job.job_id
-            ))?;
-        match res {
-            orm::jobs::RunState::InProgress => Ok(false),
-            orm::jobs::RunState::Complete => {
-                // todo: handle setting output path to the tar file when appropriate
-                let output_path = job.save_dir.clone();
-                job.set_completed(conn, &output_path, None)
-                    .await?;
-                return Ok(true);
+        if !task.is_finished() {
+            return Ok(false);
+        }
+
+        let inner_res = match task.await {
+            Ok(r) => r,
+            Err(e) => anyhow::bail!("Panic occurred in job #{}: {e}", job.job_id)
+        };
+
+        match inner_res {
+            Ok(_) => {
+                Self::set_job_complete(conn, job).await?;
+                Ok(true)
             },
-            orm::jobs::RunState::Errored => {
-                job.set_state(conn, JobState::Errored).await?;
-                anyhow::bail!("ginput error occurred in job #{}", job.job_id);
-            },
+            Err(e) => anyhow::bail!("Error occurred in job#{}: {e}", job.job_id)
         }
     }
 
-    async fn is_lut_job_done(ginput_key: &str, inner_runner: &mut Option<GinputRunner>) -> anyhow::Result<bool> {
-        let task = if let Some(runner) = inner_runner {
+    async fn set_job_complete(conn: &mut MySqlPC, job: &mut Job) -> anyhow::Result<(u64, chrono::NaiveDateTime)> {
+        // todo: handle setting output path to the tar file if appropriate
+        let output_path = job.save_dir.clone();
+        job.set_completed(conn, &output_path, None).await
+    }
+
+    async fn is_lut_job_done(ginput_key: &str, join_handle: &mut Option<GinputHandle>) -> anyhow::Result<bool> {
+        let task = if let Some(runner) = join_handle {
             runner
         } else {
             return Ok(false)
         };
 
-        let res = task.is_done()
-            .with_context(|| format!("Error checking if an LUT regeneration for ginput key '{ginput_key}' is done"))?;
+        if !task.is_finished() {
+            return Ok(false)
+        }
 
-        match res {
-            orm::jobs::RunState::InProgress => Ok(false),
-            orm::jobs::RunState::Complete => Ok(true),
-            orm::jobs::RunState::Errored => Err(anyhow::anyhow!("LUT regeneration for ginput key '{ginput_key}' errored")),
+        let inner_res = match task.await {
+            Ok(r) => r,
+            Err(e) => anyhow::bail!("Panic occurred regenerating LUTs for ginput '{ginput_key}': {e}")
+        };
+
+        match inner_res {
+            Ok(_) => Ok(true),
+            Err(e) => anyhow::bail!("Error occurred regenerating LUTs for ginput '{ginput_key}': {e}")
         }
     }
 
-    async fn start_ginput_job(job: &mut Job, inner_runner: &mut Option<GinputRunner>, config: &Config, conn: &mut MySqlConn) -> anyhow::Result<()> {
-        // The job state is set by the manager when it claims it
-        
-        // Alright, this is going to be complicated, because it needs to look at the dates for the job
-        // and check that they do not cross a boundary for which met/ginput version to use. That also should
-        // be checked on submission, but it's also possible that the config changed since the job was submitted,
-        // so we verify here too. (That check should go in the core-orm since it'll be used in a couple places.)
-        // As long as the job falls entirely within one of the configured time periods, we can set up the ginput
-        // run. Otherwise, we either error or break this into multiple calls.
+    async fn start_ginput_job(conn: MySqlPC, job: Job, config: Config, join_handle: &mut Option<GinputHandle>) -> anyhow::Result<()> {
+        *join_handle = Some(start_priors_gen_job(conn, job, config));
+        Ok(())
+    }
 
-        // TODO: check if this needs spawned into its own thread to avoid blocking the main scheduler thread
-        // See: https://docs.rs/clokwerk/latest/clokwerk/struct.AsyncScheduler.html#method.run_pending
-        let date_iter = orm::utils::DateIterator::new(
-            vec![(job.start_date, job.end_date)]
-        );
+    async fn start_lut_job(ginput_key: String, join_handle: &mut Option<GinputHandle>, config: Config) -> anyhow::Result<()> {
+        *join_handle = Some(start_lut_regen_job(ginput_key, config));
+        Ok(())
+    }
 
-        for date in date_iter {
-            let ginput_key = if let Some(key) = &job.ginput_key {
-                key
-            } else {
-                let defaults = config.get_defaults_for_date(date)
-                    .with_context(|| format!("Could not get defaults for date {date}; occurred while trying to start ginput for job {}", job.job_id))?;
-                &defaults.ginput
-            };
-
-            let ginput = config.execution.ginput.get(ginput_key)
-                .ok_or_else(|| anyhow::anyhow!("Ginput key '{ginput_key}', required by job #{}, is not defined in the configuration", job.job_id))?;
-            
-            let task_res = ginput.start_job_for_date(conn, date, job, config)
-                .await;
-
-            let task = match task_res {
-                Ok(c) => c,
+    async fn cancel_ginput_job(job: &mut Job, join_handle: &mut Option<GinputHandle>, conn: &mut MySqlPC) -> anyhow::Result<bool> {
+        if let Some(task) = join_handle {
+            task.abort();
+            match task.await {
+                Ok(_) => {
+                    Self::set_job_complete(conn, job).await
+                        .with_context(|| format!("Job #{} completed before being cancelled, but setting it complete failed", job.job_id))?;
+                },
+                Err(e) if e.is_cancelled() => (),
                 Err(e) => {
-                    // Could not start the job for whatever reason; set the job state to "errored" and exit
-                    job.set_state(conn, JobState::Errored).await?;
-                    return Err(e).with_context(|| format!(
-                        "Was not able to start job #{} for date {date}", job.job_id
-                    ));
+                    anyhow::bail!("Job #{} had encountered an error before being cancelled: {e}", job.job_id);
                 }
-            };
-            *inner_runner = Some(task);
-
-            // I'd originally worried that there could be a race condition between this method and cancel,
-            // but since both require mut refs and you can't have >1 mut ref to the same object at a time,
-            // a race should actually be impossible.
-        }
-
-        Ok(())
-    }
-
-    async fn start_lut_job(ginput_key: &str, inner_runner: &mut Option<GinputRunner>, config: &Config) -> anyhow::Result<()> {
-        let ginput = config.execution.ginput.get(ginput_key)
-            .ok_or_else(|| anyhow::anyhow!("start_lut_job callled with invalid ginput key: '{ginput_key}'"))?;
-
-        let task = ginput.start_lut_regen().await
-            .with_context(|| format!("Error occurred while trying to start LUT regen job for ginput key '{ginput_key}'"))?;
-
-        *inner_runner = Some(task);
-        Ok(())
-    }
-
-    async fn cancel_ginput_job(job: &mut Job, inner_runner: &mut Option<GinputRunner>, conn: &mut MySqlConn) -> anyhow::Result<bool> {
-        if let Some(task) = inner_runner {
-            task.cancel_ginput_job(conn, Some(job))
-                .await
-                .with_context(|| format!("Error occurred while trying to stop job #{}", job.job_id))?;
+            }
+            orm::jobs::cleanup_cancelled_ginput_job(&mut *conn, job).await?;
             Ok(true)
         } else {
             Ok(false)
         }
     }
 
-    async fn cancel_lut_job(ginput_key: &str, inner_runner: &mut Option<GinputRunner>, conn: &mut MySqlConn) -> anyhow::Result<bool> {
-        if let Some(task) = inner_runner {
-            task.cancel_ginput_job(conn, None)
-                .await
-                .with_context(|| format!("Error occurred while trying to cancel LUT regeneration for ginput key '{ginput_key}'"))?;
+    async fn cancel_lut_job(ginput_key: &str, join_handle: &mut Option<GinputHandle>) -> anyhow::Result<bool> {
+        if let Some(task) = join_handle {
+            task.abort();
+            match task.await {
+                Ok(_) => (),
+                Err(e) if e.is_cancelled() => (),
+                Err(e) => {
+                    anyhow::bail!("Regenerating LUTs for ginput '{ginput_key}' encountered an error before being cancelled: {e}");
+                }
+            }
             Ok(true)
         } else {
             Ok(false)
@@ -703,11 +711,11 @@ impl ServiceJobRunner {
 impl Queueable for ServiceJobRunner {
 
     fn new_from_job(job: Job, _config: &Config) -> Self {
-        Self::GinputJob { job, inner_runner: None }
+        Self::GinputJob { job, join_handle: None }
     }
 
     fn new_lut_job(ginput_key: String) -> Self {
-        Self::LutRegenJob { ginput_key, inner_runner: None }
+        Self::LutRegenJob { ginput_key, join_handle: None }
     }
 
     fn has_started(&self) -> bool {
@@ -715,29 +723,34 @@ impl Queueable for ServiceJobRunner {
         // takes a mutable ref, it can't be called at the same time as this function,
         // so we should never have a case where start is in progress when this is called
         match self {
-            Self::GinputJob{job: _, inner_runner} => inner_runner.is_some(),
-            Self::LutRegenJob{ginput_key: _, inner_runner} => inner_runner.is_some()
+            Self::GinputJob{job: _, join_handle} => join_handle.is_some(),
+            Self::LutRegenJob{ginput_key: _, join_handle} => join_handle.is_some()
         }
     }
 
-    async fn is_done(&mut self, conn: &mut MySqlConn) -> anyhow::Result<bool> {
+    fn make_for_cleanup(&mut self) {
+        // TODO: I think the cancel functions might also need fixed
+        todo!()
+    }
+
+    async fn is_done(&mut self, conn: &mut MySqlPC) -> anyhow::Result<bool> {
         match self {
-            Self::GinputJob{job, inner_runner} => Self::is_ginput_job_done(job, inner_runner, conn).await,
-            Self::LutRegenJob{ginput_key, inner_runner} => Self::is_lut_job_done(&ginput_key, inner_runner).await
+            Self::GinputJob{job, join_handle} => Self::is_ginput_job_done(job, join_handle, conn).await,
+            Self::LutRegenJob{ginput_key, join_handle} => Self::is_lut_job_done(&ginput_key, join_handle).await
         }
     }
 
-    async fn start(&mut self, conn: &mut MySqlConn, config: &Config) -> anyhow::Result<()> {
+    async fn start(&mut self, conn: MySqlPC, config: &Config) -> anyhow::Result<()> {
         match self {
-            Self::GinputJob{job, inner_runner} => Self::start_ginput_job(job, inner_runner, config, conn).await,
-            Self::LutRegenJob{ginput_key, inner_runner} => Self::start_lut_job(ginput_key, inner_runner, config).await,
+            Self::GinputJob{job, join_handle} => Self::start_ginput_job(conn, job.clone(), config.clone(), join_handle).await,
+            Self::LutRegenJob{ginput_key, join_handle} => Self::start_lut_job(ginput_key.clone(), join_handle, config.clone()).await,
         }
     }
 
-    async fn cancel(&mut self, conn: &mut MySqlConn) -> anyhow::Result<bool> {
+    async fn cancel(&mut self, conn: &mut MySqlPC) -> anyhow::Result<bool> {
         match self {
-            Self::GinputJob{job, inner_runner} => Self::cancel_ginput_job(job, inner_runner, conn).await,
-            Self::LutRegenJob{ginput_key, inner_runner} => Self::cancel_lut_job(ginput_key, inner_runner, conn).await,
+            Self::GinputJob{job, join_handle} => Self::cancel_ginput_job(job, join_handle, conn).await,
+            Self::LutRegenJob{ginput_key, join_handle} => Self::cancel_lut_job(ginput_key, join_handle).await,
         }
         
     }
@@ -779,7 +792,7 @@ mod tests {
             Self::new_from_seconds(5)
         }
 
-        async fn start(&mut self, _conn: &mut MySqlConn, _config: &Config) -> anyhow::Result<()> {
+        async fn start(&mut self, mut _conn: MySqlPC, _config: &Config) -> anyhow::Result<()> {
             self.start_time = Some(Instant::now());
             Ok(())
         }
@@ -788,7 +801,11 @@ mod tests {
             self.start_time.is_some()
         }
 
-        async fn is_done(&mut self, _conn: &mut MySqlConn) -> anyhow::Result<bool> {
+        fn make_for_cleanup(&mut self) {
+            todo!()
+        }
+
+        async fn is_done(&mut self, _conn: &mut MySqlPC) -> anyhow::Result<bool> {
             let start = if let Some(t) = self.start_time {
                 t
             } else {
@@ -798,7 +815,7 @@ mod tests {
             Ok(Instant::now().duration_since(start) > self.delay)
         }
 
-        async fn cancel(&mut self, _conn: &mut MySqlConn) -> anyhow::Result<bool> {
+        async fn cancel(&mut self, _conn: &mut MySqlPC) -> anyhow::Result<bool> {
             Ok(true)
         }
     }

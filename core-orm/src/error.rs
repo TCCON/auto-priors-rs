@@ -48,6 +48,8 @@ pub enum JobError {
     InvalidSiteLocation(anyhow::Error),
     RunDirectoryError(std::io::Error),
     CancellationError(String),
+    WasCancelled,
+    GinputFailureError(i32),
     Other(String)
 }
 
@@ -66,6 +68,8 @@ impl Display for JobError {
             JobError::InvalidSiteLocation(e) => write!(f, "Invalid site location: {e}"),
             JobError::RunDirectoryError(e) => write!(f, "There was a problem with the run directory: {e}"),
             JobError::CancellationError(msg) => write!(f, "There was a problem cancelling a job: {msg}"),
+            JobError::WasCancelled => write!(f, "Job was cancelled"),
+            JobError::GinputFailureError(code) => write!(f, "ginput exited with error code {code}"),
             JobError::Other(msg) => write!(f, "Other Job Error: {msg}"),
         }
     }

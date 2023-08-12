@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     // JOB MANAGER SETUP //
 
     let job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager::new_from_pool(
-        &db, 
+        db.clone(), 
         Arc::clone(&config), 
         err_handler.clone()
     ).await.expect("Failed to initialize job manager");

@@ -3,13 +3,15 @@
 //! 
 use std::{path::{PathBuf, Path}, str::FromStr, fmt::{Display, Debug}, process::Stdio};
 
+use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use sqlx::{self, FromRow, Type, Acquire};
+use tokio::task::JoinHandle;
 
-use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}};
+use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::Config, MySqlPC};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
@@ -373,7 +375,7 @@ impl TryFrom<Job> for QJob {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// The public interface to the Jobs MySQL table.
 pub struct Job {
     /// **\[primary key\]** The unique integer ID of this job
@@ -1112,49 +1114,6 @@ impl Job {
 
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum RunState {
-    InProgress,
-    Complete,
-    Errored,
-}
-
-#[derive(Debug)]
-pub enum GinputRunner {
-    Shell(ShellGinputRunner)
-}
-
-impl GinputRunner {
-    pub fn is_done(&mut self) -> JobResult<RunState> {
-        match self {
-            GinputRunner::Shell(runner) => runner.is_done(),
-        }
-    }
-
-    pub async fn cancel_ginput_job(&mut self, conn: &mut MySqlConn, job: Option<&mut Job>) -> JobResult<()> {
-        match self {
-            GinputRunner::Shell(runner) => runner.cancel().await?,
-        }
-
-        if let Some(job) = job {
-            std::fs::remove_dir_all(&job.save_dir)
-                .unwrap_or_else(|e| warn!(
-                    "Error occurred while trying to remove run directory ({}) for job {}. Error was: {e}",
-                    job.save_dir.display(), job.job_id
-                ));
-
-            job.set_state(conn, JobState::Pending)
-                .await?;
-                // .with_context(|| format!(
-                //     "An error occurred while trying to reset the state for job #{} to 'pending'; job may need reset manually to finish.",
-                //     job.job_id
-                // ))?;
-        }
-        Ok(())
-    }
-
-}
-
 pub fn job_run_dir(config: &crate::config::Config, job_id: i32) -> std::io::Result<PathBuf> {
     let job_subdir = format!("job{:09}", job_id);
     let base_run_dir = config.execution.output_path.join(job_subdir);
@@ -1166,77 +1125,173 @@ pub fn job_run_dir(config: &crate::config::Config, job_id: i32) -> std::io::Resu
     Ok(base_run_dir)
 }
 
-#[derive(Debug)]
+pub async fn cleanup_cancelled_ginput_job(conn: &mut MySqlConn, job: &mut Job) -> JobResult<()> {
+    std::fs::remove_dir_all(&job.save_dir)
+        .unwrap_or_else(|e| warn!(
+            "Error occurred while trying to remove run directory ({}) for job {}. Error was: {e}",
+            job.save_dir.display(), job.job_id
+        ));
+
+    job.set_state(conn, JobState::Pending).await?;
+    Ok(())
+}
+
+trait InnerGinputRunner {
+    fn run_gen_priors_for_date(&self, ginput_args: GinputAutomationArgs, simulation_delay: Option<u32>) -> JobResult<()>;
+    fn run_lut_regen(&self) -> JobResult<()>;
+}
+
 pub struct ShellGinputRunner {
-    child: tokio::process::Child
+    run_ginput_path: PathBuf
 }
 
 impl ShellGinputRunner {
-    fn is_done(&mut self) -> JobResult<RunState> {
-        // let mut child = match self.child.try_borrow_mut() {
-        //     Ok(c) => c,
-        //     Err(e) => return RunState::Unknown(format!(
-        //         "Could not access child process, error was: {e}"
-        //     ))
-        // };
+    pub fn new(run_ginput_path: PathBuf) -> Self {
+        Self { run_ginput_path }
+    }
+}
 
-        match self.child.try_wait() {
-            Ok(Some(status)) => {
-                if status.success() {
-                    Ok(RunState::Complete)
-                } else {
-                    Ok(RunState::Errored)
-                }
-            },
-            Ok(None) => {
-                Ok(RunState::InProgress)
-            },
-            Err(e) => {
-                Err(JobError::Other(format!("Error when checking if tokio shell process completed: {e}")))
-            }
+impl InnerGinputRunner for ShellGinputRunner {
+    fn run_gen_priors_for_date(&self, ginput_args: GinputAutomationArgs, simulation_delay: Option<u32>) -> JobResult<()> {
+        let args_file = ginput_args.save_path.join("ginput_run_args.json");
+        let args_file_h = std::fs::File::create(&args_file)
+            .map_err(|e| JobError::RunDirectoryError(e))?;
+        serde_json::to_writer_pretty(args_file_h, &ginput_args)?;
+    
+        let log_file = std::fs::File::create(
+            ginput_args.save_path.join(format!("ginput_job_{}.out", ginput_args.job_id))
+        ).map_err(|e| JobError::RunDirectoryError(e))?;
+        let log_stdout = Stdio::from(log_file);
+    
+        let log_file = std::fs::File::create(
+            ginput_args.save_path.join(format!("ginput_job_{}.err", ginput_args.job_id))
+        ).map_err(|e| JobError::RunDirectoryError(e))?;
+        let log_stderr = Stdio::from(log_file);
+
+        let mut cmd = std::process::Command::new(&self.run_ginput_path);
+        cmd.arg("auto")
+            .arg("run")
+            .arg(args_file)
+            .stdout(log_stdout)
+            .stderr(log_stderr);
+
+        if let Some(delay) = simulation_delay {
+            cmd.args(["--simulate-with-delay".to_string(), format!("{delay}")]);
+        }
+
+        let status = cmd
+            .status()
+            .map_err(|e| JobError::RunDirectoryError(e))?;
+
+        if status.success() {
+            Ok(())
+        } else if let Some(code) = status.code() {
+            Err(JobError::GinputFailureError(code))
+        } else {
+            Err(JobError::WasCancelled)
         }
     }
 
-    async fn cancel(&mut self) -> JobResult<()> {
-        let pid = if let Some(p) = self.child.id() {
-            p
+    fn run_lut_regen(&self) -> JobResult<()> {
+        let status = std::process::Command::new(&self.run_ginput_path)
+            .arg("auto")
+            .arg("regen-lut")
+            .status()
+            .map_err(|e| JobError::RunDirectoryError(e))?;
+            // TODO: send to LUT log file or log to the normal log file (capture output)
+
+        if status.success() {
+            Ok(())
+        } else if let Some(code) = status.code() {
+            Err(JobError::GinputFailureError(code))
         } else {
-            // No pid = no process, so nothing to killl presumably?
-            return Ok(())
-        };
-
-        self.child.kill().await
-            .map_err(|e| JobError::CancellationError(format!(
-                "Error occurred while trying to cancel child process ID {pid}: {e}"
-            )))?;
-
-        Ok(())
+            Err(JobError::WasCancelled)
+        }
     }
 }
 
-pub async fn start_lut_regen_through_shell(
-    run_ginput_path: &Path
-) -> JobResult<GinputRunner> {
-    // TODO: send to LUT log file or log to the normal log file (capture output)
+#[derive(Debug, Serialize)]
+struct GinputAutomationArgs {
+    job_id: i32,
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>,
+    met_path: PathBuf,
+    chem_path: PathBuf,
+    save_path: PathBuf,
+    site_ids: Vec<String>,
+    site_lons: Vec<f32>,
+    site_lats: Vec<f32>,
+    site_alts: Vec<f32>,
 
-    let child = tokio::process::Command::new(run_ginput_path)
-        .arg("auto")
-        .arg("regen-lut")
-        .spawn()
-        .map_err(|e| JobError::RunDirectoryError(e))?;
+    base_vmr_file: Option<PathBuf>,
+    zgrid_file: Option<PathBuf>,
 
-    let shell_runner = ShellGinputRunner { child };
+    map_file_format: String,
 
-    Ok(GinputRunner::Shell(shell_runner))
+    n_threads: u32
 }
 
-pub async fn start_job_for_date_through_shell(
-    conn: &mut MySqlConn,
-    date: NaiveDate,
-    job: &Job,
-    config: &crate::config::Config,
-    run_ginput_path: &Path
-) -> JobResult<GinputRunner> {
+pub type GinputHandle = JoinHandle<anyhow::Result<()>>;
+
+pub fn start_priors_gen_job(conn: MySqlPC, job: Job, config: Config) -> GinputHandle {
+    tokio::spawn(async move {
+        run_priors_gen_job(conn, job, config).await
+    })
+}
+
+async fn run_priors_gen_job(mut conn: MySqlPC, job: Job, config: Config) -> anyhow::Result<()> {
+    let date_iter = crate::utils::DateIterator::new(
+        vec![(job.start_date, job.end_date)]
+    );
+
+    for date in date_iter {
+        let ginput_args = setup_ginput_args_for_date(&mut conn, date, &job, &config).await?;        
+        let runner = get_runner_for_date(date, &job, &config)?;
+        runner.run_gen_priors_for_date(ginput_args, config.get_sim_delay())?;
+    }
+
+    Ok(())
+}
+
+pub fn start_lut_regen_job(ginput_key: String, config: Config) -> GinputHandle {
+    tokio::spawn(async move {
+        run_lut_regen_job(ginput_key, config).await
+    })
+}
+
+async fn run_lut_regen_job(ginput_key: String, config: Config) -> anyhow::Result<()> {
+    let ginput = config.execution.ginput.get(&ginput_key)
+        .ok_or_else(|| anyhow::anyhow!("Ginput key '{ginput_key}', passed to regenerate LUTs, is not defined in the configuration"))?;
+    let runner = get_runner_for_ginput(ginput);
+    runner.run_lut_regen()?;
+    Ok(())
+}
+
+
+fn get_runner_for_date(date: NaiveDate, job: &Job, config: &Config) -> anyhow::Result<Box<dyn InnerGinputRunner>> {
+    let ginput_key = if let Some(key) = &job.ginput_key {
+        key
+    } else {
+        let defaults = config.get_defaults_for_date(date)
+            .with_context(|| format!("Could not get defaults for date {date}; occurred while trying to start ginput for job {}", job.job_id))?;
+        &defaults.ginput
+    };
+
+    let ginput = config.execution.ginput.get(ginput_key)
+        .ok_or_else(|| anyhow::anyhow!("Ginput key '{ginput_key}', required by job #{}, is not defined in the configuration", job.job_id))?;
+
+    Ok(get_runner_for_ginput(ginput))
+}
+
+fn get_runner_for_ginput(ginput: &crate::config::GinputConfig) -> Box<dyn InnerGinputRunner> {
+    match ginput {
+        crate::config::GinputConfig::Script { entry_point_path } => {
+            Box::new(ShellGinputRunner{ run_ginput_path: entry_point_path.to_owned() })
+        },
+    }
+}
+
+async fn setup_ginput_args_for_date(conn: &mut MySqlConn, date: NaiveDate, job: &Job, config: &Config) -> anyhow::Result<GinputAutomationArgs> {
     let met_key = if let Some(k) = &job.met_key {
         k.to_owned()
     } else {
@@ -1252,70 +1307,27 @@ pub async fn start_job_for_date_through_shell(
         .await
         .map_err(|e| JobError::InvalidSiteLocation(e))?;
 
-    let run_dir = job_run_dir(config, job.job_id)
+    let run_dir = job_run_dir(&config, job.job_id)
         .map_err(|e| JobError::RunDirectoryError(e))?;
+
+    let nlocs = lons.len();
     
     let ginput_args = GinputAutomationArgs {
+        job_id: job.job_id,
         start_date: date,
         end_date: None,
-        met_path: &met_path,
-        chem_path: &chem_path,
-        save_path: &run_dir,
-        site_ids: &site_ids,
-        site_lats: &lats,
-        site_lons: &lons,
-        site_alts: &vec![0.0; lons.len()],
-        base_vmr_file: config.data.base_vmr_file.as_deref(),
-        zgrid_file: config.data.zgrid_file.as_deref(),
+        met_path: met_path,
+        chem_path: chem_path,
+        save_path: run_dir,
+        site_ids: site_ids,
+        site_lats: lats,
+        site_lons: lons,
+        site_alts: vec![0.0; nlocs],
+        base_vmr_file: config.data.base_vmr_file.to_owned(),
+        zgrid_file: config.data.zgrid_file.to_owned(),
         map_file_format: job.map_fmt.to_string(),
         n_threads: config.execution.max_numpy_threads
     };
 
-    let args_file = run_dir.join("ginput_run_args.json");
-    let args_file_h = std::fs::File::create(&args_file)
-        .map_err(|e| JobError::RunDirectoryError(e))?;
-    serde_json::to_writer_pretty(args_file_h, &ginput_args)?;
-
-    let log_file = std::fs::File::create(
-        run_dir.join(format!("ginput_job_{}.out", job.job_id))
-    ).map_err(|e| JobError::RunDirectoryError(e))?;
-    let log_stdout = Stdio::from(log_file);
-
-    let log_file = std::fs::File::create(
-        run_dir.join(format!("ginput_job_{}.err", job.job_id))
-    ).map_err(|e| JobError::RunDirectoryError(e))?;
-    let log_stderr = Stdio::from(log_file);
-
-    let child = tokio::process::Command::new(run_ginput_path)
-        .arg("auto")
-        .arg("run")
-        .arg(args_file)
-        .stdout(log_stdout)
-        .stderr(log_stderr)
-        .spawn()
-        .map_err(|e| JobError::RunDirectoryError(e))?;
-
-    let shell_runner = ShellGinputRunner { child };
-
-    Ok(GinputRunner::Shell(shell_runner))
-}
-
-#[derive(Debug, Serialize)]
-struct GinputAutomationArgs<'a> {
-    start_date: NaiveDate,
-    end_date: Option<NaiveDate>,
-    met_path: &'a Path,
-    chem_path: &'a Path,
-    save_path: &'a Path,
-    site_ids: &'a[String],
-    site_lons: &'a[f32],
-    site_lats: &'a[f32],
-    site_alts: &'a[f32],
-
-    base_vmr_file: Option<&'a Path>,
-    zgrid_file: Option<&'a Path>,
-
-    map_file_format: String,
-
-    n_threads: u32
-}
+    Ok(ginput_args)
+}   

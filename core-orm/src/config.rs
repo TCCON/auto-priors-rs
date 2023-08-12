@@ -19,7 +19,7 @@ use serde::{Serialize, Deserialize};
 use toml;
 use url::Url;
 
-use crate::{met::{self, MetDataType}, error::{DefaultOptsQueryError, JobResult, EmailError}, MySqlConn, email::SendMail};
+use crate::{met::{self, MetDataType}, error::{DefaultOptsQueryError, EmailError}, email::SendMail};
 
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
@@ -225,6 +225,16 @@ impl Config {
             .get(queue_name)
             .map(|q| q.to_owned())
     }
+
+    /// If the configuration is set for simulation, return the number of seconds to delay 
+    /// ginput outputting sim files by. If not set for a simulation, return `None`.
+    pub fn get_sim_delay(&self) -> Option<u32> {
+        if !self.execution.simulate {
+            None
+        } else {
+            Some(self.execution.simulation_delay)
+        }
+    }
 }
 
 /// Configuration section dealing with how jobs are run
@@ -270,6 +280,9 @@ pub struct ExecutionConfig {
     /// Run a simulation, do not execute ginput, but generate mock output files for testing
     #[serde(default)]
     pub simulate: bool,
+
+    #[serde(default = "default_sim_delay")]
+    pub simulation_delay: u32,
 }
 
 impl Default for ExecutionConfig {
@@ -290,9 +303,14 @@ impl Default for ExecutionConfig {
             std_sites_output_base: Default::default(),
             start_jobs_freq: 60.0,
             ginput: HashMap::new(),
-            simulate: false
+            simulate: false,
+            simulation_delay: default_sim_delay(),
         }
     }
+}
+
+fn default_sim_delay() -> u32 {
+    60
 }
 
 /// Configuration describing an available version of ginput that the automation can call.
@@ -302,31 +320,6 @@ pub enum GinputConfig {
     /// A ginput installation to be called via its `run_ginput.py` entry point. Requires
     /// one option, `entry_point_path`, which is the path to the `run_ginput.py` file.
     Script{entry_point_path: PathBuf}
-}
-
-impl GinputConfig {
-    pub async fn start_job_for_date(&self, 
-        conn: &mut MySqlConn,
-        date: NaiveDate,
-        job: &crate::jobs::Job,
-        config: &Config
-    ) -> JobResult<crate::jobs::GinputRunner> {
-        match self {
-            GinputConfig::Script { entry_point_path } => {
-                crate::jobs::start_job_for_date_through_shell(conn, date, job, config, &entry_point_path)
-                .await
-            },
-        }
-    }
-
-    pub async fn start_lut_regen(&self) -> JobResult<crate::jobs::GinputRunner> {
-        match self {
-            GinputConfig::Script { entry_point_path } => {
-                crate::jobs::start_lut_regen_through_shell(&entry_point_path)
-                    .await
-            }
-        }
-    }
 }
 
 /// Configuration section dealing with input data for jobs
