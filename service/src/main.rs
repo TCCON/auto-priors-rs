@@ -39,25 +39,35 @@ async fn main() -> anyhow::Result<()> {
     JOBS_MANAGER.set(Mutex::new(job_manager)).expect("Could not set the global job manager");
 
 
-    scheduler
-        .every(timing_config.job_start_seconds.seconds())
-        .run(|| async {
-            let mutex = JOBS_MANAGER.get().unwrap();
-            let mut jm = mutex.lock().await;
-            jm.scheduler_entry_point().await;
-        });
+    if !timing_config.disable_job {
+        info!("Setting up job parsing and execution to run");
+        scheduler
+            .every(timing_config.job_start_seconds.seconds())
+            .run(|| async {
+                let mutex = JOBS_MANAGER.get().unwrap();
+                let mut jm = mutex.lock().await;
+                jm.scheduler_entry_point().await;
+            });
+    } else {
+        warn!("Job parsing/execution will NOT run");
+    }
 
-    let lut_job = scheduler
-        .every(timing_config.lut_regen_days.days())
-        .run(|| async { 
-            // Should be safe to unwrap, will only be None if JOBS_MANAGER wasn't set, and 
-            // we did that above
-            let mutex = JOBS_MANAGER.get().unwrap();
-            let mut jm = mutex.lock().await;
-            jm.schedule_lut_regen().await;
-        });
-    if let Some(at) = timing_config.lut_regen_at {
-        lut_job.at(&at);
+    if !timing_config.disable_lut_regen {
+        info!("Setting up strat LUT regen to run");
+        let lut_job = scheduler
+            .every(timing_config.lut_regen_days.days())
+            .run(|| async { 
+                // Should be safe to unwrap, will only be None if JOBS_MANAGER wasn't set, and 
+                // we did that above
+                let mutex = JOBS_MANAGER.get().unwrap();
+                let mut jm = mutex.lock().await;
+                jm.schedule_lut_regen().await;
+            });
+        if let Some(at) = timing_config.lut_regen_at {
+            lut_job.at(&at);
+        }
+    } else {
+        warn!("LUT regen will NOT be run");
     }
 
     // END JOB MANAGER SETUP //
@@ -72,15 +82,20 @@ async fn main() -> anyhow::Result<()> {
 
     MET_MANAGER.set(Mutex::new(met_manager)).expect("Could not set the global met manager");
 
-    scheduler
-        .every(timing_config.met_download_hours.hours())
-        .run(|| async {
-            // Should be safe to unwrap, will only be None if MET_MANAGER wasn't set, and 
-            // we did that above
-            let mutex = MET_MANAGER.get().unwrap();
-            let mut mm = mutex.lock().await;
-            mm.scheduler_entry_point().await;
-        });
+    if !timing_config.disable_met_download {
+        info!("Setting up met download to run");
+        scheduler
+            .every(timing_config.met_download_hours.hours())
+            .run(|| async {
+                // Should be safe to unwrap, will only be None if MET_MANAGER wasn't set, and 
+                // we did that above
+                let mutex = MET_MANAGER.get().unwrap();
+                let mut mm = mutex.lock().await;
+                mm.scheduler_entry_point().await;
+            });
+    } else {
+        warn!("Met downloads will NOT run");
+    }
 
     // END MET MANAGER SETUP //
 

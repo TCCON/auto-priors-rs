@@ -24,6 +24,17 @@ use crate::{met::{self, MetDataType}, error::{DefaultOptsQueryError, EmailError}
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
 
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct TestConfig {
+    pub default_options: Vec<DefaultOptions>, // errors if after data
+    pub execution: ExecutionConfig,
+    pub data: DataConfig,
+    // #[serde(default)]
+    // pub email: EmailConfig,
+    // pub admin: AdminConfig,
+    // #[serde(default)]
+    // pub timing: ServiceTimingOptions
+}
 
 /// Top level configuration structure, comprised of subsections represented by other structures:
 /// 
@@ -37,9 +48,9 @@ pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
 /// - `timing`: a [`ServiceTimingOptions`] that controls how often different parts of the service run.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
+    pub default_options: Vec<DefaultOptions>, // errors if after data
     pub execution: ExecutionConfig,
     pub data: DataConfig,
-    pub default_options: Vec<DefaultOptions>,
     #[serde(default)]
     pub email: EmailConfig,
     pub admin: AdminConfig,
@@ -240,10 +251,6 @@ impl Config {
 /// Configuration section dealing with how jobs are run
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ExecutionConfig {
-    /// Maximum number of jobs to run simultaneously
-    #[serde(default)]
-    pub queues: HashMap<String, JobQueueOptions>,
-
     /// Maximum number of threads to let numpy use
     pub max_numpy_threads: u32,
 
@@ -274,15 +281,25 @@ pub struct ExecutionConfig {
     /// Frequency in seconds for the job service to check for pending jobs
     pub start_jobs_freq: f32,
 
-    /// Map of available ginput versions to use.
-    pub ginput: HashMap<String, GinputConfig>,
-
     /// Run a simulation, do not execute ginput, but generate mock output files for testing
     #[serde(default)]
     pub simulate: bool,
 
     #[serde(default = "default_sim_delay")]
     pub simulation_delay: u32,
+
+    /// The queue that submitted jobs go into
+    pub submitted_job_queue: String,
+
+    /// The queue that standard site jobs go into
+    pub std_site_job_queue: String,
+
+    /// Determines maximum number of jobs allowed to run simultaneously for different work sets
+    #[serde(default)]
+    pub queues: HashMap<String, JobQueueOptions>,
+
+    /// Map of available ginput versions to use.
+    pub ginput: HashMap<String, GinputConfig>,
 }
 
 impl Default for ExecutionConfig {
@@ -302,9 +319,11 @@ impl Default for ExecutionConfig {
             std_sites_tar_output: Default::default(), 
             std_sites_output_base: Default::default(),
             start_jobs_freq: 60.0,
-            ginput: HashMap::new(),
+            ginput: Default::default(),
             simulate: false,
             simulation_delay: default_sim_delay(),
+            submitted_job_queue: "submitted".to_string(),
+            std_site_job_queue: "std-sites".to_string()
         }
     }
 }
@@ -315,7 +334,7 @@ fn default_sim_delay() -> u32 {
 
 /// Configuration describing an available version of ginput that the automation can call.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(untagged)]
+#[serde(tag = "type")]
 pub enum GinputConfig {
     /// A ginput installation to be called via its `run_ginput.py` entry point. Requires
     /// one option, `entry_point_path`, which is the path to the `run_ginput.py` file.
@@ -325,20 +344,20 @@ pub enum GinputConfig {
 /// Configuration section dealing with input data for jobs
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct DataConfig {
-    /// A map of arrays of configurations that specify how to download reanalysis files.
-    /// Each config in the array represents a file that needs to be downloaded for ginput
-    /// to run. The keys to the map must be strings that will be passed as arguments to
-    /// the downloader to specify which file type to download. See [`DownloadConfig`] for 
-    /// details on the array elements.
-    pub download: HashMap<String, Vec<DownloadConfig>>,
-
     /// The path to an integral.gnd file that specifies an altitude grid. If omitted, 
     /// or an empty string, then the priors are produced on the native GEOS grid.
     pub zgrid_file: Option<PathBuf>,
 
     /// The path to a summer, 35N .vmr file that will be used for the secondary 
     /// gases. If omitted or an empty string, the secondary gases are not included.
-    pub base_vmr_file: Option<PathBuf>
+    pub base_vmr_file: Option<PathBuf>,
+
+    /// A map of arrays of configurations that specify how to download reanalysis files.
+    /// Each config in the array represents a file that needs to be downloaded for ginput
+    /// to run. The keys to the map must be strings that will be passed as arguments to
+    /// the downloader to specify which file type to download. See [`DownloadConfig`] for 
+    /// details on the array elements.
+    pub download: HashMap<String, Vec<DownloadConfig>>,
 }
 
 /// Configuration for how to download input reanalysis files for ginput
@@ -495,7 +514,7 @@ impl Default for AdminConfig {
 /// Note that if you access the vector of these directly there is no guarantee that they are time-ordered or
 /// non-overlapping. Use the methods [`Config::get_all_defaults`] and [`Config::get_all_defaults_check_overlap`]
 /// for that.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct DefaultOptions {
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
@@ -556,15 +575,24 @@ impl Default for JobQueueOptions {
 /// Configuration for how frequently elements of the systemd service run
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceTimingOptions {
+    /// Set to true to disable met downloading
+    pub disable_met_download: bool,
+
     /// How many hours between attempts to download the met data. 
     /// The met download will run on even multiples of that hour,
     /// e.g. if this is 6, then the met download will run at 00:00,
     /// 06:00, 12:00, and 18:00
     pub met_download_hours: u32,
 
+    /// Set to true to disable parsing input files and starting jobs
+    pub disable_job: bool,
+
     /// How many seconds between attempts to start jobs. As with met,
     /// the attempts run on even multiples of this value.
     pub job_start_seconds: u32,
+
+    /// Set to true to disable regenerating the stratospheric LUTs
+    pub disable_lut_regen: bool,
 
     /// How frequently (in days) to insert jobs to regenerate the stratosphere
     /// look up tables for ginput. 
@@ -573,6 +601,9 @@ pub struct ServiceTimingOptions {
     /// What time of the day, in HH:MM format, to run the LUT regen. If
     /// omitted, then that will run at midnight.
     pub lut_regen_at: Option<String>,
+
+    /// Set to true to disable generating standard site jobs/priors
+    pub disable_std_site_gen: bool,
 
     /// How frequently (in hours) to check for new days to generate standard
     /// site priors and submit jobs.
@@ -587,10 +618,14 @@ pub struct ServiceTimingOptions {
 impl Default for ServiceTimingOptions {
     fn default() -> Self {
         Self { 
+            disable_met_download: false,
             met_download_hours: 6, 
+            disable_job: false,
             job_start_seconds: 60, 
+            disable_lut_regen: false,
             lut_regen_days: 24, 
             lut_regen_at: Some("00:00".to_string()), 
+            disable_std_site_gen: false,
             std_site_gen_hours: 24, 
             std_site_gen_offset_minutes: Some(180) 
         }
@@ -688,12 +723,45 @@ pub fn generate_config_file<T>(path: T) -> anyhow::Result<()>
 where T: AsRef<Path>
 {
     // TODO: make a macro that will copy docstring comments from the structs to the file
+    // Note: if you get a "values must be emitted before tables" error, it has to do with the
+    // ordering of fields. Putting HashMaps at the end seems to help. See
+    // https://github.com/toml-rs/toml-rs/issues/142
     let mut default_cfg = Config::default();
+
     default_cfg.data.base_vmr_file = Some(PathBuf::new());
     default_cfg.data.zgrid_file = Some(PathBuf::new());
+    default_cfg.data.download.insert("geosfpit".to_string(), vec![
+        DownloadConfig{ 
+            product: met::MetProduct::GeosFpit,
+            data_type: MetDataType::Met,
+            levels: met::MetLevels::Eta,
+            url_pattern: "".to_string(),
+            basename_pattern: Some("(omit to infer from url_pattern)".to_string()),
+            file_freq_min: 180,
+            earliest_date: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+            download_dir: PathBuf::new()
+        }
+    ]);
+
     default_cfg.admin.acknowledgement_message = Some(String::new());
 
-    let toml_str = toml::to_string_pretty(&default_cfg)?;
+    default_cfg.default_options = vec![
+        DefaultOptions { 
+            start_date: NaiveDate::from_ymd_opt(2000, 1, 1),
+            end_date: NaiveDate::from_ymd_opt(2038, 1, 1),
+            ginput: "".to_string(),
+            met: "".to_string()
+        }
+    ];
+
+    let sub_queue = default_cfg.execution.submitted_job_queue.clone();
+    let std_queue = default_cfg.execution.std_site_job_queue.clone();
+    default_cfg.execution.queues.insert(sub_queue, JobQueueOptions { max_num_procs: 4 });
+    default_cfg.execution.queues.insert(std_queue, JobQueueOptions { max_num_procs: 4 });
+
+    default_cfg.execution.ginput.insert("v1.0.6".to_string(), GinputConfig::Script { entry_point_path: PathBuf::new() });
+
+    let toml_str = toml::to_string_pretty(&default_cfg).context("Could not convert default config to string")?;
     let mut f = File::create(path).context("Could not create the configuration file.")?;
     f.write_all(toml_str.as_bytes()).context("Could not write the configuration file.")?;
 
