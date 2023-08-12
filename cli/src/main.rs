@@ -56,6 +56,7 @@ enum Commands {
     ParseInputFilesManually(input_files::ParseInputFilesManualCli),
     AddJob(jobs::AddJobCli),
     DeleteJob(jobs::DeleteJobCli),
+    PrintJobs(jobs::PrintJobsCli),
     StdSites(siteinfo::StdSiteCli),
     #[clap(alias="ssj")]
     StdSiteJobs(stdsites::StdSiteJobCli),
@@ -189,6 +190,10 @@ async fn main() -> anyhow::Result<()> {
             jobs::delete_job(&mut conn, subargs).await?
         },
 
+        Commands::PrintJobs(subargs) => {
+            let mut conn = db.get_connection().await?;
+            jobs::print_jobs_table_cli(&mut conn, subargs).await?;
+        }
 
         Commands::StdSites(StdSiteCli { command: StdSiteActions::AddSite(subargs) }) => {
             let mut conn = db.get_connection().await?;
@@ -198,6 +203,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::StdSites(StdSiteCli { command: StdSiteActions::EditSite(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::edit_std_site_cli(&mut conn, subargs).await?;
+        }
+
+        Commands::StdSites(StdSiteCli { command: StdSiteActions::PrintSites(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            siteinfo::print_sites_cli(&mut conn, subargs).await?;
         }
 
         Commands::StdSites(StdSiteCli { command: StdSiteActions::AddInfo(subargs) }) => {

@@ -85,8 +85,9 @@ pub struct StdSiteCli {
 pub enum StdSiteActions {
     AddSite(AddNewStdSiteCli),
     EditSite(EditSiteCli),
+    PrintSites(PrintSitesCli),
     AddInfo(AddSiteInfoCli),
-    PrintInfo(PrintLocsArgs),
+    PrintInfo(PrintLocsCli),
 }
 
 /// Define a new standard site
@@ -228,14 +229,38 @@ pub async fn add_std_site_info_range(
 }
 
 
+/// Print out a table of defined standard sites
+#[derive(Debug, Args)]
+pub struct PrintSitesCli {
+    /// Limit to only sites of a certain type
+    #[clap(short = 't', long = "type")]
+    site_type: Option<SiteType>
+}
+
+pub async fn print_sites_cli(conn: &mut MySqlConn, args: PrintSitesCli) -> anyhow::Result<()> {
+    print_sites(conn, args.site_type).await
+}
+
+
+pub async fn print_sites(conn: &mut MySqlConn, site_type: Option<SiteType>) -> anyhow::Result<()> {
+    let sites = StdSite::get_by_type(conn, site_type).await?;
+    let table_config = tabled::settings::Settings::default()
+        .with(tabled::settings::Style::markdown());
+    let table = Table::new(sites)
+        .with(table_config)
+        .to_string();
+    println!("{table}");
+    Ok(())
+}
+
 /// Print currently defined location info for a given site
 #[derive(Debug, Args)]
-pub struct PrintLocsArgs {
+pub struct PrintLocsCli {
     /// The two-letter ID for the site to print information about
     site_id: String
 }
 
-pub async fn print_locations_for_site_cli(conn: &mut MySqlConn, args: PrintLocsArgs) -> anyhow::Result<()> {
+pub async fn print_locations_for_site_cli(conn: &mut MySqlConn, args: PrintLocsCli) -> anyhow::Result<()> {
     print_locations_for_site(conn, &args.site_id).await
 }
 

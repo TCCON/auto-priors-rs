@@ -1,5 +1,5 @@
 //! Interface to the standard site information tables
-use std::{collections::HashMap, str::FromStr, borrow::Cow};
+use std::{collections::HashMap, str::FromStr, borrow::Cow, fmt::Display};
 
 use anyhow::{self, Context};
 use chrono::{NaiveDate, Duration};
@@ -48,9 +48,19 @@ impl FromStr for SiteType {
     }
 }
 
+impl Display for SiteType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SiteType::Unknown => write!(f, "UNKNOWN"),
+            SiteType::TCCON => write!(f, "TCCON"),
+            SiteType::EM27 => write!(f, "EM27"),
+        }
+    }
+}
+
 
 /// A struct representing a standard (permanent) TCCON, EM27, or other site.
-#[derive(Debug)]
+#[derive(Debug, Tabled)]
 pub struct StdSite {
     /// **\[primary key\]** the primary key in the SQL StdSiteList table.
     pub id: i32,
@@ -61,19 +71,6 @@ pub struct StdSite {
     /// Whether this is a TCCON, EM27, or other site type.
     pub site_type: SiteType
 }
-
-// impl<'r> FromRow<'r, sqlx::mysql::MySqlRow> for StdSite {
-//     // Implementing for a concrete row type was recommended by https://stackoverflow.com/a/66713961
-//     // because trying to implement for any generic row is much more work.
-//     fn from_row(row: &'r sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
-//         let id = row.try_get("id")?;
-//         let site_id = row.try_get("site_id")?;
-//         let site_type: String = row.try_get("site_type")?;
-//         // let site_type = SiteType::from(site_type_str);
-
-//         Ok(StdSite{id, site_id, site_type})
-//     }
-// }
 
 impl From<QStdSite> for StdSite {
     fn from(obj: QStdSite) -> Self {
@@ -149,6 +146,27 @@ impl StdSite {
         .await?;
         
         Ok(Self::from(new_site))
+    }
+
+    /// Retrieve a list of standard sites, optionally filtered by site type
+    pub async fn get_by_type(conn: &mut MySqlConn, site_type: Option<SiteType>) -> anyhow::Result<Vec<Self>> {
+        let qsites = if let Some(stype) = site_type {
+            sqlx::query_as!(
+                QStdSite,
+                "SELECT * FROM StdSiteList WHERE site_type = ? ORDER BY site_id",
+                stype
+            ).fetch_all(conn).await?
+        } else {
+            sqlx::query_as!(
+                QStdSite,
+                "SELECT * FROM StdSiteList ORDER BY site_id"
+            ).fetch_all(conn).await?
+        };
+
+        let sites = qsites.into_iter()
+            .map(|q| q.into())
+            .collect();
+        Ok(sites)
     }
 
     pub async fn get_by_site_id(conn: &mut MySqlConn, site_id: &str) -> anyhow::Result<Option<Self>> {

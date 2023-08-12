@@ -4,7 +4,8 @@ use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use clap::{self, Args};
 // use clap::builder::AppSettings;
-use orm::jobs::{Job, ModFmt, VmrFmt, MapFmt, TarChoice};
+use orm::{jobs::{Job, ModFmt, VmrFmt, MapFmt, TarChoice}, MySqlConn};
+use tabled::Table;
 
 
 #[derive(Debug, Args)]
@@ -159,5 +160,106 @@ pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli) -> anyhow::Resu
 pub async fn delete_job(db: &mut orm::MySqlConn, clargs: DeleteJobCli) -> anyhow::Result<()> {
     let n_deleted = orm::jobs::Job::delete_job_with_id(db, clargs.id).await?;
     println!("Deleted {n_deleted} job(s)");
+    Ok(())
+}
+
+/// Print out jobs, either in a table or with more details
+#[derive(Debug, Args)]
+pub struct PrintJobsCli {
+    /// Print out details descriptions of all matching jobs, rather than a table.
+    /// Note that this is the only way to get all the information about jobs; many
+    /// fields are omitted from the table to keep its width reasonable.
+    #[clap(short = 'd', long)]
+    details: bool,
+
+    /// List all jobs meeting the other criteria, not just pending jobs
+    #[clap(long)]
+    all: bool,
+
+    /// Limit to certain job IDs, repeat this argument to specify multiple
+    /// job IDs.
+    #[clap(short = 'j', long)]
+    job_id: Vec<i32>,
+
+    /// Limit jobs to those submitted on or after this date
+    #[clap(short = 'a', long)]
+    submitted_after: Option<NaiveDate>,
+        
+    /// Limit jobs to those submitted before this date
+    #[clap(short = 'b', long)]
+    submitted_before: Option<NaiveDate>,
+
+    /// Limit jobs to those submitted under this email. Use "NONE" to filter for jobs submitted without an email.
+    #[clap(short = 'e', long)]
+    submitter_email: Option<String>
+}
+
+pub async fn print_jobs_table_cli(conn: &mut MySqlConn, args: PrintJobsCli) -> anyhow::Result<()> {
+    print_jobs_table(
+        conn, 
+        args.details,
+        !args.all,
+        args.job_id.as_slice(),
+        (args.submitted_after, args.submitted_before),
+        args.submitter_email.as_deref()
+    ).await
+}
+
+pub async fn print_jobs_table(
+    conn: &mut MySqlConn,
+    detailed: bool,
+    pending_only: bool,
+    job_ids: &[i32],
+    submit_date_range: (Option<NaiveDate>, Option<NaiveDate>),
+    submit_email: Option<&str>
+) -> anyhow::Result<()> {
+    let jobs = Job::get_jobs_list(conn, pending_only).await?;
+
+    // Because the filtering is kind of specific to this function, we'll do it in Rust here
+    // rather than as specific SQL queries.
+    let submit_start = submit_date_range.0.map(|d| d.and_hms_opt(0, 0, 0).unwrap());
+    let submit_end = submit_date_range.1.map(|d| d.and_hms_opt(0, 0, 0).unwrap());
+
+    let jobs = jobs.into_iter()
+        .filter(|j| {
+            if let Some(start) = submit_start {
+                if j.submit_time < start { return false; }
+            }
+
+            if let Some(end) = submit_end {
+                if j.submit_time >= end { return false; }
+            }
+
+            if !job_ids.is_empty() {
+                if !job_ids.contains(&j.job_id) {
+                    return false;
+                }
+            }
+
+            if let Some(filter_email) = submit_email {
+                return j.email.as_deref().unwrap_or("NONE") == filter_email;
+            }
+
+            return true;
+        });
+
+    if detailed {
+        let mut at_least_one = false;
+        for job in jobs {
+            println!("{job}");
+            at_least_one = true;
+        }
+        if !at_least_one {
+            println!("No jobs matching given criteria.");
+        }
+    } else {
+        let table_config = tabled::settings::Settings::default()
+            .with(tabled::settings::Style::markdown());
+        let table = Table::new(jobs)
+            .with(table_config)
+           .to_string();
+        println!("{table}");
+    }
+
     Ok(())
 }

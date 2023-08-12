@@ -5,10 +5,12 @@ use std::{path::{PathBuf, Path}, str::FromStr, fmt::{Display, Debug}, process::S
 
 use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
+use itertools::Itertools;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use sqlx::{self, FromRow, Type, Acquire};
+use tabled::Tabled;
 use tokio::task::JoinHandle;
 
 use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::Config, MySqlPC};
@@ -449,6 +451,81 @@ pub struct Job {
     pub output_file: Option<PathBuf>
 }
 
+impl Tabled for Job {
+    const LENGTH: usize = 10;
+
+    fn fields(&self) -> Vec<std::borrow::Cow<'_, str>> {
+        vec![
+            format!("{}", self.job_id).into(),
+            self.state.to_string().into(),
+            self.site_id.join(", ").into(),
+            self.start_date.to_string().into(),
+            self.end_date.to_string().into(),
+            self.email.as_deref().unwrap_or("-").into(),
+            format!("{}", self.priority).into(),
+            self.queue.as_str().into(),
+            self.submit_time.to_string().into(),
+            self.complete_time.map(|dt| dt.to_string()).unwrap_or_else(|| "-".to_string()).into(),
+        ]
+    }
+
+    fn headers() -> Vec<std::borrow::Cow<'static, str>> {
+        vec![
+            "job_id".into(),
+            "state".into(),
+            "site_id".into(),
+            "start_date".into(),
+            "end_date".into(),
+            "email".into(),
+            "priority".into(),
+            "queue".into(),
+            "submit_time".into(),
+            "complete_time".into(),
+        ]
+    }
+}
+
+impl Display for Job {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let lats = self.lat.iter()
+            .map(|v| {
+                v.map(|y| format!("{y:.3}"))
+                .unwrap_or_else(|| "DEF".to_string())
+            }).join(", ");
+
+        let lons = self.lon.iter()
+            .map(|v| {
+                v.map(|x| format!("{x:.3}"))
+                .unwrap_or_else(|| "DEF".to_string())
+            }).join(", ");
+
+        let complete_string = if let Some(time) = self.complete_time {
+            format!("completed at {time}")
+        } else {
+            "not completed yet".to_string()
+        };
+        
+        writeln!(f, "Job {} ({}):", self.job_id, self.state)?;
+        writeln!(f, "  Submitted by {} at {}, {}", 
+            self.email.as_deref().unwrap_or("NONE"),
+            self.submit_time,
+            complete_string
+        )?;
+        writeln!(f, "  Priority {} in queue {}", self.priority, self.queue)?;
+        writeln!(f, "  Dates: {} to {}", self.start_date, self.end_date)?;
+        writeln!(f, "  Site IDs:   {}", self.site_id.join(", "))?;
+        writeln!(f, "  Latitudes:  {lats}")?;
+        writeln!(f, "  Longitudes: {lons}")?;
+        writeln!(f, "  Output in {} as tarball {}", self.save_dir.display(), self.save_tarball)?;
+        writeln!(f, "  Formats: mod = {}, vmr = {}, map = {}", self.mod_fmt, self.vmr_fmt, self.map_fmt)?;
+        writeln!(f, "  Met = {}, ginput = {}", 
+            self.met_key.as_deref().unwrap_or("DEFAULT"),
+            self.ginput_key.as_deref().unwrap_or("DEFAULT")
+        )?;
+        Ok(())
+    }
+}
+
 impl TryFrom<QJob> for Job {
     type Error = JobError;
 
@@ -494,6 +571,29 @@ impl TryFrom<QJob> for Job {
 }
 
 impl Job {
+    pub async fn get_jobs_list(conn: &mut MySqlConn, pending_only: bool) -> JobResult<Vec<Job>> {
+        let qjobs = if pending_only{
+            sqlx::query_as!(
+                QJob,
+                "SELECT * FROM Jobs WHERE state = ?",
+                JobState::Pending
+            ).fetch_all(conn)
+            .await?
+        } else {
+            sqlx::query_as!(
+                QJob,
+                "SELECT * FROM Jobs"
+            ).fetch_all(conn)
+            .await?
+        };
+
+        let jobs: Result<Vec<_>, _> = qjobs.into_iter()
+            .map(|qjob| Job::try_from(qjob))
+            .collect();
+
+        jobs
+    }
+
     /// Return a `Job` instance with the given `job_id`.
     /// 
     /// # Parameters
