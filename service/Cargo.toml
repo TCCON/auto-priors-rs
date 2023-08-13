@@ -11,6 +11,7 @@ signal-hook = "0.3"
 
 anyhow.workspace = true
 chrono.workspace = true
+env_logger.workspace = true
 log.workspace = true
 sqlx.workspace = true
 tokio.workspace = true

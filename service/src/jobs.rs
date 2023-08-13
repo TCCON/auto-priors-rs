@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use anyhow::Context;
-use log::{warn, info, debug};
+use log::{warn, info, debug, error};
 use orm::{jobs::{Job, JobState, start_priors_gen_job, GinputHandle, start_lut_regen_job}, config::Config, MySqlPC, PoolWrapper};
 use tokio::sync::RwLock;
 
@@ -176,6 +176,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                 self.error_handler.report_error(e.as_ref())
             });
         
+        // TODO: delete expired jobs' output
     }
 
     /// Insert special jobs to regenerate ginput's chemical LUTs into the queues
@@ -224,7 +225,10 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         info!("{} new input files found", input_files.len());
         
         let config = &self.shared_config.read().await;
-        orm::input_files::add_jobs_from_input_files(&mut self.pool.get_connection().await?.detach(), &config, &input_files, &save_dir).await
+        orm::input_files::add_jobs_from_input_files(&mut self.pool.get_connection().await?.detach(), &config, &input_files, &save_dir).await?;
+
+        info!("Jobs from input files added to queue");
+        Ok(())
     }
 
     /// Insert the next highest priority job(s) from the database into the internal queues.
@@ -253,6 +257,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             let mut conn = self.pool.get_connection().await?;
             this_queue.clean_up_finished(&mut conn, &self.error_handler).await;
             let mut n_to_add = this_queue.num_can_add();
+            info!("Queue '{name}' can accept {n_to_add} additional jobs");
             while n_to_add > 0 {
                 let next_job = Job::claim_next_job_in_queue(&mut conn, &name)
                     .await
@@ -285,6 +290,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                     warn!("Tried to add job ID #{job_id} to queue '{name}', but queue refused the job. This should not happen, but the job was successfully reset to 'pending'.");
                     break;
                 } else {
+                    info!("Put job ID {job_id} into queue {name}");
                     n_to_add -= 1;
                 }
             }
@@ -312,11 +318,14 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
 
         for queue_name in pending_queues.iter() {
             if self.can_queue_start_jobs(queue_name).await {
+                info!("Starting jobs in queue '{queue_name}'");
                 let config = self.shared_config.read().await;
                 if let Some(queue) = self.job_queues.get_mut(queue_name) {
                     queue.start(&self.pool, &config, &self.error_handler).await;
                 }
-            } 
+            } else {
+                info!("Cannot start jobs in queue '{queue_name}' due to another queue blocking it");
+            }
         }
 
         Ok(())
@@ -622,7 +631,7 @@ impl ServiceJobRunner {
 
         let inner_res = match task.await {
             Ok(r) => r,
-            Err(e) => anyhow::bail!("Panic occurred in job #{}: {e}", job.job_id)
+            Err(e) => anyhow::bail!("Panic occurred in job #{}: {e:?}", job.job_id)
         };
 
         match inner_res {
@@ -630,7 +639,12 @@ impl ServiceJobRunner {
                 Self::set_job_complete(conn, job).await?;
                 Ok(true)
             },
-            Err(e) => anyhow::bail!("Error occurred in job#{}: {e}", job.job_id)
+            Err(e) => {
+                job.set_state(conn, JobState::Errored).await
+                    .map(|_| ())
+                    .unwrap_or_else(|e| error!("Failed to set state for job {} to 'errored' because: {e}", job.job_id));
+                anyhow::bail!("Error occurred in job #{}: {e:?}", job.job_id)
+            }
         }
     }
 
@@ -653,12 +667,12 @@ impl ServiceJobRunner {
 
         let inner_res = match task.await {
             Ok(r) => r,
-            Err(e) => anyhow::bail!("Panic occurred regenerating LUTs for ginput '{ginput_key}': {e}")
+            Err(e) => anyhow::bail!("Panic occurred regenerating LUTs for ginput '{ginput_key}': {e:?}")
         };
 
         match inner_res {
             Ok(_) => Ok(true),
-            Err(e) => anyhow::bail!("Error occurred regenerating LUTs for ginput '{ginput_key}': {e}")
+            Err(e) => {anyhow::bail!("Error occurred regenerating LUTs for ginput '{ginput_key}': {e:?}")}
         }
     }
 
@@ -682,7 +696,7 @@ impl ServiceJobRunner {
                 },
                 Err(e) if e.is_cancelled() => (),
                 Err(e) => {
-                    anyhow::bail!("Job #{} had encountered an error before being cancelled: {e}", job.job_id);
+                    anyhow::bail!("Job #{} had encountered an error before being cancelled: {e:?}", job.job_id);
                 }
             }
             orm::jobs::cleanup_cancelled_ginput_job(&mut *conn, job).await?;
@@ -699,7 +713,7 @@ impl ServiceJobRunner {
                 Ok(_) => (),
                 Err(e) if e.is_cancelled() => (),
                 Err(e) => {
-                    anyhow::bail!("Regenerating LUTs for ginput '{ginput_key}' encountered an error before being cancelled: {e}");
+                    anyhow::bail!("Regenerating LUTs for ginput '{ginput_key}' encountered an error before being cancelled: {e:?}");
                 }
             }
             Ok(true)

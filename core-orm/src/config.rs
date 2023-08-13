@@ -65,7 +65,7 @@ impl Config {
     pub fn get_met_configs(&self, met_key: &str) -> anyhow::Result<&[DownloadConfig]> {
         self.data.download.get(met_key)
         .and_then(|cfgs| Some(cfgs.as_slice()))
-        .ok_or_else(|| anyhow::Error::msg(format!("No meteorology with with '{met_key}' found.")))
+        .ok_or_else(|| anyhow::Error::msg(format!("No meteorology with key '{met_key}' found.")))
     }
 
     /// Get the GEOS and chemistry directories required to pass to version 1 ginput instances
@@ -89,7 +89,8 @@ impl Config {
     /// 4. Any of the `download_dir` paths does not have a parent directory
     /// 5. Inconsistent `geos_path` or `chem_path` values are defined.
     pub fn get_geos_and_chem_paths(&self, met_key: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
-        let dl_cfgs = self.get_met_configs(met_key)?;
+        let dl_cfgs = self.get_met_configs(met_key)
+            .context("Could not find meteorology while setting up geos & chem paths")?;
         let mut geos_path = None;
         let mut chem_path = None;
 
@@ -113,15 +114,21 @@ impl Config {
                 MetDataType::Met => {
                     if geos_path.is_none() {
                         geos_path = Some(parent_dir.to_owned());
-                    } else {
-                        anyhow::bail!("Met type {met_key} defines inconsistent parent directories for its met files");
+                    } else if geos_path.as_deref() != Some(parent_dir) {
+                        anyhow::bail!(
+                            "Met type {met_key} defines inconsistent parent directories for its met files: {} vs {}",
+                            parent_dir.display(), geos_path.unwrap().display()
+                        );
                     }
                 },
                 MetDataType::Chm => {
                     if chem_path.is_none() {
                         chem_path = Some(parent_dir.to_owned());
-                    } else {
-                        anyhow::bail!("Met type {met_key} defines inconsistent parent directories for its chem files");
+                    } else if chem_path.as_deref() != Some(parent_dir) {
+                        anyhow::bail!(
+                            "Met type {met_key} defines inconsistent parent directories for its chem files: {} vs {}",
+                            parent_dir.display(), chem_path.unwrap().display()
+                        );
                     }
                 },
                 MetDataType::Other(v) => {

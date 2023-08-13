@@ -368,7 +368,7 @@ pub async fn check_files_for_dates(
         let files_found = match orm::met::MetFile::is_date_complete_for_config_set(conn, curr_date, dl_configs).await {
             Ok(state) => Some(state),
             Err(e) => {
-                warn!("Error checking met files for date {curr_date}: {e}");
+                warn!("Error checking met files for date {curr_date}: {e:?}");
                 None
             }
         };
@@ -574,7 +574,7 @@ pub async fn rescan_met_files(
                         }
                     },
                     Err(e) => {
-                        warn!("Error checking if {} is in the database: {}", file.display(), e);
+                        warn!("Error checking if {} is in the database: {e:?}", file.display());
                     }
                 }
             }

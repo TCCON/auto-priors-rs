@@ -37,7 +37,7 @@ pub struct AddJobCli {
 
     /// Which queue to add the job to, if not given, then will use the submitted
     /// job queue defined in the config.
-    #[clap(short = 'q', long)]
+    #[clap(long)]
     queue: Option<String>,
 
     /// The two-letter site IDs used to identify the output in this job. 
@@ -95,10 +95,8 @@ pub struct DeleteJobCli {
     id: i32,
 }
 
-impl TryFrom<AddJobCli> for AddJobArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(clargs: AddJobCli) -> Result<Self, anyhow::Error> {
+impl AddJobArgs {
+    fn convert_from_clargs(clargs: AddJobCli, config: &Config) -> Result<Self, anyhow::Error> {
         if clargs.lat.is_none() != clargs.lon.is_none() {
             anyhow::bail!("lat and lon must be both given or neither given");
         }
@@ -111,9 +109,8 @@ impl TryFrom<AddJobCli> for AddJobArgs {
         let delete_time = if clargs.no_delete {
             None
         }else{
-            // TODO: use configuration for default time to keep
             let now = chrono::Local::now().naive_local();
-            Some(now + chrono::Duration::days(7))
+            Some(now + chrono::Duration::hours(config.execution.hours_to_keep as i64))
         };
 
         let save_tarball = if clargs.to_tarball {
@@ -122,8 +119,8 @@ impl TryFrom<AddJobCli> for AddJobArgs {
             TarChoice::No
         };
 
-        // TODO: take from config
-        let save_dir = PathBuf::from(".");
+        let save_dir = config.execution.output_path.clone();
+        dbg!(&save_dir);
         
         Ok(Self { 
             site_id: site_ids,
@@ -145,7 +142,7 @@ impl TryFrom<AddJobCli> for AddJobArgs {
 }
 
 pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli, config: &Config) -> anyhow::Result<()> {
-    let args = AddJobArgs::try_from(clargs)?;
+    let args = AddJobArgs::convert_from_clargs(clargs, config)?;
     let id = Job::add_job_from_args(db, 
         args.site_id,
         args.start_date, 

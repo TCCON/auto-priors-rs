@@ -6,7 +6,7 @@ use std::{path::{PathBuf, Path}, str::FromStr, fmt::{Display, Debug}, process::S
 use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use itertools::Itertools;
-use log::{info, warn};
+use log::{info, warn, debug};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use sqlx::{self, FromRow, Type, Acquire};
@@ -1238,7 +1238,7 @@ pub async fn cleanup_cancelled_ginput_job(conn: &mut MySqlConn, job: &mut Job) -
     Ok(())
 }
 
-trait InnerGinputRunner {
+trait InnerGinputRunner: Display {
     fn run_gen_priors_for_date(&self, ginput_args: GinputAutomationArgs, simulation_delay: Option<u32>) -> JobResult<()>;
     fn run_lut_regen(&self) -> JobResult<()>;
 }
@@ -1250,6 +1250,12 @@ pub struct ShellGinputRunner {
 impl ShellGinputRunner {
     pub fn new(run_ginput_path: PathBuf) -> Self {
         Self { run_ginput_path }
+    }
+}
+
+impl Display for ShellGinputRunner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ShellGinputRunner({})", self.run_ginput_path.display())
     }
 }
 
@@ -1342,14 +1348,20 @@ pub fn start_priors_gen_job(conn: MySqlPC, job: Job, config: Config) -> GinputHa
 }
 
 async fn run_priors_gen_job(mut conn: MySqlPC, job: Job, config: Config) -> anyhow::Result<()> {
+    info!("Beginning job {} for dates {} to {}", job.job_id, job.start_date, job.end_date);
     let date_iter = crate::utils::DateIterator::new(
         vec![(job.start_date, job.end_date)]
     );
 
     for date in date_iter {
-        let ginput_args = setup_ginput_args_for_date(&mut conn, date, &job, &config).await?;        
-        let runner = get_runner_for_date(date, &job, &config)?;
-        runner.run_gen_priors_for_date(ginput_args, config.get_sim_delay())?;
+        let res = setup_ginput_args_for_date(&mut conn, date, &job, &config).await;
+        let res = res.with_context(|| format!("Error occurred setting up arguments to run date {date} in job {}", job.job_id));
+        let ginput_args = res?;
+        let runner = get_runner_for_date(date, &job, &config)
+            .with_context(|| format!("Error occurred setting up inner runner for date {date} in job {}", job.job_id))?;
+        info!("Running {date} for job {} using {runner}", job.job_id);
+        runner.run_gen_priors_for_date(ginput_args, config.get_sim_delay())
+            .with_context(|| format!("Error occurred while running ginput for date {date} in job {}", job.job_id))?;
     }
 
     Ok(())
@@ -1394,6 +1406,7 @@ fn get_runner_for_ginput(ginput: &crate::config::GinputConfig) -> Box<dyn InnerG
 }
 
 async fn setup_ginput_args_for_date(conn: &mut MySqlConn, date: NaiveDate, job: &Job, config: &Config) -> anyhow::Result<GinputAutomationArgs> {
+    debug!("Job {}: Getting met key for job", job.job_id);
     let met_key = if let Some(k) = &job.met_key {
         k.to_owned()
     } else {
@@ -1402,18 +1415,22 @@ async fn setup_ginput_args_for_date(conn: &mut MySqlConn, date: NaiveDate, job: 
         defaults.met.clone()
     };
 
+    debug!("Job {}: Getting met and chem paths for met key '{met_key}'", job.job_id);
     let (met_path, chem_path) = config.get_geos_and_chem_paths(&met_key)
         .map_err(|e| JobError::ConfigurationError(e))?;
 
+    debug!("Job {}: Standardize site IDs, lats, and lons", job.job_id);
     let (site_ids, lats, lons) = job.lats_lons_sids_filled_for_date(conn, date)
         .await
         .map_err(|e| JobError::InvalidSiteLocation(e))?;
 
+    debug!("Job {}: setting up run directory", job.job_id);
     let run_dir = job_run_dir(&config, job.job_id)
         .map_err(|e| JobError::RunDirectoryError(e))?;
 
     let nlocs = lons.len();
     
+    debug!("Job {}: creating automation arguments", job.job_id);
     let ginput_args = GinputAutomationArgs {
         job_id: job.job_id,
         start_date: date,

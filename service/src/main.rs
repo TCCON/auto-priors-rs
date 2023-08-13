@@ -15,6 +15,13 @@ static MET_MANAGER: OnceCell<Mutex<met::MetManager<LoggingErrorHandler>>> = Once
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // env_logger::Builder::from_default_env()
+    //     .filter_module("tccon-priors-service", log::LevelFilter::Info)
+    //     .filter_module("tccon_priors_orm", log::LevelFilter::Info)
+    //     .init();
+    env_logger::init();
+    println!("Service starting");
+    info!("Starting tccon-priors-service");
     let db_url = orm::get_database_url(None)?;
     let db = orm::get_database_pool(Some(db_url.clone())).await.unwrap();
 

@@ -2009,6 +2009,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "clokwerk",
+ "env_logger",
  "glob",
  "log",
  "signal-hook",
