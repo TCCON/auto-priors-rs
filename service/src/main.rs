@@ -2,7 +2,7 @@ use std::{sync::{Arc, atomic::AtomicBool}, time::Duration};
 
 use clokwerk::{TimeUnits, Job};
 use error::LoggingErrorHandler;
-use log::{info, warn};
+use log::{info, warn, debug};
 use signal_hook::{consts::signal, iterator::Signals};
 use tokio::sync::{RwLock, Mutex, OnceCell};
 
@@ -15,11 +15,10 @@ static MET_MANAGER: OnceCell<Mutex<met::MetManager<LoggingErrorHandler>>> = Once
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // env_logger::Builder::from_default_env()
-    //     .filter_module("tccon-priors-service", log::LevelFilter::Info)
-    //     .filter_module("tccon_priors_orm", log::LevelFilter::Info)
-    //     .init();
-    env_logger::init();
+    env_logger::Builder::from_default_env()
+        .filter_module("sqlx", log::LevelFilter::Warn)
+        .init();
+
     println!("Service starting");
     info!("Starting tccon-priors-service");
     let db_url = orm::get_database_url(None)?;
@@ -51,9 +50,11 @@ async fn main() -> anyhow::Result<()> {
         scheduler
             .every(timing_config.job_start_seconds.seconds())
             .run(|| async {
+                debug!("Scheduled task to run jobs started");
                 let mutex = JOBS_MANAGER.get().unwrap();
                 let mut jm = mutex.lock().await;
                 jm.scheduler_entry_point().await;
+                debug!("Schedule task to run jobs done");
             });
     } else {
         warn!("Job parsing/execution will NOT run");
@@ -126,12 +127,16 @@ async fn main() -> anyhow::Result<()> {
             }, // reload config
             signal::SIGINT => {
                 schedule_handle.abort();
+                info!("Beginning graceful shutdown");
                 shutdown_components(ExitCommand::Graceful).await;
+                info!("Graceful shutdown complete");
                 break;
             },
             signal::SIGTERM | signal::SIGQUIT => {
                 schedule_handle.abort();
+                info!("Beginning rapid shutdown");
                 shutdown_components(ExitCommand::Rapid).await;
+                info!("Rapid shutdown complete");
                 break;
             },
             _ => {

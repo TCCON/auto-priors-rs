@@ -175,6 +175,8 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             .unwrap_or_else(|e| {
                 self.error_handler.report_error(e.as_ref())
             });
+
+        debug!("Finished in scheduler_entry_point");
         
         // TODO: delete expired jobs' output
     }
