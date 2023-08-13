@@ -22,3 +22,5 @@ url = {version = "2.2", features = ["serde"]}
 tabled.workspace = true
 tokio.workspace = true
 whoami = "1.4.1"
+tar = "0.4.40"
+flate2 = "1.0.26"

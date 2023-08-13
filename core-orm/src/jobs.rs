@@ -5,7 +5,7 @@ use std::{path::{PathBuf, Path}, str::FromStr, fmt::{Display, Debug}, process::S
 
 use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use log::{info, warn, debug};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -13,7 +13,7 @@ use sqlx::{self, FromRow, Type, Acquire};
 use tabled::Tabled;
 use tokio::task::JoinHandle;
 
-use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::Config, MySqlPC};
+use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::Config, MySqlPC, utils};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
@@ -1216,8 +1216,11 @@ impl Job {
 
 }
 
-pub fn job_run_dir(config: &crate::config::Config, job_id: i32) -> std::io::Result<PathBuf> {
+pub fn job_run_dir(config: &crate::config::Config, job_id: i32, basename_only: bool) -> std::io::Result<PathBuf> {
     let job_subdir = format!("job{:09}", job_id);
+    if basename_only {
+        return Ok(PathBuf::from(job_subdir));
+    }
     let base_run_dir = config.execution.output_path.join(job_subdir);
 
     if !base_run_dir.exists() {
@@ -1364,6 +1367,56 @@ async fn run_priors_gen_job(mut conn: MySqlPC, job: Job, config: Config) -> anyh
             .with_context(|| format!("Error occurred while running ginput for date {date} in job {}", job.job_id))?;
     }
 
+    let (make_tarball, tarball_name) = match job.save_tarball {
+        TarChoice::No => (false, PathBuf::new()),
+        TarChoice::Yes => {
+            (true, make_std_tar_file_name(&mut conn, &job).await?)
+        },
+        TarChoice::Egi => {
+            (true, make_egi_tar_file_name(&mut conn, &job).await?)
+        },
+    };
+
+    if !make_tarball {
+        return Ok(())
+    }
+
+    let job_dir = job_run_dir(&config, job.job_id, false)?;
+    let job_dir_name = job_run_dir(&config, job.job_id, true)?;
+
+    // Clever combination of tar archive builder and gzip compressor taken from
+    // https://stackoverflow.com/a/46521163
+    let tgz_file = std::fs::File::create(tarball_name)
+        .with_context(|| format!("Error occurred trying to create the initial .tgz file for job {}", job.job_id))?;
+    let encoder = flate2::write::GzEncoder::new(tgz_file, flate2::Compression::default());
+    let mut archive = tar::Builder::new(encoder);
+
+    // ginput will output the .mod/.vmr/.map files into subdirectories, the only files directly in the
+    // top directory will be the output logs and the args JSON. By appending only top level subdirectories,
+    // we ensure that even if the met name in the top subdirectory changes, we get all the output files.
+    for entry in std::fs::read_dir(&job_dir)
+        .with_context(|| format!("Error occurred while selecting output files for tarball in job {}", job.job_id))? 
+    {
+        let entry = entry.with_context(|| format!("Error getting directory entry while making tarball for job {}", job.job_id))?;
+        let src_path = entry.path();
+        if src_path.is_dir() {
+            let dest_path = src_path.file_name()
+                .with_context(|| format!("Error getting source directory file name from {} for job {}", src_path.display(), job.job_id))?;
+            let dest_path = job_dir_name.join(dest_path);
+            archive.append_dir_all(dest_path, &src_path)
+                .with_context(|| format!("Error adding directory {} to tarball for job {}", src_path.display(), job.job_id))?;
+        }
+    }
+
+    let encoder = archive.into_inner()
+        .with_context(|| format!("Error occurred while trying to finalize tar archive for job {}", job.job_id))?;
+
+    // Unsure if this is needed, but doesn't seem to hurt
+    encoder.finish()
+        .with_context(|| format!("Error occurred while trying to finalize the gzip compression for job {}", job.job_id))?;
+
+    std::fs::remove_dir_all(&job_dir)
+        .unwrap_or_else(|_| warn!("Failed to remove output directory for job {} after creating the tarball", job.job_id));
     Ok(())
 }
 
@@ -1425,7 +1478,7 @@ async fn setup_ginput_args_for_date(conn: &mut MySqlConn, date: NaiveDate, job: 
         .map_err(|e| JobError::InvalidSiteLocation(e))?;
 
     debug!("Job {}: setting up run directory", job.job_id);
-    let run_dir = job_run_dir(&config, job.job_id)
+    let run_dir = job_run_dir(&config, job.job_id, false)
         .map_err(|e| JobError::RunDirectoryError(e))?;
 
     let nlocs = lons.len();
@@ -1449,4 +1502,47 @@ async fn setup_ginput_args_for_date(conn: &mut MySqlConn, date: NaiveDate, job: 
     };
 
     Ok(ginput_args)
-}   
+}
+
+async fn make_std_tar_file_name(conn: &mut MySqlConn, job: &Job) -> JobResult<PathBuf> {
+    let (site_ids, site_lats, site_lons) = job.lats_lons_sids_filled_for_date(conn, job.start_date)
+        .await
+        .map_err(|e| JobError::InvalidSiteLocation(e))?;
+
+    let nsite = site_ids.len();
+    let nlon = site_lons.len();
+    let nlat = site_lats.len();
+
+    let locstr = if nsite == 1 && nlon == 1 && nlat == 1 {
+        format!("{}_{}_{}", site_ids[0], utils::format_lat_str(site_lats[0], 2), utils::format_lon_str(site_lons[0], 2))
+    } else if nsite == nlon && nsite == nlat {
+        "multisite".to_string()
+    } else {
+        warn!("Inconsistent number of sites, lats, and lons for tarball name. Defaulting to 'multisite' for location string");
+        "multisite".to_string()
+    };
+
+    let job_id = job.job_id;
+    let start = job.start_date.format("%Y%m%d").to_string();
+    let end = job.end_date.format("%Y%m%d").to_string();
+
+    let filename = format!("job_{job_id:09}_{locstr}_{start}-{end}.tgz");
+    Ok(job.save_dir.join(filename))
+}
+
+async fn make_egi_tar_file_name(conn: &mut MySqlConn, job: &Job) -> JobResult<PathBuf> {
+    let (site_ids, site_lats, site_lons) = job.lats_lons_sids_filled_for_date(conn, job.start_date)
+        .await
+        .map_err(|e| JobError::InvalidSiteLocation(e))?;
+
+    let locstr = izip!(site_ids, site_lats, site_lons)
+        .map(|(i, y, x)| {
+            let lat = utils::format_lat_str(y, 0);
+            let lon = utils::format_lon_str(x, 0);
+            format!("{i}{lat}{lon}")
+        }).join("_");
+
+    let start = job.start_date.format("%Y%m%d").to_string();
+    let filename = format!("EGI_{locstr}_{start}.tgz");
+    Ok(job.save_dir.join(filename))
+}

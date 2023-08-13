@@ -231,6 +231,39 @@ impl Iterator for DateIterator {
     }
 }
 
+pub fn format_lat_str(lat: f32, prec: u8) -> String {
+    let ns = if lat >= 0.0 { "N" } else { "S" };
+    let lat = lat.abs();
+    match prec {
+        0 => format!("{lat:.0}{ns}"),
+        1 => format!("{lat:.1}{ns}"),
+        2 => format!("{lat:.2}{ns}"),
+        3 => format!("{lat:.3}{ns}"),
+        4 => format!("{lat:.4}{ns}"),
+        5 => format!("{lat:.5}{ns}"),
+        6 => format!("{lat:.6}{ns}"),
+        7 => format!("{lat:.7}{ns}"),
+        _ => unimplemented!("precision > 7 not implemented")
+    }
+}
+
+pub fn format_lon_str(lon: f32, prec: u8) -> String {
+    let lon = if lon > 180.0 { lon - 360.0 } else { lon };
+    let ew = if lon >= 0.0 { "E" } else { "W" };
+    let lon = lon.abs();
+    match prec {
+        0 => format!("{lon:.0}{ew}"),
+        1 => format!("{lon:.1}{ew}"),
+        2 => format!("{lon:.2}{ew}"),
+        3 => format!("{lon:.3}{ew}"),
+        4 => format!("{lon:.4}{ew}"),
+        5 => format!("{lon:.5}{ew}"),
+        6 => format!("{lon:.6}{ew}"),
+        7 => format!("{lon:.7}{ew}"),
+        _ => unimplemented!("precision > 7 not implemented")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDate;
