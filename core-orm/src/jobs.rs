@@ -14,7 +14,7 @@ use sqlx::{self, FromRow, Type, Acquire};
 use tabled::Tabled;
 use tokio::task::JoinHandle;
 
-use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::Config, utils, PoolWrapper};
+use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::Config, utils};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
@@ -1308,10 +1308,11 @@ impl InnerGinputRunner for ShellGinputRunner {
     }
 
     async fn run_lut_regen(&self) -> JobResult<()> {
-        let status = std::process::Command::new(&self.run_ginput_path)
+        let status = tokio::process::Command::new(&self.run_ginput_path)
             .arg("auto")
             .arg("regen-lut")
             .status()
+            .await
             .map_err(|e| JobError::RunDirectoryError(e))?;
             // TODO: send to LUT log file or log to the normal log file (capture output)
 
@@ -1348,13 +1349,13 @@ struct GinputAutomationArgs {
 
 pub type GinputHandle = JoinHandle<anyhow::Result<()>>;
 
-pub fn start_priors_gen_job(pool: PoolWrapper, job: Job, config: Config) -> GinputHandle {
+pub fn start_priors_gen_job(conn: MySqlConn, job: Job, config: Config) -> GinputHandle {
     tokio::spawn(async move {
-        run_priors_gen_job(pool, job, config).await
+        run_priors_gen_job(conn, job, config).await
     })
 }
 
-async fn run_priors_gen_job(pool: PoolWrapper, mut job: Job, config: Config) -> anyhow::Result<()> {
+async fn run_priors_gen_job(mut conn: MySqlConn, mut job: Job, config: Config) -> anyhow::Result<()> {
     info!("Beginning job {} for dates {} to {}", job.job_id, job.start_date, job.end_date);
     let date_iter = crate::utils::DateIterator::new(
         vec![(job.start_date, job.end_date)]
@@ -1362,8 +1363,7 @@ async fn run_priors_gen_job(pool: PoolWrapper, mut job: Job, config: Config) -> 
 
     for date in date_iter {
         let res = {
-            let mut pc = pool.get_connection().await?;
-            setup_ginput_args_for_date(&mut pc, date, &job, &config).await
+            setup_ginput_args_for_date(&mut conn, date, &job, &config).await
         };
         let res = res.with_context(|| format!("Error occurred setting up arguments to run date {date} in job {}", job.job_id));
         let ginput_args = res?;
@@ -1378,12 +1378,10 @@ async fn run_priors_gen_job(pool: PoolWrapper, mut job: Job, config: Config) -> 
     let (make_tarball, output_path) = match job.save_tarball {
         TarChoice::No => (false, job.save_dir.clone()),
         TarChoice::Yes => {
-            let mut pc = pool.get_connection().await?;
-            (true, make_std_tar_file_name(&mut pc, &job).await?)
+            (true, make_std_tar_file_name(&mut conn, &job).await?)
         },
         TarChoice::Egi => {
-            let mut pc = pool.get_connection().await?;
-            (true, make_egi_tar_file_name(&mut pc, &job).await?)
+            (true, make_egi_tar_file_name(&mut conn, &job).await?)
         },
     };
 
@@ -1428,8 +1426,7 @@ async fn run_priors_gen_job(pool: PoolWrapper, mut job: Job, config: Config) -> 
     std::fs::remove_dir_all(&job_dir)
         .unwrap_or_else(|_| warn!("Failed to remove output directory for job {} after creating the tarball", job.job_id));
 
-    let mut pc = pool.get_connection().await?;
-    job.set_completed(&mut pc, &output_path, None).await?;
+    job.set_completed(&mut conn, &output_path, None).await?;
     Ok(())
 }
 

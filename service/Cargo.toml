@@ -18,4 +18,4 @@ tokio.workspace = true
 
 orm = {path = "../core-orm", package = "tccon_priors_orm"}
 cli = {path = "../cli", package = "tccon-priors-cli"}
-console-subscriber = "0.1.10"
+# console-subscriber = "0.1.10"

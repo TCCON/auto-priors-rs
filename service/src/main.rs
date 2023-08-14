@@ -17,8 +17,12 @@ static MET_MANAGER: OnceCell<Mutex<met::MetManager<LoggingErrorHandler>>> = Once
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    console_subscriber::init();
-    
+    // Uncomment this, and restore the console-subscriber dependency in the service Cargo.toml
+    // and the tokio tracing feature in the workspace Cargo.toml to use the tokio-console app
+    // to measure tokio behavior. See https://github.com/tokio-rs/console for RUSTFLAGS needed
+    // as well
+    // console_subscriber::init();
+
     env_logger::Builder::from_default_env()
         .filter_module("sqlx", log::LevelFilter::Warn)
         .init();
