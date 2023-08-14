@@ -48,6 +48,7 @@ struct InputJob {
     mod_fmt: ModFmt,
     vmr_fmt: VmrFmt,
     map_fmt: MapFmt,
+    confirmation: bool
 }
 
 impl InputJob {
@@ -107,8 +108,38 @@ impl InputJob {
             "email",
             "mod_fmt",
             "vmr_fmt",
-            "map_fmt"
+            "map_fmt",
+            "confirmation"
         ]
+    }
+
+    fn get_field_as_string(&self, field: &str) -> Option<String> {
+        let s = match field {
+            "site_id" => self.site_id.join(", "),
+            "start_date" => self.start_date.to_string(),
+            "end_date" => self.end_date.to_string(),
+            "lat" => self.lat.iter().map(|v| v.map(|x| format!("{x:.3}")).unwrap_or_else(|| "(default)".to_string())).join(", "),
+            "lon" => self.lon.iter().map(|v| v.map(|x| format!("{x:.3}")).unwrap_or_else(|| "(default)".to_string())).join(", "),
+            "email" => self.email.clone(),
+            "mod_fmt" => self.mod_fmt.to_string(),
+            "vmr_fmt" => self.vmr_fmt.to_string(),
+            "map_fmt" => self.map_fmt.to_string(),
+            "confirmation" => self.confirmation.to_string(),
+            _ => return None
+        };
+
+        Some(s)
+    }
+}
+
+impl Display for InputJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, field) in Self::field_order().iter().enumerate() {
+            let val = self.get_field_as_string(field).unwrap_or_else(|| "?".to_string());
+            if i > 0 { writeln!(f, "")?; }
+            write!(f, "{field} = {val}")?;
+        }
+        Ok(())
     }
 }
 
@@ -122,11 +153,12 @@ struct InputJobBuilder {
     mod_fmt: Option<ModFmt>,
     vmr_fmt: Option<VmrFmt>,
     map_fmt: Option<MapFmt>,
+    confirmation: Option<bool>,
 }
 
 impl InputJobBuilder {
     fn new() -> Self {
-        Self { site_id: None, start_date: None, end_date: None, lat: None, lon: None, email: None, mod_fmt: None, vmr_fmt: None, map_fmt: None }
+        Self { site_id: None, start_date: None, end_date: None, lat: None, lon: None, email: None, mod_fmt: None, vmr_fmt: None, map_fmt: None, confirmation: None }
     }
 
     fn finalize(self) -> Result<InputJob, Vec<String>> {
@@ -162,7 +194,8 @@ impl InputJobBuilder {
             email: self.email.unwrap_or_else(|| {errors.push("missing field email".to_owned()); String::new()}),
             mod_fmt: self.mod_fmt.unwrap_or_default(),
             vmr_fmt: self.vmr_fmt.unwrap_or_default(),
-            map_fmt: self.map_fmt.unwrap_or_default()
+            map_fmt: self.map_fmt.unwrap_or_default(),
+            confirmation: self.confirmation.unwrap_or(true)
         };
 
         if errors.len() > 0 {
@@ -183,6 +216,7 @@ impl InputJobBuilder {
             "mod_fmt" => return self.mod_fmt.is_some(),
             "vmr_fmt" => return self.vmr_fmt.is_some(),
             "map_fmt" => return self.map_fmt.is_some(),
+            "confirmation" => return self.confirmation.is_some(),
             _ => return false
         }
     }
@@ -283,6 +317,15 @@ impl InputJobBuilder {
         Ok(())
     }
 
+    fn confirmation(&mut self, valstr: &str) -> Result<(), String> {
+        let conf = match bool::from_str(valstr) {
+            Ok(v) => v,
+            Err(e) => return Err(format!("{e}"))
+        };
+        self.confirmation = Some(conf);
+        Ok(())
+    }
+
     fn set_field_in_place(&mut self, field: &str, value: &str) -> Result<(), String> {
         if self.is_field_set(field) {
             return Err(format!("{field} given multiple times"))
@@ -298,6 +341,7 @@ impl InputJobBuilder {
             "mod_fmt" => self.mod_fmt(value),
             "vmr_fmt" => self.vmr_fmt(value),
             "map_fmt" => self.map_fmt(value),
+            "confirmation" => self.confirmation(value),
             _ => Err(format!("Unknown field '{field}'"))
         }?;
 
@@ -348,13 +392,13 @@ pub async fn add_jobs_from_input_files(
 
     for (job, infile) in jobs.into_iter().zip(successful_input_files) {
         let new_id = crate::jobs::Job::add_job_from_args(conn,
-            job.site_id,
+            job.site_id.clone(),
             job.start_date,
             job.end_date,
             save_dir.to_owned(),
-            Some(job.email),
-            job.lat,
-            job.lon,
+            Some(job.email.clone()),
+            job.lat.clone(),
+            job.lon.clone(),
             &config.execution.submitted_job_queue,
             Some(job.mod_fmt),
             Some(job.vmr_fmt),
@@ -365,6 +409,9 @@ pub async fn add_jobs_from_input_files(
         ).await?;
 
         info!("Added job {new_id} from file {}", infile.display());
+        if job.confirmation {
+            confirm_successful_parsing(&job, config);
+        }
     }
 
     if unmoved_input_file_errors.is_empty() {
@@ -376,6 +423,20 @@ pub async fn add_jobs_from_input_files(
             .join("\n");
         anyhow::bail!("There were problems moving {nerrs} input files. Reasons were:\n{error_causes}")
     }
+}
+
+fn confirm_successful_parsing(job: &InputJob, config: &Config) {
+    let email = &job.email;
+    let body = format!("This confirms successful receipt of the following request for GGG priors:\n\n{job}\n\nTo disable these emails, set 'confirmation=false' (without the quotes) as the last line of your input file");
+    config.email.send_mail(
+        &[email],
+        None,
+        None,
+        "Confirming receipt of GGG priors request",
+        &body
+    ).unwrap_or_else(|e| {
+        warn!("Failed to send confirmation email to {email}. Reason was: {e}")
+    });
 }
 
 fn handle_failed_parsing(error: FailedParsingError, config: &Config) {
@@ -507,8 +568,3 @@ impl<'p> Display for InputFileMoveError<'p> {
         }
     }
 }
-
-// fn must_move_file(from_file: &Path, to_dir: &Path) -> anyhow::Result<()> {
-//     let to_filename = from_file.file_name()
-//         .unwrap_or_else(|| warn!("Could not extract file name from input file {}, file will be deleted instead of moved"))
-// }
