@@ -6,11 +6,18 @@ use log::{warn, info, debug, error};
 use orm::{jobs::{Job, JobState, start_priors_gen_job, GinputHandle, start_lut_regen_job}, config::Config, MySqlPC, PoolWrapper};
 use tokio::sync::RwLock;
 
-use crate::{ExitCommand, error::ErrorHandler};
+use crate::error::ErrorHandler;
 
 const LUT_REGEN_BLOCKING_PRIORITY: i32 = 10;
 static LUT_QUEUE_NAME: &'static str = "LUT_REGEN";
 
+
+pub(crate) enum JobMessage {
+    StartJobs,
+    RegenLut,
+    StopGracefully,
+    StopRapidly,
+}
 
 /// A manager for parsing job input files, starting jobs, and regenerating the chemical LUTs
 /// 
@@ -101,6 +108,7 @@ pub(crate) struct JobManager<T: Queueable, H: ErrorHandler> {
     pub(crate) shared_config: Arc<RwLock<Config>>,
     pub(crate) job_queues: HashMap<String, Queue<T>>,
     pub(crate) error_handler: H,
+    pub(crate) msg_recv: tokio::sync::mpsc::Receiver<JobMessage>
 }
 
 impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
@@ -117,10 +125,11 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     pub(crate) async fn new(
         shared_config: Arc<RwLock<Config>>, 
         error_handler: H,
+        msg_recv: tokio::sync::mpsc::Receiver<JobMessage>,
     ) -> anyhow::Result<Self> {
         let db_url = orm::get_database_url(None)?;
         let db = orm::get_database_pool(Some(db_url.clone())).await?;
-        Self::new_from_pool(db, shared_config, error_handler).await
+        Self::new_from_pool(db, shared_config, error_handler, msg_recv).await
     }
 
     /// Create a new instance of `JobManager`, taking a database connection from an existing database pool.
@@ -134,15 +143,42 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         pool: PoolWrapper, 
         shared_config: Arc<RwLock<Config>>, 
         error_handler: H,
+        msg_recv: tokio::sync::mpsc::Receiver<JobMessage>
     ) -> anyhow::Result<Self> {
         let mut me = Self { 
             pool,
             shared_config,
             job_queues: HashMap::new(), 
-            error_handler
+            error_handler,
+            msg_recv
         };
         me.schedule_lut_regen().await;
         Ok(me)
+    }
+
+    pub(crate) async fn message_loop(&mut self) {
+        loop {
+            let msg = self.msg_recv.recv().await;
+            if let Some(m) = msg {
+                match m {
+                    JobMessage::StartJobs => self.start_jobs_entry_point().await,
+                    JobMessage::RegenLut => self.schedule_lut_regen().await,
+                    JobMessage::StopGracefully => {
+                        self.msg_recv.close();
+                        self.wait_for_jobs_to_finish().await;
+                        break;
+                    },
+                    JobMessage::StopRapidly => {
+                        self.msg_recv.close();
+                        self.stop_and_reset_jobs().await;
+                        break;
+                    }
+                }
+            } else {
+                info!("JobManager: receiver closed, exiting message loop");
+                break;
+            }
+        }
     }
 
     /// The main driver function to be called in a loop or frequently scheduled task.
@@ -152,7 +188,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     /// 
     /// Note that while errors may occur in this function, they are passed to the instance's
     /// error handler to report (usually to a log file and/or email). 
-    pub(crate) async fn scheduler_entry_point(&mut self) {
+    async fn start_jobs_entry_point(&mut self) {
         // TODO: check if the configuration queues still match the ones we have stored
         // and update if needed. Alternatively, pop any empty queues from the HashMap
         // so that they eventually get updated. The former approach would benefit from
@@ -302,18 +338,6 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         Ok(())
     }
 
-    /// Handles stopping jobs when terminating the service.
-    /// 
-    /// Given an [`ExitCommand::Graceful`], any running jobs are allowed 
-    /// to finish before this function returns. Conversely, [`ExitCommand::Rapid`]
-    /// will stop running jobs ASAP and reset their state in the database.
-    pub async fn stop_jobs(&mut self, exit_cmd: ExitCommand) {
-        match exit_cmd {
-            ExitCommand::Graceful => self.wait_for_jobs_to_finish().await,
-            ExitCommand::Rapid => self.stop_and_reset_jobs().await,
-        }
-    }
-
     /// Start jobs waiting in queues, respecting queue blocking priority
     async fn start_queues_with_jobs(&mut self) -> anyhow::Result<()> {
         let pending_queues = self.get_all_queue_names().await?;
@@ -324,6 +348,8 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                 let config = self.shared_config.read().await;
                 if let Some(queue) = self.job_queues.get_mut(queue_name) {
                     queue.start(&self.pool, &config, &self.error_handler).await;
+                } else {
+                    warn!("Failed to get queue {queue_name} to start jobs, even though it was listed as a pending queue");
                 }
             } else {
                 info!("Cannot start jobs in queue '{queue_name}' due to another queue blocking it");
@@ -443,6 +469,8 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
 /// separate implementors of this trait (though that could change in the future).
 #[async_trait]
 pub(crate) trait Queueable {
+    fn describe(&self) -> String;
+
     /// Create a new instance of this type from a job in the database.
     fn new_from_job(job: Job, config: &Config) -> Self;
 
@@ -525,6 +553,7 @@ impl<T: Queueable> Queue<T> {
     pub async fn start<H: ErrorHandler>(&mut self, pool: &PoolWrapper, config: &Config, error_handler: &H) {
         for item in self.items.iter_mut() {
             if !item.has_started() {
+                debug!("Starting queued item: {}", item.describe());
                 let conn = match pool.get_connection().await {
                     Ok(c) => c,
                     Err(e) => {
@@ -538,6 +567,9 @@ impl<T: Queueable> Queue<T> {
                 };
                 item.start(conn, config).await
                 .unwrap_or_else(|e| error_handler.report_error(e.as_ref()));
+                debug!("Queued item {} started successfully", item.describe());
+            } else {
+                debug!("Queued item {} already started", item.describe());
             }
         }
     }
@@ -680,11 +712,13 @@ impl ServiceJobRunner {
 
     async fn start_ginput_job(conn: MySqlPC, job: Job, config: Config, join_handle: &mut Option<GinputHandle>) -> anyhow::Result<()> {
         *join_handle = Some(start_priors_gen_job(conn, job, config));
+        debug!("Ginput job started, join handle = {join_handle:?}");
         Ok(())
     }
 
     async fn start_lut_job(ginput_key: String, join_handle: &mut Option<GinputHandle>, config: Config) -> anyhow::Result<()> {
         *join_handle = Some(start_lut_regen_job(ginput_key, config));
+        debug!("LUT job started, join handle = {join_handle:?}");
         Ok(())
     }
 
@@ -727,6 +761,12 @@ impl ServiceJobRunner {
 
 #[async_trait]
 impl Queueable for ServiceJobRunner {
+    fn describe(&self) -> String {
+        match self {
+            Self::GinputJob{job, join_handle: _} => format!("ServiceJobRunner(job = {})", job.job_id),
+            Self::LutRegenJob{ginput_key, join_handle: _} => format!("ServiceJobRunner(lut ginput = {ginput_key})")
+        }
+    }
 
     fn new_from_job(job: Job, _config: &Config) -> Self {
         Self::GinputJob { job, join_handle: None }
@@ -802,6 +842,10 @@ mod tests {
 
     #[async_trait]
     impl Queueable for DummyJobRunner {
+        fn describe(&self) -> String {
+            format!("DummyJobRunner(delay = {:?})", self.delay)
+        }
+
         fn new_from_job(_job: Job, _config: &Config) -> Self {
             Self::new_from_seconds(5)
         }
@@ -845,9 +889,12 @@ mod tests {
             orm::config::JobQueueOptions{ max_num_procs: TEST_QUEUE_MAX_NUM_ITEMS }
         );
 
+        let (_, rx) = tokio::sync::mpsc::channel(256);
+
         JobManager::new(
             Arc::new(RwLock::new(config)), 
-            LoggingErrorHandler{}
+            LoggingErrorHandler{},
+            rx
         ).await.expect("Could not make dummy JobManager")
     }
 
@@ -952,7 +999,7 @@ mod tests {
         let mut lut_queue = Queue::new_blocking(usize::MAX, LUT_REGEN_BLOCKING_PRIORITY);
         lut_queue.add(lut_job).await;
 
-        manager.scheduler_entry_point().await;
+        manager.start_jobs_entry_point().await;
         let n_running = manager.job_queues
             .get(TEST_QUEUE_NAME)
             .unwrap()
@@ -964,7 +1011,7 @@ mod tests {
             .get_mut(TEST_QUEUE_NAME)
             .unwrap()
             .add(test_job).await;
-        manager.scheduler_entry_point().await;
+        manager.start_jobs_entry_point().await;
 
         let n_running = manager.job_queues
             .get(TEST_QUEUE_NAME)
@@ -981,7 +1028,7 @@ mod tests {
         // Now wait long enough that the first standard job should *definitely* finish
         tokio::time::sleep(Duration::from_secs(10)).await;
         
-        manager.scheduler_entry_point().await;
+        manager.start_jobs_entry_point().await;
         let n_in_queue = manager.job_queues
             .get(TEST_QUEUE_NAME)
             .unwrap()
@@ -1003,7 +1050,7 @@ mod tests {
         // Now wait for the LUT job to finish
         tokio::time::sleep(Duration::from_secs(10)).await;
 
-        manager.scheduler_entry_point().await;
+        manager.start_jobs_entry_point().await;
 
         let n_lut_in_queue = manager.job_queues
             .get("LUT")

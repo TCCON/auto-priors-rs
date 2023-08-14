@@ -2,15 +2,17 @@ use std::{sync::{Arc, atomic::AtomicBool}, time::Duration};
 
 use clokwerk::{TimeUnits, Job};
 use error::LoggingErrorHandler;
-use log::{info, warn, debug};
+use jobs::JobMessage;
+use log::{info, warn, error, debug};
 use signal_hook::{consts::signal, iterator::Signals};
-use tokio::sync::{RwLock, Mutex, OnceCell};
+use tokio::sync::{RwLock, Mutex, OnceCell, mpsc::{self, error::TrySendError, error::TryRecvError, Sender}};
+
+use crate::error::ErrorHandler;
 
 mod error;
 mod jobs;
 mod met;
 
-static JOBS_MANAGER: OnceCell<Mutex<jobs::JobManager<jobs::ServiceJobRunner,LoggingErrorHandler>>> = OnceCell::const_new();
 static MET_MANAGER: OnceCell<Mutex<met::MetManager<LoggingErrorHandler>>> = OnceCell::const_new();
 
 #[tokio::main]
@@ -32,29 +34,39 @@ async fn main() -> anyhow::Result<()> {
     let err_handler = error::LoggingErrorHandler{};
 
     let mut scheduler = clokwerk::AsyncScheduler::new();
-    let mut signals = setup_signals().expect("Could not set up signal handling");
+    let mut sync_scheduler = clokwerk::Scheduler::new();
+    let signals = setup_signals().expect("Could not set up signal handling");
 
     // JOB MANAGER SETUP //
 
-    let job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager::new_from_pool(
-        db.clone(), 
-        Arc::clone(&config), 
-        err_handler.clone()
-    ).await.expect("Failed to initialize job manager");
-        
-    JOBS_MANAGER.set(Mutex::new(job_manager)).expect("Could not set the global job manager");
+    let (tx_jobs, rx_jobs) = mpsc::channel::<jobs::JobMessage>(256);        
+    let job_man_handle = {
+        let db = db.clone();
+        let shared_config = Arc::clone(&config);
+        let err_handler = err_handler.clone();
+        tokio::spawn(async move {
+            let mut job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager::new_from_pool(
+                db, 
+                shared_config, 
+                err_handler, 
+                rx_jobs
+            ).await.expect("Failed to initialize job manager");
 
+            job_manager.message_loop().await;
+        })  
+    };
 
     if !timing_config.disable_job {
         info!("Setting up job parsing and execution to run");
-        scheduler
+        let tx_run_jobs = tx_jobs.clone();
+        sync_scheduler
             .every(timing_config.job_start_seconds.seconds())
-            .run(|| async {
-                debug!("Scheduled task to run jobs started");
-                let mutex = JOBS_MANAGER.get().unwrap();
-                let mut jm = mutex.lock().await;
-                jm.scheduler_entry_point().await;
-                debug!("Schedule task to run jobs done");
+            .run(move || {
+                match tx_run_jobs.try_send(jobs::JobMessage::StartJobs) {
+                    Ok(_) => (),
+                    Err(TrySendError::Closed(_)) => warn!("Could not send StartJobs message, channel closed"),
+                    Err(TrySendError::Full(_)) => warn!("Could not send StartJobs message, channel full"),
+                }
             });
     } else {
         warn!("Job parsing/execution will NOT run");
@@ -62,18 +74,19 @@ async fn main() -> anyhow::Result<()> {
 
     if !timing_config.disable_lut_regen {
         info!("Setting up strat LUT regen to run");
-        let lut_job = scheduler
+        let tx_lut_regen = tx_jobs.clone();
+        let lut_job = sync_scheduler
             .every(timing_config.lut_regen_days.days())
-            .run(|| async { 
-                // Should be safe to unwrap, will only be None if JOBS_MANAGER wasn't set, and 
-                // we did that above
-                let mutex = JOBS_MANAGER.get().unwrap();
-                let mut jm = mutex.lock().await;
-                jm.schedule_lut_regen().await;
+            .run(move || {
+                match tx_lut_regen.try_send(jobs::JobMessage::RegenLut) {
+                    Ok(_) => (),
+                    Err(TrySendError::Closed(_)) => warn!("Could not send RegenLut message, channel closed"),
+                    Err(TrySendError::Full(_)) => warn!("Could not send RegenLut message, channel closed")
+                }
             });
         if let Some(at) = timing_config.lut_regen_at {
             lut_job.at(&at);
-        }
+            }
     } else {
         warn!("LUT regen will NOT be run");
     }
@@ -107,43 +120,49 @@ async fn main() -> anyhow::Result<()> {
 
     // END MET MANAGER SETUP //
 
+    // Start scheduler
+
+    let (tx_scheduler, mut rx_scheduler) = mpsc::channel::<bool>(4);
     let schedule_handle = tokio::spawn(async move {
         loop {
-            scheduler.run_pending().await;
+            match rx_scheduler.try_recv() {
+                Ok(true) => { 
+                    info!("Stopping scheduler loop");
+                    break;
+                },
+                Ok(false) => {
+                    debug!("Heartbeat scheduler message received");
+                },
+                Err(TryRecvError::Disconnected) => {
+                    warn!("Scheduler receiver disconnected, aborting loop");
+                    break;
+                },
+                Err(TryRecvError::Empty) => ()
+            }
+            sync_scheduler.run_pending();
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     });
 
-    // If I understand the signal_hook docs correctly, this should be an infinite loop.
-    for sig in &mut signals {
-        match sig {
-            signal::SIGHUP => {
-                let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
-                info!("Reloading configuration");
-                let new_config = orm::config::load_config_file_or_default(config_file)?;
-                let mut global_config = config.write().await;
-                *global_config = new_config; // todo: verify this works
-                
-            }, // reload config
-            signal::SIGINT => {
-                schedule_handle.abort();
-                info!("Beginning graceful shutdown");
-                shutdown_components(ExitCommand::Graceful).await;
-                info!("Graceful shutdown complete");
-                break;
-            },
-            signal::SIGTERM | signal::SIGQUIT => {
-                schedule_handle.abort();
-                info!("Beginning rapid shutdown");
-                shutdown_components(ExitCommand::Rapid).await;
-                info!("Rapid shutdown complete");
-                break;
-            },
-            _ => {
-                info!("Received signal {sig}, taking no action");
-            }
-        }
-    }
+    // Start signal processing
+    let signal_handle = {
+        let config = Arc::clone(&config);
+        tokio::spawn(async move {
+            process_signals(signals, config, tx_scheduler, tx_jobs).await
+                .unwrap_or_else(|e| error!("Error occurred while processing signals: {e}"));
+        })
+    };
+
+    tokio::try_join!(
+        job_man_handle,
+        schedule_handle,
+        signal_handle
+    ).map(|_| ())
+    .unwrap_or_else(|e| {
+        err_handler.report_error_with_context(&e, "Error occurred in join on all top level threads");
+    });
+
+    
 
     Ok(())
 }
@@ -173,11 +192,60 @@ fn setup_signals() -> std::io::Result<Signals> {
     Signals::new(sigs)
 }
 
-async fn shutdown_components(exit_cmd: ExitCommand) {
-    if let Some(jobs_manager) = JOBS_MANAGER.get() {
-        let mut lock = jobs_manager.lock().await;
-        lock.stop_jobs(exit_cmd).await;
-    } else {
-        warn!("Could not get access to jobs manager to properly stop running jobs; some jobs may be in an incomplete state.");
+async fn process_signals(
+    mut signals: Signals, 
+    config: Arc<RwLock<orm::config::Config>>, 
+    tx_scheduler: Sender<bool>,
+    tx_jobs: Sender<JobMessage>
+    ) -> anyhow::Result<()> {
+    // If I understand the signal_hook docs correctly, this should be an infinite loop.
+    for sig in &mut signals {
+        match sig {
+            signal::SIGHUP => {
+                let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
+                info!("Reloading configuration");
+                let new_config = orm::config::load_config_file_or_default(config_file)?;
+                let mut global_config = config.write().await;
+                *global_config = new_config; // todo: verify this works
+                
+            }, // reload config
+            signal::SIGINT => {
+                info!("Beginning graceful shutdown");
+                shutdown_components(ExitCommand::Graceful, tx_scheduler, tx_jobs).await;
+                info!("Graceful shutdown complete");
+                break;
+            },
+            signal::SIGTERM | signal::SIGQUIT => {
+                info!("Beginning rapid shutdown");
+                shutdown_components(ExitCommand::Rapid, tx_scheduler, tx_jobs).await;
+                info!("Rapid shutdown complete");
+                break;
+            },
+            _ => {
+                info!("Received signal {sig}, taking no action");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn shutdown_components(
+    exit_cmd: ExitCommand, 
+    tx_scheduler: Sender<bool>,
+    tx_jobs: Sender<JobMessage>
+) {
+    tx_scheduler.send(true).await
+        .unwrap_or_else(|e| error!("Could not send shutdown message to scheduler: {e}"));
+
+    match exit_cmd {
+        ExitCommand::Graceful => {
+            tx_jobs.send(JobMessage::StopGracefully).await
+                .unwrap_or_else(|e| error!("Could not send graceful shutdown message to jobs manager: {e}"));
+        },
+        ExitCommand::Rapid => {
+            tx_jobs.send(JobMessage::StopRapidly).await
+            .unwrap_or_else(|e| error!("Could not send rapid shutdown message to jobs manager: {e}"));
+        },
     }
 }
