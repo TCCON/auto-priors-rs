@@ -11,7 +11,7 @@ use crate::error::ErrorHandler;
 const LUT_REGEN_BLOCKING_PRIORITY: i32 = 10;
 static LUT_QUEUE_NAME: &'static str = "LUT_REGEN";
 
-
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum JobMessage {
     StartJobs,
     RegenLut,
@@ -158,8 +158,10 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
 
     pub(crate) async fn message_loop(&mut self) {
         loop {
+            debug!("Job manager waiting for next message");
             let msg = self.msg_recv.recv().await;
             if let Some(m) = msg {
+                debug!("Job manager received message: {m:?}");
                 match m {
                     JobMessage::StartJobs => self.start_jobs_entry_point().await,
                     JobMessage::RegenLut => self.schedule_lut_regen().await,
@@ -174,6 +176,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                         break;
                     }
                 }
+                debug!("Job manager finished handling message: {m:?}");
             } else {
                 info!("JobManager: receiver closed, exiting message loop");
                 break;
@@ -478,7 +481,7 @@ pub(crate) trait Queueable {
     fn new_lut_job(ginput_key: String) -> Self;
 
     /// Start the job, updating the database if needed.
-    async fn start(&mut self, mut conn: MySqlPC, config: &Config) -> anyhow::Result<()>;
+    async fn start(&mut self, pool: PoolWrapper, config: &Config) -> anyhow::Result<()>;
 
     /// Return whether this job has started yet. It can be `true` even if the job is complete,
     /// use `is_done` instead to check if a previously started job is complete or errored.
@@ -554,18 +557,18 @@ impl<T: Queueable> Queue<T> {
         for item in self.items.iter_mut() {
             if !item.has_started() {
                 debug!("Starting queued item: {}", item.describe());
-                let conn = match pool.get_connection().await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        item.make_for_cleanup();
-                        error_handler.report_error_with_context(
-                            e.as_ref(),
-                            "Failed to acquire database connection while trying to start a job"
-                        );
-                        continue;
-                    }
-                };
-                item.start(conn, config).await
+                // let conn = match pool.get_connection().await {
+                //     Ok(c) => c,
+                //     Err(e) => {
+                //         item.make_for_cleanup();
+                //         error_handler.report_error_with_context(
+                //             e.as_ref(),
+                //             "Failed to acquire database connection while trying to start a job"
+                //         );
+                //         continue;
+                //     }
+                // };
+                item.start(pool.to_owned(), config).await
                 .unwrap_or_else(|e| error_handler.report_error(e.as_ref()));
                 debug!("Queued item {} started successfully", item.describe());
             } else {
@@ -703,8 +706,8 @@ impl ServiceJobRunner {
         }
     }
 
-    async fn start_ginput_job(conn: MySqlPC, job: Job, config: Config, join_handle: &mut Option<GinputHandle>) -> anyhow::Result<()> {
-        *join_handle = Some(start_priors_gen_job(conn, job, config));
+    async fn start_ginput_job(pool: PoolWrapper, job: Job, config: Config, join_handle: &mut Option<GinputHandle>) -> anyhow::Result<()> {
+        *join_handle = Some(start_priors_gen_job(pool, job, config));
         debug!("Ginput job started, join handle = {join_handle:?}");
         Ok(())
     }
@@ -788,9 +791,9 @@ impl Queueable for ServiceJobRunner {
         }
     }
 
-    async fn start(&mut self, conn: MySqlPC, config: &Config) -> anyhow::Result<()> {
+    async fn start(&mut self, pool: PoolWrapper, config: &Config) -> anyhow::Result<()> {
         match self {
-            Self::GinputJob{job, join_handle} => Self::start_ginput_job(conn, job.clone(), config.clone(), join_handle).await,
+            Self::GinputJob{job, join_handle} => Self::start_ginput_job(pool, job.clone(), config.clone(), join_handle).await,
             Self::LutRegenJob{ginput_key, join_handle} => Self::start_lut_job(ginput_key.clone(), join_handle, config.clone()).await,
         }
     }
@@ -844,7 +847,7 @@ mod tests {
             Self::new_from_seconds(5)
         }
 
-        async fn start(&mut self, mut _conn: MySqlPC, _config: &Config) -> anyhow::Result<()> {
+        async fn start(&mut self, mut _pool: PoolWrapper, _config: &Config) -> anyhow::Result<()> {
             self.start_time = Some(Instant::now());
             Ok(())
         }

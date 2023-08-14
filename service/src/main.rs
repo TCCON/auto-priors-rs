@@ -17,6 +17,8 @@ static MET_MANAGER: OnceCell<Mutex<met::MetManager<LoggingErrorHandler>>> = Once
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    console_subscriber::init();
+    
     env_logger::Builder::from_default_env()
         .filter_module("sqlx", log::LevelFilter::Warn)
         .init();
@@ -62,11 +64,13 @@ async fn main() -> anyhow::Result<()> {
         sync_scheduler
             .every(timing_config.job_start_seconds.seconds())
             .run(move || {
+                debug!("Scheduler: sending StartJobs message");
                 match tx_run_jobs.try_send(jobs::JobMessage::StartJobs) {
-                    Ok(_) => (),
+                    Ok(_) => debug!("Scheduler: StartJobs message sent"),
                     Err(TrySendError::Closed(_)) => warn!("Could not send StartJobs message, channel closed"),
                     Err(TrySendError::Full(_)) => warn!("Could not send StartJobs message, channel full"),
                 }
+                
             });
     } else {
         warn!("Job parsing/execution will NOT run");
@@ -78,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
         let lut_job = sync_scheduler
             .every(timing_config.lut_regen_days.days())
             .run(move || {
+                debug!("Scheduler: sending RegenLut message");
                 match tx_lut_regen.try_send(jobs::JobMessage::RegenLut) {
                     Ok(_) => (),
                     Err(TrySendError::Closed(_)) => warn!("Could not send RegenLut message, channel closed"),
@@ -139,8 +144,10 @@ async fn main() -> anyhow::Result<()> {
                 },
                 Err(TryRecvError::Empty) => ()
             }
+            debug!("Running pending jobs in scheduler");
             sync_scheduler.run_pending();
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            debug!("Finished running pending jobs in scheduler");
+            tokio::time::sleep(Duration::from_millis(1000)).await;
         }
     });
 

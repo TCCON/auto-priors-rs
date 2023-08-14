@@ -8,10 +8,11 @@ exclude = ["deps/Rocket", "python-bindings", "rocket-app"]
 
 [workspace.dependencies]
 anyhow = "1.0"
+async-trait = "0.1.72"
 chrono = "0.4"
 env_logger = "0.9"
 log = "0.4"
 sqlx = {version = "0.7", features = ["mysql", "runtime-tokio-rustls", "chrono"]}
 tabled = "0.14.0"
-tokio = {version = "1.31.0", features = ["full"]}
+tokio = {version = "1.31.0", features = ["full", "tracing"]}
 

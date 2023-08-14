@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-async-trait = "0.1.72"
+async-trait.workspace = true
 clokwerk = "0.4"
 glob = "0.3"
 signal-hook = "0.3"
@@ -18,3 +18,4 @@ tokio.workspace = true
 
 orm = {path = "../core-orm", package = "tccon_priors_orm"}
 cli = {path = "../cli", package = "tccon-priors-cli"}
+console-subscriber = "0.1.10"
