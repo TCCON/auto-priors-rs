@@ -1,10 +1,10 @@
-use std::{path::{PathBuf, Path}, ffi::OsStr, io::BufRead, str::FromStr};
+use std::{path::{PathBuf, Path}, ffi::OsStr, io::BufRead, str::FromStr, collections::HashSet, fmt::Display};
 
-use chrono::NaiveDate;
-use log::{debug, info};
+use chrono::{NaiveDate, DateTime, Local};
+use itertools::Itertools;
+use log::{debug, info, warn};
 
 use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::Config};
-
 
 struct FailedParsingError {
     reasons: Vec<String>,
@@ -310,23 +310,39 @@ pub async fn add_jobs_from_input_files(
     conn: &mut crate::MySqlConn, 
     config: &Config,
     input_files: &[PathBuf],
-    save_dir: &Path
+    save_dir: &Path,
+    mover: &mut InputFileMoveHandler
 ) -> anyhow::Result<()> {
     let mut jobs = vec![];
     let mut successful_input_files = vec![];
-    let mut failed_input_files = vec![];
+    let mut unmoved_input_file_errors = vec![];
 
+    // This ended up being more complicated than I expected: there is a chance that copying or deleting the input file can fail. 
+    // If it gets deleted but not copied, that's one thing, but the real problem comes if a file cannot be deleted. In that case,
+    // we might end up parsing the input file over and over because it just sits there. Hence this convoluted logic, which checks
     for input_file in input_files {
-        match InputJob::from_file(&input_file) {
+
+        // This is the key: the first time we encounter a file, as long as we can read it, we will try to 
+        // parse it. Then, if the move fails, it gets added to a list of files that failed to copy or delete
+        if mover.file_previously_errored(&input_file) {
+            warn!("Skipping input file {}, it looks like this was handled already but could not be moved for some reason", input_file.display());
+            continue;
+        }
+
+        let move_dir = match InputJob::from_file(&input_file) {
             Ok(job) => {
                 jobs.push(job);
-                // TODO: move successful input file into the success folder
-                successful_input_files.push(input_file)
+                successful_input_files.push(input_file);
+                &config.execution.success_input_file_dir
             },
             Err(e) => {
-                handle_failed_parsing(e);
-                failed_input_files.push(input_file);
+                handle_failed_parsing(e, config);
+                &config.execution.failure_input_file_dir
             }
+        };
+
+        if let Err(e) = mover.move_file(&input_file, &move_dir) {
+            unmoved_input_file_errors.push(e);
         }
     }
 
@@ -350,20 +366,149 @@ pub async fn add_jobs_from_input_files(
 
         info!("Added job {new_id} from file {}", infile.display());
     }
-    Ok(())
+
+    if unmoved_input_file_errors.is_empty() {
+        Ok(())
+    } else {
+        let nerrs = unmoved_input_file_errors.len();
+        let error_causes = unmoved_input_file_errors.into_iter()
+            .map(|e| e.to_string())
+            .join("\n");
+        anyhow::bail!("There were problems moving {nerrs} input files. Reasons were:\n{error_causes}")
+    }
 }
 
-fn handle_failed_parsing(error: FailedParsingError) {
-    // TODO: Eventually this will need to email the user and log it as well, but for now, let's just print the message out
-    // TODO: copy the failed input file to the failures directory and delete the original. Maybe also write the error?
+fn handle_failed_parsing(error: FailedParsingError, config: &Config) {
+    // Log the error
     let file = error.input_file.display();
-    eprint!("Error parsing {file}. ");
-    if let Some(email) = &error.email {
-        eprintln!("Email to be sent to {email}.")
-    }else{
-        eprintln!("");
-    }
+    let warn_msg = if let Some(email) = &error.email {
+        format!("Error parsing {file}. Email to be sent to {email}.")
+    } else {
+        format!("Error parsing {file}. Could not identify email to contact.")
+    };
 
     let sep = "=".repeat(32);
-    eprintln!("{sep}\n{}\n{sep}\n", error.email_body());
+    warn!("{warn_msg}\n{sep}\n{}\n{sep}\n", error.email_body());
+
+    // Email the user, if we could parse the file enough to find the email
+    if let Some(email) = &error.email {
+        config.email.send_mail(
+            &[email.as_str()],
+            None,
+            None,
+            "", 
+            &error.email_body()
+        ).unwrap_or_else(|e| {
+            warn!("Failed to send email to {email}, reason was: {e:?}")
+        });
+    }
 }
+
+#[derive(Debug)]
+pub struct InputFileMoveHandler {
+    last_clear_time: DateTime<Local>,
+    errored_files: HashSet<PathBuf>
+}
+
+impl InputFileMoveHandler {
+    pub fn new() -> Self {
+        Self { last_clear_time: Local::now(), errored_files: HashSet::new() }
+    }
+
+    /// Returns `true` if we tried to delete `file` recently and doing so failed
+    fn file_previously_errored(&self, file: &Path) -> bool {
+        self.errored_files.contains(file)
+    }
+
+    /// Move `from_file` into the directory `to_dir`
+    /// 
+    /// # Returns
+    /// - `Ok(true)` if the move succeeded
+    /// - `Ok(false)` if the move failed, but removing the file failed recently
+    /// - `Err(e)` if this is the first time moving this file has failed recently
+    /// 
+    /// This is intended to help avoid spamming the admin emails if a file cannot be deleted.
+    fn move_file(&mut self, from_file: &Path, to_dir: &Path) -> anyhow::Result<bool> {
+        let now = Local::now();
+        // Clear the cache of failed files every 3 days. That keeps it from getting too large (hopefully)
+        // but gives time to respond to emails about failed file removals.
+        if now - self.last_clear_time > chrono::Duration::days(3) {
+            self.errored_files.clear();
+            self.last_clear_time = now;
+        }
+
+        let res = Self::move_file_inner(from_file, to_dir);
+        if res.is_err() && self.errored_files.contains(from_file) {
+            // We've seen this file recently, so don't treat the move error as an actual error
+            Ok(false)
+        } else if res.is_err() {
+            if let InputFileMoveError::CopyAndRemoveFail(_, _, _) | InputFileMoveError::RemoveFail(_, _) = res {
+                // If we didn't remove the file, we need to ignore it on successive 
+                self.errored_files.insert(from_file.to_path_buf());
+            }
+            anyhow::bail!(res.to_string())
+        } else {
+            Ok(true)
+        }
+    }
+
+    fn move_file_inner<'p>(from_file: &'p Path, to_dir: &Path) -> InputFileMoveError<'p> {
+        let to_file = if let Some(name) = from_file.file_name() {
+            to_dir.join(name)
+        } else {
+            // anyhow::bail!("Cannot get name of input file, was given a bad path: {}", from_file.display());
+            return InputFileMoveError::BadPath(from_file);
+        };
+
+        let res_copy = std::fs::copy(from_file, to_file);
+        let res_rm = std::fs::remove_file(from_file);
+
+        if let (Err(e_cp), Err(e_rm)) = (&res_copy, &res_rm) {
+            // anyhow::bail!("URGENT: could not copy or remove original input file {}. Errors were\nCopying: {e_cp}\nRemoving: {e_rm}", from_file.display())
+            InputFileMoveError::CopyAndRemoveFail(from_file, e_cp.to_string(), e_rm.to_string())
+        } else if let Err(e) = res_copy {
+            // anyhow::bail!("Could not copy original input file {}, file was deleted. Error was: {e}", from_file.display())
+            InputFileMoveError::CopyFail(from_file, e.to_string())
+        } else if let Err(e) = res_rm {
+            // anyhow::bail!("URGENT: Could not remove original input file {}. Error was: {e}", from_file.display())
+            InputFileMoveError::RemoveFail(from_file, e.to_string())
+        } else {
+            InputFileMoveError::Ok(from_file)
+        }            
+    }
+}
+
+#[derive(Debug, Clone)]
+enum InputFileMoveError<'p> {
+    Ok(&'p Path),
+    BadPath(&'p Path),
+    CopyFail(&'p Path, String),
+    RemoveFail(&'p Path, String),
+    CopyAndRemoveFail(&'p Path, String, String)
+}
+
+impl<'p> InputFileMoveError<'p> {
+    fn is_err(&self) -> bool {
+        match self {
+            InputFileMoveError::Ok(_) => false,
+            _ => true
+        }
+    }
+}
+
+impl<'p> Display for InputFileMoveError<'p> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputFileMoveError::Ok(p) => write!(f, "{} moved successfully", p.display()),
+            InputFileMoveError::BadPath(p) => write!(f, "Cannot get name of input file, was given a bad path: {}", p.display()),
+            InputFileMoveError::CopyFail(p, e) => write!(f, "Could not copy original input file {}, file was deleted. Error was: {e}", p.display()),
+            InputFileMoveError::RemoveFail(p, e) => write!(f, "URGENT: Could not remove original input file {}. Error was: {e}", p.display()),
+            InputFileMoveError::CopyAndRemoveFail(p, e_cp, e_rm) => write!(f, "URGENT: could not copy or remove original input file {}. Errors were\nCopying: {e_cp}\nRemoving: {e_rm}", p.display()),
+        }
+    }
+}
+
+// fn must_move_file(from_file: &Path, to_dir: &Path) -> anyhow::Result<()> {
+//     let to_filename = from_file.file_name()
+//         .unwrap_or_else(|| warn!("Could not extract file name from input file {}, file will be deleted instead of moved"))
+// }

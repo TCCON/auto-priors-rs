@@ -146,6 +146,46 @@ impl SendMail for Lettre {
 }
 
 
+/// A struct used to send emails by directly connecting to an SMTP server with the Lettre crate.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MockEmail {}
+
+impl SendMail for MockEmail {
+    fn send_mail(&self, to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError> {
+        use std::fmt::Write;
+        let mut msg = "== Mock email ==\n".to_string();
+        
+        writeln!(&mut msg, "To: {}", to.join(","))
+            .map_err(|e| EmailError::SendFailure(e.to_string()))?;
+        
+        writeln!(&mut msg, "From: {}", from)
+            .map_err(|e| EmailError::SendFailure(e.to_string()))?;
+        
+        if let Some(cc) = cc {
+            writeln!(&mut msg, "CC: {}", cc.join(","))
+                .map_err(|e| EmailError::SendFailure(e.to_string()))?;
+        }
+
+        if let Some(bcc) = bcc {
+            writeln!(&mut msg, "BCC: {}", bcc.join(","))
+                .map_err(|e| EmailError::SendFailure(e.to_string()))?;
+        }
+
+        writeln!(&mut msg, "Subject: {}", subject)
+            .map_err(|e| EmailError::SendFailure(e.to_string()))?;
+
+        writeln!(&mut msg, "Body: {}", message)
+            .map_err(|e| EmailError::SendFailure(e.to_string()))?;
+
+        write!(&mut msg, "== End mock email ==")
+            .map_err(|e| EmailError::SendFailure(e.to_string()))?;
+
+        println!("{}", msg);
+        Ok(())
+    }
+}
+
+
 /// A convenience function to parse a string into a [`Lettre::Mailbox`] with
 /// no name, just an email address.
 pub fn parse_email_address(email: &str) -> Result<Mailbox, EmailError> {

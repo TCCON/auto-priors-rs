@@ -264,6 +264,12 @@ pub struct ExecutionConfig {
     /// Full glob pattern (including directory) to use to find input files
     pub input_file_pattern: String,
 
+    /// Directory to which successfully parsed input files go
+    pub success_input_file_dir: PathBuf,
+
+    /// Directory to which input files that fail parsing go
+    pub failure_input_file_dir: PathBuf,
+
     /// Hours to retain requested jobs before deleting
     pub hours_to_keep: u32,
 
@@ -320,6 +326,8 @@ impl Default for ExecutionConfig {
             max_numpy_threads: 2, 
             hours_to_keep: 168,
             input_file_pattern: "input_file_2020*.txt".to_owned(),
+            success_input_file_dir: PathBuf::from("."),
+            failure_input_file_dir: PathBuf::from("."),
             ftp_download_server: Url::parse(&format!("ftp://{host}/")).unwrap_or_else(|_| Url::parse("ftp://localhost/").unwrap()), 
             ftp_download_root: Default::default(), 
             output_path: Default::default(), 
@@ -681,6 +689,9 @@ impl EmailConfig {
             EmailBackend::Mailx(backend) => {
                 backend.send_mail(to, &from, cc, bcc, subject, message)
             },
+            EmailBackend::Mock(backend) => {
+                backend.send_mail(to, &from, cc, bcc, subject, message)
+            }
         }
     }
 
@@ -707,7 +718,10 @@ pub enum EmailBackend {
 
     /// Calls the `mailx` command line client via the shell to send
     /// emails.
-    Mailx(crate::email::Mailx)
+    Mailx(crate::email::Mailx),
+
+    /// Prints the email to the terminal (intended for testing)
+    Mock(crate::email::MockEmail),
 }
 
 impl Default for EmailBackend {

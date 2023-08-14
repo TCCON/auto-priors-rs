@@ -107,6 +107,7 @@ pub(crate) struct JobManager<T: Queueable, H: ErrorHandler> {
     pub(crate) pool: PoolWrapper,
     pub(crate) shared_config: Arc<RwLock<Config>>,
     pub(crate) job_queues: HashMap<String, Queue<T>>,
+    pub(crate) input_file_mover: orm::input_files::InputFileMoveHandler,
     pub(crate) error_handler: H,
     pub(crate) msg_recv: tokio::sync::mpsc::Receiver<JobMessage>
 }
@@ -149,6 +150,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             pool,
             shared_config,
             job_queues: HashMap::new(), 
+            input_file_mover: orm::input_files::InputFileMoveHandler::new(),
             error_handler,
             msg_recv
         };
@@ -266,7 +268,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         info!("{} new input files found", input_files.len());
         
         let config = &self.shared_config.read().await;
-        orm::input_files::add_jobs_from_input_files(&mut self.pool.get_connection().await?.detach(), &config, &input_files, &save_dir).await?;
+        orm::input_files::add_jobs_from_input_files(&mut self.pool.get_connection().await?.detach(), &config, &input_files, &save_dir, &mut self.input_file_mover).await?;
 
         info!("Jobs from input files added to queue");
         Ok(())

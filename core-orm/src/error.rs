@@ -99,6 +99,7 @@ impl From<serde_json::Error> for JobError {
 }
 
 
+#[derive(Debug)]
 pub enum EmailError {
     UnparsableEmail(String),
     UnencodableBody(String),
