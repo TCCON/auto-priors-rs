@@ -1350,7 +1350,7 @@ pub fn start_priors_gen_job(conn: MySqlPC, job: Job, config: Config) -> GinputHa
     })
 }
 
-async fn run_priors_gen_job(mut conn: MySqlPC, job: Job, config: Config) -> anyhow::Result<()> {
+async fn run_priors_gen_job(mut conn: MySqlPC, mut job: Job, config: Config) -> anyhow::Result<()> {
     info!("Beginning job {} for dates {} to {}", job.job_id, job.start_date, job.end_date);
     let date_iter = crate::utils::DateIterator::new(
         vec![(job.start_date, job.end_date)]
@@ -1367,8 +1367,8 @@ async fn run_priors_gen_job(mut conn: MySqlPC, job: Job, config: Config) -> anyh
             .with_context(|| format!("Error occurred while running ginput for date {date} in job {}", job.job_id))?;
     }
 
-    let (make_tarball, tarball_name) = match job.save_tarball {
-        TarChoice::No => (false, PathBuf::new()),
+    let (make_tarball, output_path) = match job.save_tarball {
+        TarChoice::No => (false, job.save_dir.clone()),
         TarChoice::Yes => {
             (true, make_std_tar_file_name(&mut conn, &job).await?)
         },
@@ -1386,7 +1386,7 @@ async fn run_priors_gen_job(mut conn: MySqlPC, job: Job, config: Config) -> anyh
 
     // Clever combination of tar archive builder and gzip compressor taken from
     // https://stackoverflow.com/a/46521163
-    let tgz_file = std::fs::File::create(tarball_name)
+    let tgz_file = std::fs::File::create(&output_path)
         .with_context(|| format!("Error occurred trying to create the initial .tgz file for job {}", job.job_id))?;
     let encoder = flate2::write::GzEncoder::new(tgz_file, flate2::Compression::default());
     let mut archive = tar::Builder::new(encoder);
@@ -1417,6 +1417,8 @@ async fn run_priors_gen_job(mut conn: MySqlPC, job: Job, config: Config) -> anyh
 
     std::fs::remove_dir_all(&job_dir)
         .unwrap_or_else(|_| warn!("Failed to remove output directory for job {} after creating the tarball", job.job_id));
+
+    job.set_completed(&mut conn, &output_path, None).await?;
     Ok(())
 }
 

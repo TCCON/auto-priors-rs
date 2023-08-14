@@ -670,7 +670,6 @@ impl ServiceJobRunner {
 
         match inner_res {
             Ok(_) => {
-                Self::set_job_complete(conn, job).await?;
                 Ok(true)
             },
             Err(e) => {
@@ -680,12 +679,6 @@ impl ServiceJobRunner {
                 anyhow::bail!("Error occurred in job #{}: {e:?}", job.job_id)
             }
         }
-    }
-
-    async fn set_job_complete(conn: &mut MySqlPC, job: &mut Job) -> anyhow::Result<(u64, chrono::NaiveDateTime)> {
-        // todo: handle setting output path to the tar file if appropriate
-        let output_path = job.save_dir.clone();
-        job.set_completed(conn, &output_path, None).await
     }
 
     async fn is_lut_job_done(ginput_key: &str, join_handle: &mut Option<GinputHandle>) -> anyhow::Result<bool> {
@@ -726,10 +719,7 @@ impl ServiceJobRunner {
         if let Some(task) = join_handle {
             task.abort();
             match task.await {
-                Ok(_) => {
-                    Self::set_job_complete(conn, job).await
-                        .with_context(|| format!("Job #{} completed before being cancelled, but setting it complete failed", job.job_id))?;
-                },
+                Ok(_) => info!("Job {} was already complete when tried to cancel", job.job_id),
                 Err(e) if e.is_cancelled() => (),
                 Err(e) => {
                     anyhow::bail!("Job #{} had encountered an error before being cancelled: {e:?}", job.job_id);
