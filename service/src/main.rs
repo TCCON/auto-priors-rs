@@ -54,10 +54,16 @@ async fn main() -> anyhow::Result<()> {
             let mut job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager::new_from_pool(
                 db, 
                 shared_config, 
-                err_handler, 
+                err_handler.clone(), 
                 rx_jobs
             ).await.expect("Failed to initialize job manager");
 
+            if let Err(e) = job_manager.reset_running_jobs().await {
+                err_handler.report_error_with_context(
+                    e.as_ref(), 
+                    "Error occurred during job manager start up while trying to reset jobs left as 'running' in the database. These jobs will likely still be stuck as 'running'."
+                );
+            }
             job_manager.message_loop().await;
         })  
     };

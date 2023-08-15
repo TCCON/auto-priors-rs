@@ -517,7 +517,11 @@ impl Display for Job {
         writeln!(f, "  Site IDs:   {}", self.site_id.join(", "))?;
         writeln!(f, "  Latitudes:  {lats}")?;
         writeln!(f, "  Longitudes: {lons}")?;
-        writeln!(f, "  Output in {} as tarball {}", self.save_dir.display(), self.save_tarball)?;
+        if let Some(out) = &self.output_file {
+            writeln!(f, "  Output stored in {}", out.display())?;
+        } else {
+            writeln!(f, "  Save under {} as tarball {}", self.save_dir.display(), self.save_tarball)?;
+        }
         writeln!(f, "  Formats: mod = {}, vmr = {}, map = {}", self.mod_fmt, self.vmr_fmt, self.map_fmt)?;
         writeln!(f, "  Met = {}, ginput = {}", 
             self.met_key.as_deref().unwrap_or("DEFAULT"),
@@ -572,6 +576,15 @@ impl TryFrom<QJob> for Job {
 }
 
 impl Job {
+    pub fn run_dir(&self, basename_only: bool) -> PathBuf {
+        let job_subdir = format!("job{:09}", self.job_id);
+        if basename_only {
+            return PathBuf::from(job_subdir);
+        }
+        let base_run_dir = self.save_dir.join(job_subdir);
+        base_run_dir
+    }
+
     pub async fn get_jobs_list(conn: &mut MySqlConn, pending_only: bool) -> JobResult<Vec<Job>> {
         let qjobs = if pending_only{
             sqlx::query_as!(
@@ -667,6 +680,20 @@ impl Job {
         .collect();
 
         Ok(queues)
+    }
+
+    pub async fn get_jobs_in_state(conn: &mut MySqlConn, state: JobState) -> anyhow::Result<Vec<Job>> {
+        let jobs: Result<Vec<Job>, _> = sqlx::query_as!(
+            QJob,
+            "SELECT * FROM Jobs WHERE state = ?",
+            state
+        ).fetch_all(conn)
+        .await?
+        .into_iter()
+        .map(|q| q.try_into())
+        .collect();
+
+        Ok(jobs?)
     }
 
     /// Get the next job in `queue` which should be run
@@ -939,33 +966,6 @@ impl Job {
         Ok((site_ids, lats, lons))
     }
 
-    // pub async fn lat_lons_sids_filled_for_date(&self, conn: &mut MySqlConn, date: NaiveDate) -> anyhow::Result<(Vec<String>, Vec<f32>, Vec<f32>)> {
-    //     let (sids, lats, lons) = Self::expand_site_lat_lon(
-    //         self.site_id.clone(), 
-    //         Some(self.lat.clone()), 
-    //         Some(self.lon.clone())
-    //     )?;
-
-    //     let mut filled_lats = vec![];
-    //     let mut filled_lons = vec![];
-
-    //     for (idx, sid) in sids.iter().enumerate() {
-    //         if let (Some(y), Some(x)) = (lats[idx], lons[idx]) {
-    //             filled_lats.push(y);
-    //             filled_lons.push(x);
-    //         } else {
-    //             if lats[idx].is_some() || lons[idx].is_some() {
-    //                 anyhow::bail!("Site '{sid}' in job {} has lat or lon given but not both; the standard lat/lon willl override the given one", self.job_id);
-    //             }
-
-    //             let site_info = crate::siteinfo::SiteInfo::get_site_info_for_date(
-    //                 conn, date, true
-    //             ).await?;
-    //         }
-    //     }
-    //     todo!();
-    // }
-
     /// Add a new job to the database
     /// 
     /// # Parameters
@@ -1086,10 +1086,10 @@ impl Job {
         Ok(new_id as i32)
     }
 
-    /// Delete a pending job from the queue
+    /// Delete a job from the queue
     /// 
     /// # Parameters
-    /// `pool` - a pool of connections to the MySQL database. See Notes.
+    /// `conn` - a connection to the MySQL database.
     /// `id` - the numeric ID (primary key) of the job to delete.
     /// 
     /// # Returns
@@ -1100,32 +1100,15 @@ impl Job {
     /// 
     /// * querying for the number of jobs in the table fails
     /// * deleting the row in the SQL table fails
-    /// 
-    /// # Notes
-    /// Unlike most job functions, this needs a pool of database connections, rather than a single
-    /// connection. This is an internal implementation detail that can hopefully be addressed in the
-    /// future to use a single connection, to be consistent with other job functions.
-    pub async fn delete_job_with_id(conn: &mut MySqlConn, id: i32) -> anyhow::Result<i64> {
-        // must rename COUNT(*) to a valid field name
-        let pre_count = sqlx::query!("SELECT COUNT(*) as count FROM Jobs")
-            .fetch_one(&mut *conn)
-            .await?
-            .count;
-        
-        let pending: i8 = JobState::Pending.into();
-        sqlx::query!(
-            "DELETE FROM Jobs WHERE job_id = ? AND state = ?",
-            id,
-            pending
-        ).execute(&mut *conn)
-        .await?;
+    pub async fn delete_job_with_id(conn: &mut MySqlConn, id: i32) -> anyhow::Result<u64> {
+        let job = Self::get_job_with_id(conn, id).await?;
+        job.delete(conn).await
+    }
 
-        let post_count = sqlx::query!("SELECT COUNT(*) as count FROM Jobs")
-            .fetch_one(&mut *conn)
-            .await?
-            .count;
-
-        return Ok(pre_count - post_count)
+    /// Reset a job, deleting any output and changing its status back to "pending"
+    pub async fn reset_job_with_id(conn: &mut MySqlConn, id: i32) -> anyhow::Result<()> {
+        let mut job = Self::get_job_with_id(conn, id).await?;
+        job.reset(conn).await
     }
 
     /// Set the state of a job by its `job_id`
@@ -1215,20 +1198,61 @@ impl Job {
         return Ok((n, t))
     }
 
-}
+    /// Reset this job to pending, deleting the run directory or output directory/file as well
+    pub async fn reset(&mut self, conn: &mut MySqlConn) -> anyhow::Result<()> {
+        if let Some(output) = &self.output_file {
+            if output.is_dir() {
+                std::fs::remove_dir_all(output)
+                    .unwrap_or_else(|e| warn!(
+                        "Error occurred while trying to remove output directory ({}) for job {}. Error was: {e}",
+                        self.save_dir.display(), self.job_id
+                    ));
+            }
 
-pub fn job_run_dir(config: &crate::config::Config, job_id: i32, basename_only: bool) -> std::io::Result<PathBuf> {
-    let job_subdir = format!("job{:09}", job_id);
-    if basename_only {
-        return Ok(PathBuf::from(job_subdir));
+            if output.is_file() {
+                std::fs::remove_file(output)
+                    .unwrap_or_else(|e| warn!(
+                        "Error occurred while trying to remove output file ({}) for job {}. Error was: {e}",
+                        self.save_dir.display(), self.job_id
+                    ));
+            }
+        }
+
+        let run_dir = self.run_dir(false);
+        if run_dir.exists() {
+            std::fs::remove_dir_all(&run_dir)
+                .unwrap_or_else(|e| warn!(
+                    "Error occurred while trying to remove run directory ({}) for job {}. Error was: {e}",
+                    run_dir.display(), self.job_id
+                ));
+        }
+
+        sqlx::query!(
+            "UPDATE Jobs SET state = ?, output_file = ?, complete_time = ? WHERE job_id = ?",
+            JobState::Pending,
+            None::<String>,
+            None::<NaiveDateTime>,
+            self.job_id
+        ).execute(conn)
+        .await?;
+
+        self.state = JobState::Pending;
+        self.output_file = None;
+        self.complete_time = None;
+
+        Ok(())
     }
-    let base_run_dir = config.execution.output_path.join(job_subdir);
 
-    if !base_run_dir.exists() {
-        std::fs::create_dir_all(&base_run_dir)?;
+    /// Delete this job, removing output/run files and deleting the job itself from the Jobs table
+    pub async fn delete(mut self, conn: &mut MySqlConn) -> anyhow::Result<u64> {
+        // Only error is if setting the state fails, and since we're deleting the job, that doesn't matter
+        let _ = self.reset(conn).await;
+        let res = sqlx::query!("DELETE FROM Jobs WHERE job_id = ?", self.job_id)
+            .execute(conn)
+            .await?;
+        Ok(res.rows_affected())
     }
 
-    Ok(base_run_dir)
 }
 
 pub async fn cleanup_cancelled_ginput_job(conn: &mut MySqlConn, job: &mut Job) -> JobResult<()> {
@@ -1376,7 +1400,7 @@ async fn run_priors_gen_job(mut conn: MySqlConn, mut job: Job, config: Config) -
     }
 
     let (make_tarball, output_path) = match job.save_tarball {
-        TarChoice::No => (false, job.save_dir.clone()),
+        TarChoice::No => (false, job.run_dir(false)),
         TarChoice::Yes => {
             (true, make_std_tar_file_name(&mut conn, &job).await?)
         },
@@ -1386,11 +1410,15 @@ async fn run_priors_gen_job(mut conn: MySqlConn, mut job: Job, config: Config) -
     };
 
     if !make_tarball {
+        job.set_completed(&mut conn, &output_path, None).await?;
         return Ok(())
     }
 
-    let job_dir = job_run_dir(&config, job.job_id, false)?;
-    let job_dir_name = job_run_dir(&config, job.job_id, true)?;
+    let job_dir = job.run_dir(false);
+    if !job_dir.exists() {
+        std::fs::create_dir_all(&job_dir)?;
+    }
+    let job_dir_name = job.run_dir(true);
 
     // Clever combination of tar archive builder and gzip compressor taken from
     // https://stackoverflow.com/a/46521163
@@ -1488,8 +1516,10 @@ async fn setup_ginput_args_for_date(conn: &mut MySqlConn, date: NaiveDate, job: 
         .map_err(|e| JobError::InvalidSiteLocation(e))?;
 
     debug!("Job {}: setting up run directory", job.job_id);
-    let run_dir = job_run_dir(&config, job.job_id, false)
-        .map_err(|e| JobError::RunDirectoryError(e))?;
+    let run_dir = job.run_dir(false);
+    if !run_dir.exists() {
+        std::fs::create_dir_all(&run_dir)?;
+    }
 
     let nlocs = lons.len();
     

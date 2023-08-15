@@ -55,6 +55,7 @@ enum Commands {
     #[clap(alias="pifm")]
     ParseInputFilesManually(input_files::ParseInputFilesManualCli),
     AddJob(jobs::AddJobCli),
+    ResetJob(jobs::ResetJobCli),
     DeleteJob(jobs::DeleteJobCli),
     PrintJobs(jobs::PrintJobsCli),
     StdSites(siteinfo::StdSiteCli),
@@ -184,6 +185,11 @@ async fn main() -> anyhow::Result<()> {
             let mut conn = db.get_connection().await?;
             jobs::add_job(&mut conn, subargs, &config).await?;
         },
+
+        Commands::ResetJob(subargs) => {
+            let mut conn = db.get_connection().await?;
+            jobs::reset_job(&mut conn, subargs).await?;
+        }
 
         Commands::DeleteJob(subargs) => {
             let mut conn = db.get_connection().await?;

@@ -88,11 +88,30 @@ pub struct AddJobArgs {
     save_tarball: TarChoice
 }
 
+/// Reset a job, deleting a run directory or output, and setting its status to 'pending'
 #[derive(Debug, Args)]
-/// Delete a pending job from the command line
-pub struct DeleteJobCli {
-    /// The job ID to delete. Will have no effect if the job has already run.
+pub struct ResetJobCli {
+    /// The job ID to reset
     id: i32,
+}
+
+pub async fn reset_job(db: &mut orm::MySqlConn, clargs: ResetJobCli) -> anyhow::Result<()> {
+    orm::jobs::Job::reset_job_with_id(db, clargs.id).await?;
+    println!("Reset job #{}", clargs.id);
+    Ok(())
+}
+
+#[derive(Debug, Args)]
+/// Delete a job from the command line
+pub struct DeleteJobCli {
+    /// The job ID to delete.
+    id: i32,
+}
+
+pub async fn delete_job(db: &mut orm::MySqlConn, clargs: DeleteJobCli) -> anyhow::Result<()> {
+    let n_deleted = orm::jobs::Job::delete_job_with_id(db, clargs.id).await?;
+    println!("Deleted {n_deleted} job(s)");
+    Ok(())
 }
 
 impl AddJobArgs {
@@ -160,12 +179,6 @@ pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli, config: &Config
         Some(args.save_tarball))
     .await?;
     println!("Added new job, ID = {id}");
-    Ok(())
-}
-
-pub async fn delete_job(db: &mut orm::MySqlConn, clargs: DeleteJobCli) -> anyhow::Result<()> {
-    let n_deleted = orm::jobs::Job::delete_job_with_id(db, clargs.id).await?;
-    println!("Deleted {n_deleted} job(s)");
     Ok(())
 }
 

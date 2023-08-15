@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use anyhow::Context;
 use log::{warn, info, debug, error};
 use orm::{jobs::{Job, JobState, start_priors_gen_job, GinputHandle, start_lut_regen_job}, config::Config, MySqlPC, PoolWrapper};
+use sqlx::Connection;
 use tokio::sync::RwLock;
 
 use crate::error::ErrorHandler;
@@ -249,6 +250,31 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         }
     }
 
+    pub(crate) async fn reset_running_jobs(&self) -> anyhow::Result<()> {
+        let mut conn = self.pool.get_connection().await
+            .context("Unable to get connection from DB pool while trying to reset running jobs")?;
+
+        let mut trans = conn.begin().await
+            .context("Unable to begin transaction while resetting running jobs")?;
+
+        let running_jobs = Job::get_jobs_in_state(&mut trans, JobState::Running).await
+            .context("Unable to get jobs listed in database as 'running'")?;
+
+        let njobs = running_jobs.len();
+        if njobs > 0 {
+            warn!("{njobs} job(s) detected in running state. Assuming these were orphaned from an incomplete shutdown and resetting them to 'pending'.");
+        }
+        for mut job in running_jobs {
+            job.reset(&mut trans).await
+                .with_context(|| format!("Unable to reset running job #{}", job.job_id))?;
+        }
+        trans.commit().await
+            .context("Unable to commit transaction to reset running jobs")?;
+
+        info!("{njobs} running job(s) reset to pending");
+        Ok(())
+    }
+
     /// Scan for job request files and add them to the database.
     async fn scan_for_job_submissions(&mut self) -> anyhow::Result<()> {
         let (input_glob_pattern, save_dir) = { 
@@ -300,7 +326,8 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             let mut conn = self.pool.get_connection().await?;
             this_queue.clean_up_finished(&mut conn, &self.error_handler).await;
             let mut n_to_add = this_queue.num_can_add();
-            info!("Queue '{name}' can accept {n_to_add} additional jobs");
+            let n_total = this_queue.max_num_items;
+            info!("Queue '{name}' is running {} of {n_total} allowed jobs", n_total - n_to_add);
             while n_to_add > 0 {
                 let next_job = Job::claim_next_job_in_queue(&mut conn, &name)
                     .await
