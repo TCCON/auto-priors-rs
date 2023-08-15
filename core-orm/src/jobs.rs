@@ -585,12 +585,13 @@ impl Job {
         base_run_dir
     }
 
-    pub async fn get_jobs_list(conn: &mut MySqlConn, pending_only: bool) -> JobResult<Vec<Job>> {
-        let qjobs = if pending_only{
+    pub async fn get_jobs_list(conn: &mut MySqlConn, pending_and_running_only: bool) -> JobResult<Vec<Job>> {
+        let qjobs = if pending_and_running_only{
             sqlx::query_as!(
                 QJob,
-                "SELECT * FROM Jobs WHERE state = ?",
-                JobState::Pending
+                "SELECT * FROM Jobs WHERE state = ? OR state = ?",
+                JobState::Pending,
+                JobState::Running
             ).fetch_all(conn)
             .await?
         } else {

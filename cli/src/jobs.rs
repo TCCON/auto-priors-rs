@@ -227,12 +227,12 @@ pub async fn print_jobs_table_cli(conn: &mut MySqlConn, args: PrintJobsCli) -> a
 pub async fn print_jobs_table(
     conn: &mut MySqlConn,
     detailed: bool,
-    pending_only: bool,
+    pending_and_running_only: bool,
     job_ids: &[i32],
     submit_date_range: (Option<NaiveDate>, Option<NaiveDate>),
     submit_email: Option<&str>
 ) -> anyhow::Result<()> {
-    let jobs = Job::get_jobs_list(conn, pending_only).await?;
+    let jobs = Job::get_jobs_list(conn, pending_and_running_only).await?;
 
     // Because the filtering is kind of specific to this function, we'll do it in Rust here
     // rather than as specific SQL queries.
