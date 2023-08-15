@@ -11,7 +11,7 @@ static TEST_QUEUE_NAME: &'static str = "default";
 
 
 async fn mock_run_job_with_delay<'t>(conn: &mut MySqlConnection, delay_seconds: f32) -> anyhow::Result<i32> {
-    let mut j = Job::get_next_job_in_queue(conn, TEST_QUEUE_NAME).await
+    let mut j = Job::get_next_job_in_queue(conn, TEST_QUEUE_NAME, &orm::jobs::PrioritySubmitFS{}).await
         .with_context(|| "Query to get next test job failed")?
         .expect("Expected at least one job in test queue");
 
@@ -32,7 +32,7 @@ async fn mock_run_job_with_delay_transaction(mut conn: MySqlPC, delay_seconds: f
 
         println!("{:?} ({delay_seconds}): Got transaction", Instant::now());
 
-        let mut j = Job::get_next_job_in_queue(&mut trans, TEST_QUEUE_NAME).await
+        let mut j = Job::get_next_job_in_queue(&mut trans, TEST_QUEUE_NAME, &orm::jobs::PrioritySubmitFS{}).await
             .with_context(|| "Query to get next test job failed")?
             .expect("Expected at least one job in test queue");
 
@@ -128,7 +128,7 @@ async fn test_claim_job() {
 
 
     let fut1 = mock_run_job_with_delay_transaction(conn1, 3.0);
-    let fut2 = Job::claim_next_job_in_queue(&mut conn2, TEST_QUEUE_NAME);
+    let fut2 = Job::claim_next_job_in_queue(&mut conn2, TEST_QUEUE_NAME, &orm::jobs::PrioritySubmitFS{});
 
     let (job1, job2) = tokio::join!(fut1, fut2);
 

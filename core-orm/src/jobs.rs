@@ -630,45 +630,6 @@ impl Job {
         return Ok(Job::try_from(result)?)
     }
 
-    /// Return a vector of the jobs that should be run next
-    /// 
-    /// # Parametesr
-    /// * `conn` - connection to the MySQL database
-    /// * `njobs` - maximum number of jobs to list. If `None`, then all pending jobs are returned.
-    /// 
-    /// # Returns
-    /// A vector of [`Job`] instances in order first from highest to lowest priority, then in order
-    /// of submission time.
-    /// 
-    /// # Errors
-    /// Returns an `Err` if the database query fails, or parsing any of the job information into a job
-    /// structure fails.
-    pub async fn get_next_jobs(conn: &mut MySqlConn, njobs: Option<u32>) -> anyhow::Result<Vec<Job>> {
-        let qjobs = if let Some(njobs) = njobs {
-            sqlx::query_as!(
-                QJob,
-                "SELECT * FROM Jobs WHERE state = ? ORDER BY priority desc, submit_time LIMIT ?",
-                JobState::Pending,
-                njobs
-            ).fetch_all(conn)
-            .await?
-        }else{
-            sqlx::query_as!(
-                QJob,
-                "SELECT * FROM Jobs WHERE state = ? ORDER BY priority desc, submit_time",
-                JobState::Pending
-            ).fetch_all(conn)
-            .await?
-        };
-
-        let mut jobs = vec![];
-        for qjob in qjobs.into_iter() {
-            jobs.push(qjob.try_into()?);
-        }
-
-        return Ok(jobs)
-    }
-
     pub async fn get_queues_with_pending_jobs(conn: &mut MySqlConn) -> anyhow::Result<Vec<String>> {
         let queues = sqlx::query!(
             "SELECT DISTINCT(queue) AS q FROM Jobs WHERE state = ?",
@@ -707,18 +668,8 @@ impl Job {
     /// next job with the intent of starting it running, prefer [`Job::claim_next_job_in_queue`]
     /// or [`Job::claim_next_job_in_queue_with_opts`], which prevent race conditions
     /// if multiple connections try to get the next job for the same queue too closely in time.
-    pub async fn get_next_job_in_queue(conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>> {
-        let job: Option<Job>  = sqlx::query_as!(
-            QJob,
-            "SELECT * FROM Jobs WHERE state = ? AND queue = ? ORDER BY priority desc, submit_time LIMIT 1",
-            JobState::Pending,
-            queue
-        ).fetch_optional(conn)
-        .await?
-        .map(|qjob| qjob.try_into())
-        .transpose()?;
-        
-        Ok(job)
+    pub async fn get_next_job_in_queue<F: FairShare>(conn: &mut MySqlConn, queue: &str, fair_share: &F) -> JobResult<Option<Job>> {
+        fair_share.next_job_in_queue(conn, queue).await
     }
 
     /// Try to "claim" the next job in a given queue by settings its state to 'running'
@@ -754,7 +705,7 @@ impl Job {
     /// # See also
     /// - [`Job::claim_next_job_in_queue`] for a version of this function with defaults for `delay` and `ntries`
     /// - [`Job::get_next_job_in_queue`] for a function that does not set the job state to 'running'
-    pub async fn claim_next_job_in_queue_with_opts(conn: &mut MySqlConn, queue: &str, delay: f32, ntries: usize) -> JobResult<Option<Job>> {
+    pub async fn claim_next_job_in_queue_with_opts<F: FairShare>(conn: &mut MySqlConn, queue: &str, fair_share: &F, delay: f32, ntries: usize) -> JobResult<Option<Job>> {
         let delay_val = std::time::Duration::from_secs_f32(delay);
         
         let mut n = 0;
@@ -763,7 +714,7 @@ impl Job {
 
             let mut trans = conn.begin().await?;
 
-            let mut job = match Self::get_next_job_in_queue(&mut trans, queue).await {
+            let mut job = match Self::get_next_job_in_queue(&mut trans, queue, fair_share).await {
                 Ok(Some(j)) => {
                     j
                 },
@@ -803,8 +754,8 @@ impl Job {
     /// 
     /// This is the same as [`Job::claim_next_job_in_queue_with_opts`] with `delay = 1.0` and
     /// `ntries = 5`.
-    pub async fn claim_next_job_in_queue(conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>> {
-        Self::claim_next_job_in_queue_with_opts(conn, queue, 1.0, 5).await
+    pub async fn claim_next_job_in_queue<F: FairShare>(conn: &mut MySqlConn, queue: &str, fair_share: &F) -> JobResult<Option<Job>> {
+        Self::claim_next_job_in_queue_with_opts(conn, queue, fair_share, 1.0, 5).await
     }
 
     /// Convert a user-inputted string of site IDs into a proper vector of site IDs
@@ -1253,6 +1204,52 @@ impl Job {
         Ok(res.rows_affected())
     }
 
+}
+
+#[async_trait]
+pub trait FairShare {
+    async fn next_job_in_queue(&self, conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>>;
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PrioritySubmitFS {}
+
+#[async_trait]
+impl FairShare for PrioritySubmitFS {
+    async fn next_job_in_queue(&self, conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>> {
+        let job: Option<Job>  = sqlx::query_as!(
+            QJob,
+            "SELECT * FROM Jobs WHERE state = ? AND queue = ? ORDER BY priority desc, submit_time LIMIT 1",
+            JobState::Pending,
+            queue
+        ).fetch_optional(conn)
+        .await?
+        .map(|qjob| qjob.try_into())
+        .transpose()?;
+
+        Ok(job)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PsuedoRoundRobinFS {
+    time_period_days: u64
+}
+
+impl Default for PsuedoRoundRobinFS {
+    fn default() -> Self {
+        Self { time_period_days: 14 }
+    }
+}
+
+#[async_trait]
+impl FairShare for PsuedoRoundRobinFS {
+    async fn next_job_in_queue(&self, _conn: &mut MySqlConn, _queue: &str) -> JobResult<Option<Job>> {
+        // My idea for this one is to order the jobs by (1) priority, (2) number of jobs run in the last TIME_PERIOD_DAYS,
+        // then (3) submit time. The idea here is to rotate through users if a bunch of people have requests at the same
+        // time
+        todo!()
+    }
 }
 
 pub async fn cleanup_cancelled_ginput_job(conn: &mut MySqlConn, job: &mut Job) -> JobResult<()> {

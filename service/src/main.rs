@@ -12,6 +12,7 @@ use crate::error::ErrorHandler;
 mod error;
 mod jobs;
 mod met;
+mod stdsitejobs;
 
 static MET_MANAGER: OnceCell<Mutex<met::MetManager<LoggingErrorHandler>>> = OnceCell::const_new();
 

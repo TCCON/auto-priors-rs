@@ -577,12 +577,41 @@ impl Display for DefaultOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobQueueOptions {
     /// The maximum number of processors that this queue can use (default = 1)
-    pub max_num_procs: usize
+    pub max_num_procs: usize,
+
+    /// The fair share policy to use for this queue
+    #[serde(default)]
+    pub fair_share_policy: FairSharePolicy
 }
 
 impl Default for JobQueueOptions {
     fn default() -> Self {
-        Self { max_num_procs: 1 }
+        Self { 
+            max_num_procs: 1,
+            fair_share_policy: Default::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+
+#[serde(tag = "type")]
+pub enum FairSharePolicy {
+    Simple(crate::jobs::PrioritySubmitFS)
+}
+
+impl Default for FairSharePolicy {
+    fn default() -> Self {
+        Self::Simple(crate::jobs::PrioritySubmitFS{})
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::jobs::FairShare for FairSharePolicy {
+    async fn next_job_in_queue(&self, conn: &mut crate::MySqlConn, queue: &str) -> crate::error::JobResult<Option<crate::jobs::Job>> {
+        match self {
+            Self::Simple(policy) => policy.next_job_in_queue(conn, queue).await
+        }
     }
 }
 
@@ -777,8 +806,8 @@ where T: AsRef<Path>
 
     let sub_queue = default_cfg.execution.submitted_job_queue.clone();
     let std_queue = default_cfg.execution.std_site_job_queue.clone();
-    default_cfg.execution.queues.insert(sub_queue, JobQueueOptions { max_num_procs: 4 });
-    default_cfg.execution.queues.insert(std_queue, JobQueueOptions { max_num_procs: 4 });
+    default_cfg.execution.queues.insert(sub_queue, JobQueueOptions { max_num_procs: 4, ..Default::default() });
+    default_cfg.execution.queues.insert(std_queue, JobQueueOptions { max_num_procs: 4, ..Default::default() });
 
     default_cfg.execution.ginput.insert("v1.0.6".to_string(), GinputConfig::Script { entry_point_path: PathBuf::new() });
 

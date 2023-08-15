@@ -329,7 +329,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             let n_total = this_queue.max_num_items;
             info!("Queue '{name}' is running {} of {n_total} allowed jobs", n_total - n_to_add);
             while n_to_add > 0 {
-                let next_job = Job::claim_next_job_in_queue(&mut conn, &name)
+                let next_job = Job::claim_next_job_in_queue(&mut conn, &name, &queue_options.fair_share_policy)
                     .await
                     .with_context(|| format!("Error occurred while trying to claim the next job in queue '{name}'"))?;
 
@@ -908,7 +908,7 @@ mod tests {
         let mut config = orm::config::Config::default();
         config.execution.queues.insert(
             TEST_QUEUE_NAME.to_string(), 
-            orm::config::JobQueueOptions{ max_num_procs: TEST_QUEUE_MAX_NUM_ITEMS }
+            orm::config::JobQueueOptions{ max_num_procs: TEST_QUEUE_MAX_NUM_ITEMS, ..Default::default() }
         );
 
         let (_, rx) = tokio::sync::mpsc::channel(256);
