@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS `StdSiteList` (
   `site_id` char(2) NOT NULL,
   `name` varchar(32) NOT NULL,
   `site_type` enum('Unknown','TCCON','EM27') NOT NULL DEFAULT 'Unknown',
+  `output_structure` enum('FlatModVmr','FlatAll','FlatAllMapNc','TreeModVmr','TreeAll','TreeAllMapNc') NOT NULL DEFAULT 'TreeAll'
   PRIMARY KEY (`id`),
   UNIQUE KEY `site_id` (`site_id`)
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -145,4 +146,5 @@ CREATE OR REPLACE VIEW `v_StdSiteJobs` AS select
   `StdSiteJobs`.`state` AS `state`,
   `StdSiteJobs`.`job` AS `job`,
   `StdSiteJobs`.`tarfile` AS `tarfile`,
-  `StdSiteList`.`site_id` AS `site_id` from (`StdSiteJobs` left join `StdSiteList` on(`StdSiteJobs`.`site` = `StdSiteList`.`id`));
+  `StdSiteList`.`site_id` AS `site_id`,
+  `StdSiteList`.`site_type` AS `site_type` from (`StdSiteJobs` left join `StdSiteList` on(`StdSiteJobs`.`site` = `StdSiteList`.`id`));

@@ -47,3 +47,7 @@ pub async fn update_std_site_job_table(conn: &mut MySqlConn, config: &orm::confi
     ).await?;
     Ok(())
 }
+
+pub async fn add_jobs_for_pending_rows(conn: &mut MySqlConn, config: &orm::config::Config) -> anyhow::Result<()> {
+    stdsitejobs::StdSiteJob::add_jobs_for_pending_rows(conn, config).await
+}

@@ -64,8 +64,10 @@ impl Display for SiteType {
 pub enum StdOutputStructure {
     FlatModVmr = 1,
     FlatAll = 2,
-    TreeModVmr = 3,
-    TreeAll = 4
+    FlatAllMapNc = 3,
+    TreeModVmr = 4,
+    TreeAll = 5,
+    TreeAllMapNc = 6
 }
 
 impl FromStr for StdOutputStructure {
@@ -75,8 +77,10 @@ impl FromStr for StdOutputStructure {
         match s.to_ascii_lowercase().as_str() {
             "flatmodvmr" => Ok(Self::FlatModVmr),
             "flatall" => Ok(Self::FlatAll),
+            "flatallmapnc" => Ok(Self::FlatAllMapNc),
             "treemodvmr" => Ok(Self::TreeModVmr),
             "treeall" => Ok(Self::TreeAll),
+            "treeallmapnc" => Ok(Self::TreeAllMapNc),
             _ => anyhow::bail!("Invalid string for StdOutputStructure: {s}")
         }
     }
@@ -87,8 +91,10 @@ impl Display for StdOutputStructure {
         match self {
             StdOutputStructure::FlatModVmr => write!(f, "FlatModVmr"),
             StdOutputStructure::FlatAll => write!(f, "FlatAll"),
+            StdOutputStructure::FlatAllMapNc => write!(f, "FlatAllMapNc"),
             StdOutputStructure::TreeModVmr => write!(f, "TreeModVmr"),
             StdOutputStructure::TreeAll => write!(f, "TreeAll"),
+            StdOutputStructure::TreeAllMapNc => write!(f, "TreeAllMapNc"),
         }
     }
 }

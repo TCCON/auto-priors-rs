@@ -11,9 +11,9 @@ use serde::Serialize;
 use sqlx::{self, FromRow, Type, Connection};
 
 use crate::config::Config;
+use crate::jobs;
 use crate::met;
 use crate::siteinfo::SiteType;
-use crate::siteinfo::StdSite;
 use crate::utils::DateIterator;
 use crate::MySqlConn;
 use crate::siteinfo;
@@ -275,49 +275,63 @@ impl StdSiteJob {
         Ok(())
     }
 
+    /// Adds jobs needed to generate priors for standard site dates missing their priors
+    /// 
+    /// This will submit one job per date; this allows ginput to reuse certain expensive global calculations
+    /// for every site that needs that day. It requests jobs to generate all the output files, the desired
+    /// files will be selected while the standard site tarballs are created. If there is an error while
+    /// adding the job for a date or assigning that job ID to the table rows in the standard sites job table,
+    /// that job should be rescinded from the jobs table (as each date's database updates are handled in a
+    /// transaction).
     pub async fn add_jobs_for_pending_rows(conn: &mut MySqlConn, config: &Config) -> anyhow::Result<()> {
+        // This will give us a series of records, one per date, that lists the site IDs and std. site job
+        // table row IDs that need jobs for each data. We want to submit one job per date because ginput
+        // can then calculate the EqL interpolators once for all the sites, rather than repeating that
+        // work for every site.
         let query = sqlx::query!(
-            r#"SELECT date,GROUP_CONCAT(DISTINCT site_id SEPARATOR ",") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR ",") AS row_ids FROM v_StdSiteJobs WHERE state = ? GROUP BY date"#,
+            r#"SELECT date,GROUP_CONCAT(DISTINCT site_id SEPARATOR ",") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR ",") AS ids FROM v_stdsitejobs WHERE state = ? GROUP BY date;"#,
             StdSiteJobState::JobNeeded
         ).fetch_all(&mut *conn)
         .await?;
 
-        // TODO: need to figure out how to ensure the right rows get the right job.
-        // I think grouping the query by site type as well should help:
-        // SELECT date,site_type,GROUP_CONCAT(DISTINCT site_id SEPARATOR ",") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR ",") AS ids FROM v_stdsitejobs WHERE state = 0 GROUP BY date,site_type;
-        // The only problem is if there is a case where we do a site that isn't needed, but we shouldn't
-
         for rec in query {
-            if let Some(site_ids) = rec.site_ids {
-                let date = rec.date;
-                let row_ids: Vec<_> = rec.row_ids
-                    .ok_or_else(|| anyhow::anyhow!("Inconsistent return from database: got site ID in query for distinct standard site days needing jobs, but not row ids"))?
-                    .split(",")
-                    .map(|s| s.parse::<i32>())
+            if let (Some(s_sids), Some(rids)) = (rec.site_ids, rec.ids) {
+                let sids = s_sids.split(",").collect_vec();
+                let rids: Vec<i32> = rids.split(",")
+                    .map(|v| v.parse())
                     .try_collect()
-                    .context("Unable to parse joined row IDs back into integers")?;
+                    .with_context(|| format!("Could not convert standard site job table row IDs back from string for date {} (this shouldn't happen)", rec.date))?;
+
+                // For all the jobs, we'll just make all the possible output files, then put only the ones we want
+                // into the tarballs later. This way we can still use one job per date, rather than splitting that
+                // job up by what the different sites want.
+                let mut trans = conn.begin().await?;
+
+                let job_id = jobs::Job::add_job_from_args(
+                    &mut trans, 
+                    sids.iter().map(|s| s.to_string()).collect_vec(), 
+                    rec.date, 
+                    rec.date + Duration::days(1), 
+                    config.execution.output_path.clone(), 
+                    None, 
+                    vec![None; sids.len()], 
+                    vec![None; sids.len()], 
+                    &config.execution.std_site_job_queue, 
+                    Some(jobs::ModFmt::Text), 
+                    Some(jobs::VmrFmt::Text), 
+                    Some(jobs::MapFmt::TextAndNetCDF), 
+                    None, 
+                    None, 
+                    Some(jobs::TarChoice::No)
+                ).await.with_context(|| format!("Error occurred while adding standard sites job for date {}", rec.date))?;
                 
-                // Need to split into TCCON and EM27 sites because they have different needs (EM27s might need .map files)
-                let mut tccon_site_ids = vec![];
-                let mut em27_site_ids = vec![];
-                let mut unknown_site_ids = vec![];
-                for sid in site_ids.split(",") {
-                    let site = StdSite::get_by_site_id(conn, sid).await?
-                        .map(|s| s.site_type);
-
-                    match site {
-                        Some(SiteType::TCCON) => tccon_site_ids.push(sid),
-                        Some(SiteType::EM27) => em27_site_ids.push(sid),
-                        Some(SiteType::Unknown) => {
-                            warn!("Site {sid} unknown type, defaulting to producing all files");
-                            unknown_site_ids.push(sid);
-                        },
-                        None => warn!("Side {sid} not defined in standard sites, skipping generation")
-                    }
-                    
+                for rid in rids {
+                    Self::set_job_by_id(&mut trans, rid, job_id).await
+                    .with_context(|| format!("Error occurred while trying to update standard site job table row {rid} with job ID {job_id}"))?;
                 }
-
-
+                
+                trans.commit().await?;
+                info!("Created job #{job_id} for standard sites {s_sids} on date {}", rec.date);
 
             }
         }
@@ -411,6 +425,18 @@ impl StdSiteJob {
         };
 
         Ok(q.rows_affected())
+    }
+
+    pub async fn set_job_by_id(conn: &mut MySqlConn, row_id: i32, job_id: i32) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE StdSiteJobs SET state = ?, job = ? WHERE id = ?",
+            StdSiteJobState::InProgress,
+            job_id,
+            row_id
+        ).execute(conn)
+        .await?;
+
+        Ok(())
     }
 
     /// Update the state of this instance and the corresponding row in the database.

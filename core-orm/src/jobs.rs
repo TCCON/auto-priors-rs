@@ -255,7 +255,9 @@ pub enum MapFmt {
     /// **\[default\]** Create text `.map` files. String representation = `"Text"`.
     Text,
     /// Create netCDF4 `.map` files. String representation = `"NetCDF"`.
-    NetCDF
+    NetCDF,
+    /// Create both text and netCDF files. String representation = "TxtAndNc"
+    TextAndNetCDF
 }
 
 impl Default for MapFmt {
@@ -270,7 +272,8 @@ impl Display for MapFmt {
         let s = match self {
             MapFmt::None => "None".to_owned(),
             MapFmt::Text => "Text".to_owned(),
-            MapFmt::NetCDF => "NetCDF".to_owned()
+            MapFmt::NetCDF => "NetCDF".to_owned(),
+            MapFmt::TextAndNetCDF => "TxtAndNc".to_owned()
         };
 
         write!(f, "{s}")
@@ -292,6 +295,7 @@ impl FromStr for MapFmt {
             "none" => Ok(Self::None),
             "text" => Ok(Self::Text),
             "netcdf" => Ok(Self::NetCDF),
+            "txtandnc" => Ok(Self::TextAndNetCDF),
             _ => Err(JobError::InvalidMapFmt(s.to_owned()))
         }
     }

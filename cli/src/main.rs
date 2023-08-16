@@ -239,8 +239,8 @@ async fn main() -> anyhow::Result<()> {
         },
 
         Commands::StdSiteJobs( StdSiteJobCli { command: StdSiteJobActions::AddJobs } ) => {
-            // let mut conn = db.get_connection().await?;
-            todo!();
+            let mut conn = db.get_connection().await?;
+            stdsites::add_jobs_for_pending_rows(&mut conn, &config).await?;
         },
 
         Commands::StdSiteJobs( StdSiteJobCli { command: StdSiteJobActions::TarFiles } ) => {
