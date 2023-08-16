@@ -2,7 +2,7 @@ use std::str::FromStr;
 use anyhow;
 use chrono::NaiveDate;
 use clap::{self,Args, Subcommand};
-use orm::{self, siteinfo::{SiteType, StdSite, SiteInfo}, MySqlConn};
+use orm::{self, siteinfo::{SiteType, StdSite, SiteInfo, StdOutputStructure}, MySqlConn};
 use sqlx::Connection;
 use tabled::Table;
 
@@ -123,14 +123,28 @@ pub struct EditSiteCli {
 
     /// If given, the new type (TCCON or EM27) for this site
     #[clap(long="type")]
-    site_type: Option<SiteType>
+    site_type: Option<SiteType>,
+
+    /// If given, the new output structure ("FlatModVmr", "FlatAll", "TreeModVmr", or "TreeAll")
+    /// for this site. The "Flat" structures will put all the files in the root of the tarball,
+    /// while the "Tree" structure retain ginputs `fpit/xx/*` directory structure. The "ModVmr"
+    /// options only keep the `.mod` and `.vmr` files, while the "All" structures include the 
+    /// `.map` files as well.
+    #[clap(long="output")]
+    output_structure: Option<StdOutputStructure>
 }
 
 pub async fn edit_std_site_cli(conn: &mut MySqlConn, args: EditSiteCli) -> anyhow::Result<()> {
-    edit_std_site(conn, &args.site_id, args.site_name, args.site_type).await
+    edit_std_site(conn, &args.site_id, args.site_name, args.site_type, args.output_structure).await
 }
 
-pub async fn edit_std_site(conn: &mut MySqlConn, site_id: &str, site_name: Option<String>, site_type: Option<SiteType>) -> anyhow::Result<()> {
+pub async fn edit_std_site(
+    conn: &mut MySqlConn, 
+    site_id: &str, 
+    site_name: Option<String>, 
+    site_type: Option<SiteType>,
+    output_structure: Option<StdOutputStructure>,
+    ) -> anyhow::Result<()> {
     let mut trans = conn.begin().await?;
 
     let mut site = if let Some(s) = StdSite::get_by_site_id(&mut trans, site_id).await? {
@@ -146,6 +160,10 @@ pub async fn edit_std_site(conn: &mut MySqlConn, site_id: &str, site_name: Optio
 
     if let Some(typ) = site_type {
         site.set_type(&mut trans, typ).await?;
+    }
+
+    if let Some(out_struct) = output_structure {
+        site.set_output_structure(&mut trans, out_struct).await?;
     }
 
     trans.commit().await?;

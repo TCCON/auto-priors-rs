@@ -3,6 +3,7 @@ use std::{collections::HashMap, str::FromStr, borrow::Cow, fmt::Display};
 
 use anyhow::{self, Context};
 use chrono::{NaiveDate, Duration};
+use itertools::Itertools;
 use log::error;
 use serde::Serialize;
 use sqlx::{self, FromRow, Type, Connection};
@@ -58,6 +59,40 @@ impl Display for SiteType {
     }
 }
 
+#[derive(Debug, Type, Clone, Copy)]
+#[repr(i8)]  // NB: SQL enums start at 1
+pub enum StdOutputStructure {
+    FlatModVmr = 1,
+    FlatAll = 2,
+    TreeModVmr = 3,
+    TreeAll = 4
+}
+
+impl FromStr for StdOutputStructure {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "flatmodvmr" => Ok(Self::FlatModVmr),
+            "flatall" => Ok(Self::FlatAll),
+            "treemodvmr" => Ok(Self::TreeModVmr),
+            "treeall" => Ok(Self::TreeAll),
+            _ => anyhow::bail!("Invalid string for StdOutputStructure: {s}")
+        }
+    }
+}
+
+impl Display for StdOutputStructure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StdOutputStructure::FlatModVmr => write!(f, "FlatModVmr"),
+            StdOutputStructure::FlatAll => write!(f, "FlatAll"),
+            StdOutputStructure::TreeModVmr => write!(f, "TreeModVmr"),
+            StdOutputStructure::TreeAll => write!(f, "TreeAll"),
+        }
+    }
+}
+
 
 /// A struct representing a standard (permanent) TCCON, EM27, or other site.
 #[derive(Debug, Tabled)]
@@ -69,12 +104,18 @@ pub struct StdSite {
     /// The long form name for this site
     pub name: String,
     /// Whether this is a TCCON, EM27, or other site type.
-    pub site_type: SiteType
+    pub site_type: SiteType,
+    /// How this site expects the output tarballs' file structure to be organized
+    pub output_structure: StdOutputStructure
 }
 
-impl From<QStdSite> for StdSite {
-    fn from(obj: QStdSite) -> Self {
-        StdSite { id: obj.id, site_id: obj.site_id, name: obj.name, site_type: SiteType::from(obj.site_type) }
+impl TryFrom<QStdSite> for StdSite {
+    type Error = anyhow::Error;
+
+    fn try_from(value: QStdSite) -> Result<Self, Self::Error> {
+        let output_structure = StdOutputStructure::from_str(&value.output_structure)?;
+        Ok(Self { id: value.id, site_id: value.site_id, name: value.name, site_type: SiteType::from(value.site_type), output_structure })
+        
     }
 }
 
@@ -145,7 +186,7 @@ impl StdSite {
         ).fetch_one(conn)
         .await?;
         
-        Ok(Self::from(new_site))
+        Self::try_from(new_site)
     }
 
     /// Retrieve a list of standard sites, optionally filtered by site type
@@ -164,9 +205,9 @@ impl StdSite {
         };
 
         let sites = qsites.into_iter()
-            .map(|q| q.into())
-            .collect();
-        Ok(sites)
+            .map(|q| q.try_into())
+            .try_collect();
+        sites
     }
 
     pub async fn get_by_site_id(conn: &mut MySqlConn, site_id: &str) -> anyhow::Result<Option<Self>> {
@@ -176,7 +217,8 @@ impl StdSite {
             site_id
         ).fetch_optional(conn)
         .await?
-        .map(StdSite::from);
+        .map(StdSite::try_from)
+        .transpose()?;
 
         Ok(site)
     }
@@ -204,6 +246,18 @@ impl StdSite {
         self.site_type = site_type;
         Ok(())
     }
+
+    pub async fn set_output_structure(&mut self, conn: &mut MySqlConn, output_structure: StdOutputStructure) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE StdSiteList SET output_structure = ? WHERE id = ?",
+            output_structure,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.output_structure = output_structure;
+        Ok(())
+    }
 }
 
 
@@ -215,7 +269,8 @@ struct QStdSite {
     id: i32,
     site_id: String,
     name: String,
-    site_type: String
+    site_type: String,
+    output_structure: String,
 }
 
 /// A structure representing a single information row for a standard site
@@ -291,7 +346,7 @@ impl SiteInfo {
             ).fetch_one(conn)
             .await?;
 
-        Ok(StdSite::from(result))
+        StdSite::try_from(result)
     }
 
     /// Create a JSON string representing a list of SiteInfo instances

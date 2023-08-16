@@ -8,7 +8,7 @@ edition = "2021"
 anyhow.workspace = true
 async-trait.workspace = true
 chrono = {workspace = true, features = ["serde"]}
-dotenv = "0.15.0"
+dotenv.workspace = true
 futures = "0.3"
 hostname = "0.3"
 itertools = "0.10.3"

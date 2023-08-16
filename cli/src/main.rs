@@ -138,6 +138,11 @@ async fn main() -> anyhow::Result<()> {
 
     debug!("Log level set to DEBUG");
     let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
+    if let Some(cf) = &config_file {
+        debug!("Loading configuration from {}", cf.to_string_lossy());
+    } else {
+        debug!("Will use default config");
+    }
     let config = orm::config::load_config_file_or_default(config_file)?;
     let db_url = orm::get_database_url(None)?;
     let db = orm::get_database_pool(Some(db_url.clone())).await.unwrap();

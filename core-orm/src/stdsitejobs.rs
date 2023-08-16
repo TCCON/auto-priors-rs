@@ -38,6 +38,8 @@ pub enum StdSiteJobState {
     Complete = 2,
 }
 
+// TODO: update the database converter tool to properly map the old states to match the new ones (complete = 1 in old, 2 in new)
+
 impl Default for StdSiteJobState {
     fn default() -> Self {
         return Self::Unknown

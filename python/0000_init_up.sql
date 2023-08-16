@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS Jobs (
 CREATE TABLE IF NOT EXISTS StdSiteList (
     id INT PRIMARY KEY AUTO_INCREMENT,
     site_id CHAR(2) NOT NULL UNIQUE,
-    site_type ENUM('Unknown', 'TCCON', 'EM27') NOT NULL DEFAULT 'Unknown'
+    site_type ENUM('Unknown', 'TCCON', 'EM27') NOT NULL DEFAULT 'Unknown',
+    output_structure ENUM('FlatModVmr', 'FlatAll', 'TreeModVmr', 'TreeAll') NOT NULL DEFAULT 'TreeAll'
 ) DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS StdSiteInfo (
@@ -74,7 +75,7 @@ CREATE TABLE IF NOT EXISTS StdSiteJobs (
 
 CREATE OR REPLACE VIEW v_StdSiteJobs
 AS
-SELECT StdSiteJobs.*, StdSiteList.site_id, StdSiteList.site_type FROM
+SELECT StdSiteJobs.*, StdSiteList.site_id, StdSiteList.site_type, StdSiteList.output_structure FROM
 StdSiteJobs LEFT JOIN StdSiteList ON StdSiteJobs.site = StdSiteList.id;
 
 -- If we knew what sites were possible ahead of time

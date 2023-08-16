@@ -7,7 +7,7 @@ edition = "2021"
 anyhow.workspace = true
 clap = {version = "3.2", features = ["derive"]}
 clap-verbosity-flag = "1.0"
-dotenv = "0.15"
+dotenv.workspace = true
 env_logger.workspace = true
 chrono.workspace = true
 log.workspace = true

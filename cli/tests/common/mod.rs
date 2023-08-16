@@ -45,7 +45,7 @@ pub(crate) fn get_test_db_url() -> anyhow::Result<String> {
     // First, try the regular environmental variables
     for key in TEST_DB_ENV_VARS {
         if let Ok(val) = env::var(key) {
-            log::info!("Using database URL {val} from the environmental variable {key}");
+            log::debug!("Using database URL {val} from the environmental variable {key}");
             return Ok(val)
         }
     }
@@ -55,7 +55,7 @@ pub(crate) fn get_test_db_url() -> anyhow::Result<String> {
     for key in TEST_DB_ENV_VARS {
         if let Ok(val) = dotenv::var(key) {
             let epd = env_path.display();
-            log::info!("Using database URL {val} from the variable {key} in {epd}");
+            log::debug!("Using database URL {val} from the variable {key} in {epd}");
             return Ok(val)
         }
     }
