@@ -22,8 +22,10 @@ pub enum StdSiteJobActions {
     TarFiles
 }
 
+/// Update the standard site jobs table: add rows for new site-days possible 
 #[derive(Debug, Args)]
 pub struct UpdateTableCli {
+    #[clap(short='b', long)]
     not_before: Option<NaiveDate>
 }
 

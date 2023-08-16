@@ -98,6 +98,16 @@ impl From<QStdSiteJob> for StdSiteJob {
 
 impl StdSiteJob {
     pub async fn update_std_site_job_table(conn: &mut MySqlConn, config: &Config, not_before: Option<NaiveDate>) -> anyhow::Result<()> {
+        let first_date = if let Some(d) = not_before {
+            d
+        } else if let Some(d) = met::MetFile::get_first_complete_day_for_default_mets(conn, config).await
+        .context("Error occurred while trying to identify the first complete day for default meteorologies")? {
+            d
+        } else {
+            warn!("No available met data, nothing to be done to update the standard sites table");
+            return Ok(());
+        };
+
         let last_met_date = if let Some(d) = met::MetFile::get_last_complete_date_for_default_mets(conn, config).await
             .context("Error occurred while trying to identify the last complete day for default meteorologies")? {
                 d
@@ -106,7 +116,7 @@ impl StdSiteJob {
                 return Ok(());
             };
 
-        Self::fill_missing_dates_for_all_sites(conn, last_met_date, not_before).await
+        Self::fill_missing_dates_for_all_sites(conn, first_date, last_met_date).await
             .map_err(|e| {
                 let n = e.len();
                 let msg = e.into_iter()
@@ -137,7 +147,7 @@ impl StdSiteJob {
         return Ok(())
     }
 
-    pub async fn fill_missing_dates_for_site(conn: &mut MySqlConn, site_id: &str, last_met_date: NaiveDate, not_before: Option<NaiveDate>) -> anyhow::Result<()> {
+    pub async fn fill_missing_dates_for_site(conn: &mut MySqlConn, site_id: &str, first_date: NaiveDate, last_met_date: NaiveDate) -> anyhow::Result<()> {
         // First we get dates for which there is already an entry (in any state) for this site in the table
         let extant_site_dates: HashSet<_> = sqlx::query!(
             "SELECT date FROM v_StdSiteJobs WHERE site_id = ?",
@@ -176,7 +186,7 @@ impl StdSiteJob {
         // Last, we insert an "JobNeeded" entry for this site & date for each date missing. 
         // We could use a transaction here, but it's not actually critical that we revert if only some 
         // adds fail.  We don't worry about missing met here, we'll do that when we submit jobs
-        let date_iter = DateIterator::new_with_bounds(date_ranges, not_before, Some(last_met_date + Duration::days(1)));
+        let date_iter = DateIterator::new_with_bounds(date_ranges, Some(first_date), Some(last_met_date + Duration::days(1)));
 
         let mut ndates = 0;
         for date in date_iter {
@@ -198,12 +208,12 @@ impl StdSiteJob {
     /// 
     /// Note that this will try all sites, even if an error occurs while processing one. If any site errors, the returned `Err`
     /// will contain the individual error messages from each site. 
-    pub async fn fill_missing_dates_for_all_sites(conn: &mut MySqlConn, last_met_date: NaiveDate, not_before: Option<NaiveDate>) -> Result<(), Vec<(String, anyhow::Error)>> {
+    pub async fn fill_missing_dates_for_all_sites(conn: &mut MySqlConn, first_date: NaiveDate, last_met_date: NaiveDate) -> Result<(), Vec<(String, anyhow::Error)>> {
         let site_ids = siteinfo::StdSite::get_site_ids(conn, None).await
             .map_err(|e| vec![("all".to_string(), e)])?;
         let mut errors = Vec::new();
         for site_id in site_ids {
-            if let Err(e) = Self::fill_missing_dates_for_site(conn, &site_id, last_met_date, not_before).await {
+            if let Err(e) = Self::fill_missing_dates_for_site(conn, &site_id, first_date, last_met_date).await {
                 errors.push((site_id, e))
             }
         }
@@ -238,7 +248,7 @@ impl StdSiteJob {
             njobs += 1;
         }
 
-        info!("{njobs} rows in StdSiteJobs changed from 'RegeNeeded' to 'JobNeeded' (outputs cleared if they were present)");
+        info!("{njobs} rows in StdSiteJobs changed from 'RegenNeeded' to 'JobNeeded' (outputs cleared if they were present)");
         Ok(())
     }
 
@@ -295,13 +305,28 @@ impl StdSiteJob {
         .await?;
 
         for rec in query {
-            if let (Some(s_sids), Some(rids)) = (rec.site_ids, rec.ids) {
-                let sids = s_sids.split(",").collect_vec();
-                let rids: Vec<i32> = rids.split(",")
-                    .map(|v| v.parse())
-                    .try_collect()
-                    .with_context(|| format!("Could not convert standard site job table row IDs back from string for date {} (this shouldn't happen)", rec.date))?;
+            // Really the site_ids and ids values should never be None; the way the above query works, we should only get a record if there are rows with sites that 
+            // need a job. However, we can't prove that the GROUP_CONCAT operation will produce something, so we double check that these aren't Nones. Also, we return
+            // an error instead of panicking because we don't want to crash the service if this does happen, we want to log it so we can fix it.
+            let sids = rec.site_ids.as_deref()
+                .ok_or_else(|| anyhow::anyhow!("No site IDs collected needing jobs for date {} in standard site jobs table; this may mean a standard site is missing a location or otherwise defined incorrectly in the database", rec.date))?
+                .split(",").collect_vec();
 
+            let rids: Vec<i32> = rec.ids
+                .ok_or_else(|| anyhow::anyhow!("No row IDs collected needing jobs for date {} in standard site jobs table; this may mean a standard site is missing a location or otherwise defined incorrectly in the database", rec.date))?
+                .split(",")
+                .map(|v| v.parse())
+                .try_collect()
+                .with_context(|| format!("Could not convert standard site job table row IDs back from string for date {} (this shouldn't happen)", rec.date))?;
+                
+            if !crate::met::MetFile::is_date_complete_for_default_mets(conn, config, rec.date).await?.is_complete() {
+                warn!("Default meteorology not available for {}, setting these rows' states to MissingMet", rec.date);
+                for rid in rids {
+                    Self::set_state_by_id(conn, StdSiteJobState::MissingMet, rid).await
+                        .with_context(|| format!("Error occurred while setting row {rid} in the standard site jobs table to state 'MissingMet'"))?;
+                }
+
+            } else {
                 // For all the jobs, we'll just make all the possible output files, then put only the ones we want
                 // into the tarballs later. This way we can still use one job per date, rather than splitting that
                 // job up by what the different sites want.
@@ -331,6 +356,7 @@ impl StdSiteJob {
                 }
                 
                 trans.commit().await?;
+                let s_sids = rec.site_ids.as_deref().unwrap_or("?");
                 info!("Created job #{job_id} for standard sites {s_sids} on date {}", rec.date);
 
             }
@@ -439,15 +465,20 @@ impl StdSiteJob {
         Ok(())
     }
 
-    /// Update the state of this instance and the corresponding row in the database.
-    pub async fn set_state(&mut self, state: StdSiteJobState, conn: &mut MySqlConn) -> anyhow::Result<()> {
+    pub async fn set_state_by_id(conn: &mut MySqlConn, state: StdSiteJobState, row_id: i32) -> anyhow::Result<()> {
         sqlx::query!(
             "UPDATE StdSiteJobs SET state = ? WHERE id = ?",
             state,
-            self.id
+            row_id
         ).execute(conn)
         .await?;
 
+        Ok(())
+    }
+
+    /// Update the state of this instance and the corresponding row in the database.
+    pub async fn set_state(&mut self, state: StdSiteJobState, conn: &mut MySqlConn) -> anyhow::Result<()> {
+        Self::set_state_by_id(conn, state, self.id).await?;
         self.state = state;
         Ok(())
     }

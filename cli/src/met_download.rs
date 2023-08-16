@@ -173,7 +173,7 @@ async fn get_date_iter_for_specified_met(
     let start_date = if let Some(d) = start_date {
         // the user provided start date takes precedence
         Some(d)
-    } else if let Some(d) = orm::met::MetFile::get_last_complete_date_for_config_set(conn, dl_cfgs).await? {
+    } else if let Some(d) = orm::met::MetFile::get_first_or_last_complete_date_for_config_set(conn, dl_cfgs, false).await? {
         // if that's not available, assume we want to start with the day after the last date for which we have this met
         // data for
         Some(d + Duration::days(1))

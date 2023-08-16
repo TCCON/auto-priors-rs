@@ -24,6 +24,15 @@ impl AsRef<str> for MetDayState {
     }
 }
 
+impl MetDayState {
+    pub fn is_complete(&self) -> bool {
+        match self {
+            Self::Complete => true,
+            Self::Incomplete | Self::Missing => false
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub enum MetProduct {
@@ -210,6 +219,30 @@ impl MetFile {
         Ok(1440 / cfg.file_freq_min)
     }
 
+    pub async fn get_first_complete_date_for_config(conn: &mut MySqlConn, cfg: &config::DownloadConfig) -> anyhow::Result<Option<NaiveDate>> {
+        let n_expected = Self::num_expected_daily_files(cfg)?;
+
+        trace!("Querying first complete date ({n_expected} files) for {}, {}, {}", cfg.levels, cfg.data_type, cfg.product);
+        let this_min_date = sqlx::query!(
+            r#"SELECT MIN(tbl.date) as min_date
+                FROM (
+                    SELECT DATE(filedate) AS date,COUNT(filedate) AS count
+                    FROM MetFiles
+                    WHERE levels = ? AND data_type = ? AND product = ?
+                    GROUP BY DATE(filedate)
+                ) AS tbl
+                WHERE tbl.count = ?"#,
+            cfg.levels.to_string(),
+            cfg.data_type.to_string(),
+            cfg.product.to_string(),
+            n_expected
+        ).fetch_one(conn)
+        .await?
+        .min_date;
+
+        Ok(this_min_date)
+    }
+
     /// Given a configuration for downloading reanalysis data, find the last date for which that data was downloaded
     /// 
     /// This is most useful for figuring out  data needs downloaded. To figure out if all the different data sets
@@ -243,26 +276,32 @@ impl MetFile {
         Ok(this_max_date)
     }
 
-    /// Given a list of reanalysis download configurations, find the last date where all the data sets were downloaded.
+    /// Given a list of reanalysis download configurations, find the first or last date where all the data sets were downloaded.
     /// 
-    /// This is meant for finding the last date that the priors can be generated for. To figure out the last date a
-    /// specific reanalysis data set was downloaded for, use [`get_last_complete_date_for_config`]
+    /// This is meant for finding the first or last date that the priors can be generated for. To figure out the first or last date a
+    /// specific reanalysis data set was downloaded for, use [`get_first_complete_date_for_config`] or [`get_last_complete_date_for_config`].
     /// 
     /// # Returns
     /// The most recent date for which all the datasets specified by `cfgs` are complete. There can be several cases:
     /// 
     /// 1. If none of those datasets have any data downloaded, returns `None` 
     /// 2. If some (but not all) of those datasets have data downloaded, still returns `None` but prints a warning
-    /// 3. If all those datasets have data downloaded, but the end dates differ, returns the earliest end date and
-    ///    prints a warning.
-    /// 4. If all those datasets have data downloaded through the same date, returns that date.
+    /// 3. If all those datasets have data downloaded, but the start or end dates differ, returns the latest start date or earliest 
+    ///    end date and prints a warning.
+    /// 4. If all those datasets have same start or end date, return that date.
     /// 
     /// This will return an `Err` if the database query fails.
-    pub async fn get_last_complete_date_for_config_set(conn: &mut MySqlConn, cfgs: &[config::DownloadConfig]) -> anyhow::Result<Option<NaiveDate>> {
+    pub async fn get_first_or_last_complete_date_for_config_set(conn: &mut MySqlConn, cfgs: &[config::DownloadConfig], first: bool) -> anyhow::Result<Option<NaiveDate>> {
         let mut dates = vec![];
         for cfg in cfgs {
-            if let Some(d) = Self::get_last_complete_date_for_config(conn, cfg).await? {
-                debug!("Last complete day for {cfg} was {d}");
+            let (descr, opt_date) = if first {
+                ("First", Self::get_first_complete_date_for_config(conn, cfg).await?)
+            } else {
+                ("Last", Self::get_last_complete_date_for_config(conn, cfg).await?)
+            };
+
+            if let Some(d) = opt_date {
+                debug!("{descr} complete day for {cfg} was {d}");
                 dates.push(d);
             }else{
                 debug!("No complete days found for {cfg}");
@@ -280,16 +319,47 @@ impl MetFile {
             return Ok(None)
         }
 
-        // Case 3: not all of the dates are the same so issue a warning and return the earliest date
+        // Case 3: not all of the dates are the same so issue a warning and return the earliest/latest date
+        // Case 4: all products have the same first/last time
         // We know that there is at least one date so this is okay to unwrap
-        let earliest_date = dates.iter().min().unwrap().to_owned();
-        if !dates.iter().all(|&d| d == earliest_date) {
-            warn!("While trying to identify the last complete date of meteorology, the required products had different final dates, so defaulting to the earliest.");
-            return Ok(Some(earliest_date));
+        if first {
+            let latest_first_date = dates.iter().max().unwrap().to_owned();
+            if !dates.iter().all(|&d| d == latest_first_date) {
+                warn!("While trying to identify the first complete date of meteorology, the required products had different initial dates, so defaulting to the latest.");
+            }
+            Ok(Some(latest_first_date))
+        } else {
+            let earliest_last_date = dates.iter().min().unwrap().to_owned();
+            if !dates.iter().all(|&d| d == earliest_last_date) {
+                warn!("While trying to identify the last complete date of meteorology, the required products had different final dates, so defaulting to the earliest.");
+            }
+            return Ok(Some(earliest_last_date));
         }
-        
-        // Case 4: all products have the same last time.
-        Ok(Some(earliest_date))
+
+    }
+
+    /// Get the most first date for which the meteorology files expected based on the default options are all available.
+    /// 
+    /// Because different time periods may use different meteorology, figuring out the most first day for which we can generate
+    /// priors requires knowing which met files to check for. This function uses the defined default options to check for the first
+    /// day with all the needed met files.
+    /// 
+    /// # Returns
+    /// - `Ok(Some(date))` if it finds a date with all the needed met files
+    /// - `Ok(None)` if no dates have all the needed met files
+    /// - `Err` if any database queries fail or any of the default option sets defined in the configuration overlap in time.
+    pub async fn get_first_complete_day_for_default_mets(conn: &mut MySqlConn, cfg: &config::Config) -> anyhow::Result<Option<NaiveDate>> {
+        let option_sets = cfg.get_all_defaults_check_overlap()?;
+        // Since these are date-ordered and do not overlap, we know we can start from the first set and check for complete met data
+        for options in option_sets.iter() {
+            let met_key = &options.met;
+            let met_configs = cfg.get_met_configs(met_key)?;
+            if let Some(first_date) = Self::get_first_or_last_complete_date_for_config_set(conn, met_configs, true).await? {
+                return Ok(Some(first_date))
+            }
+        }
+
+        Ok(None)
     }
 
     /// Get the most recent date for which the meteorology files expected based on the default options are all available.
@@ -308,7 +378,7 @@ impl MetFile {
         for options in option_sets.iter().rev() {
             let met_key = &options.met;
             let met_configs = cfg.get_met_configs(met_key)?;
-            if let Some(last_date) = Self::get_last_complete_date_for_config_set(conn, met_configs).await? {
+            if let Some(last_date) = Self::get_first_or_last_complete_date_for_config_set(conn, met_configs, false).await? {
                 return Ok(Some(last_date))
             }
         }
