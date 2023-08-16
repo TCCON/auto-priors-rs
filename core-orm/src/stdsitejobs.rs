@@ -123,7 +123,7 @@ impl StdSiteJob {
                 return Ok(());
             };
 
-        Self::fill_missing_dates_for_all_sites(conn, first_date, last_met_date).await
+        Self::fill_missing_dates_for_all_sites(conn, config, first_date, last_met_date).await
             .map_err(|e| {
                 let n = e.len();
                 let msg = e.into_iter()
@@ -140,9 +140,9 @@ impl StdSiteJob {
         Ok(())
     }
 
-    pub async fn add_std_site_job_row_from_args(conn: &mut MySqlConn, site_id: &str, date: NaiveDate, state: StdSiteJobState, job: Option<i32>) -> anyhow::Result<()> {
+    pub async fn add_std_site_job_row_from_args(conn: &mut MySqlConn, site_id: &str, date: NaiveDate, state: StdSiteJobState, job: Option<i32>) -> anyhow::Result<i32> {
         let site_prim_key = siteinfo::StdSite::site_id_to_primary_key(conn, site_id).await?;
-        sqlx::query!(
+        let res = sqlx::query!(
             "INSERT INTO StdSiteJobs (site, date, state, job) VALUES (?, ?, ?, ?)",
             site_prim_key,
             date,
@@ -151,10 +151,12 @@ impl StdSiteJob {
         ).execute(conn)
         .await?;
 
-        return Ok(())
+        let rid: i32 = res.last_insert_id().try_into()?;
+
+        return Ok(rid)
     }
 
-    pub async fn fill_missing_dates_for_site(conn: &mut MySqlConn, site_id: &str, first_date: NaiveDate, last_met_date: NaiveDate) -> anyhow::Result<()> {
+    pub async fn fill_missing_dates_for_site(conn: &mut MySqlConn, config: &Config, site_id: &str, first_date: NaiveDate, last_met_date: NaiveDate) -> anyhow::Result<()> {
         // First we get dates for which there is already an entry (in any state) for this site in the table
         let extant_site_dates: HashSet<_> = sqlx::query!(
             "SELECT date FROM v_StdSiteJobs WHERE site_id = ?",
@@ -198,9 +200,17 @@ impl StdSiteJob {
         let mut ndates = 0;
         for date in date_iter {
             if !extant_site_dates.contains(&date) {
-                Self::add_std_site_job_row_from_args(conn, site_id, date, StdSiteJobState::JobNeeded, None).await?;
+                let rid = Self::add_std_site_job_row_from_args(conn, site_id, date, StdSiteJobState::JobNeeded, None).await?;
                 ndates += 1;
-            }
+
+                if !crate::met::MetFile::is_date_complete_for_default_mets(conn, config, date).await?.is_complete() {
+                    warn!("Missing met data for date {}, setting standard site job table row for site {site_id} to 'MissingMet'", date);
+                    Self::set_state_by_id(conn, StdSiteJobState::MissingMet, rid).await
+                            .with_context(|| format!("Error occurred while setting row {rid} in the standard site jobs table to state 'MissingMet'"))?;
+                }
+            };
+
+            
         }
 
         info!("{ndates} row in StdSiteJobs added for site {site_id}");
@@ -215,12 +225,12 @@ impl StdSiteJob {
     /// 
     /// Note that this will try all sites, even if an error occurs while processing one. If any site errors, the returned `Err`
     /// will contain the individual error messages from each site. 
-    pub async fn fill_missing_dates_for_all_sites(conn: &mut MySqlConn, first_date: NaiveDate, last_met_date: NaiveDate) -> Result<(), Vec<(String, anyhow::Error)>> {
+    pub async fn fill_missing_dates_for_all_sites(conn: &mut MySqlConn, config: &Config, first_date: NaiveDate, last_met_date: NaiveDate) -> Result<(), Vec<(String, anyhow::Error)>> {
         let site_ids = siteinfo::StdSite::get_site_ids(conn, None).await
             .map_err(|e| vec![("all".to_string(), e)])?;
         let mut errors = Vec::new();
         for site_id in site_ids {
-            if let Err(e) = Self::fill_missing_dates_for_site(conn, &site_id, first_date, last_met_date).await {
+            if let Err(e) = Self::fill_missing_dates_for_site(conn, config, &site_id, first_date, last_met_date).await {
                 errors.push((site_id, e))
             }
         }
@@ -344,7 +354,7 @@ impl StdSiteJob {
                     sids.iter().map(|s| s.to_string()).collect_vec(), 
                     rec.date, 
                     rec.date + Duration::days(1), 
-                    config.execution.output_path.clone(), 
+                    config.execution.std_sites_output_base.clone(), 
                     None, 
                     vec![None; sids.len()], 
                     vec![None; sids.len()], 

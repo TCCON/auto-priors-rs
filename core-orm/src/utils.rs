@@ -210,6 +210,10 @@ impl DateIterator {
         Self { date_ranges, curr_date: None, range_idx: 0, not_before: None, not_after: None, first: true }
     }
 
+    pub fn new_one_range(start_date: NaiveDate, end_date: NaiveDate) -> Self {
+        Self::new(vec![(start_date, end_date)])
+    }
+
     /// Create a new date iterator that will skip dates before and/or after given dates
     /// 
     /// # Inputs

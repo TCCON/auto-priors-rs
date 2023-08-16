@@ -143,7 +143,6 @@ impl StdOutputStructure {
     }
 
     pub fn get_files_for_tarball(&self, job: &Job, site_id: Option<&str>) -> anyhow::Result<Vec<(PathBuf, PathBuf)>> {
-        // TODO: use this in the regular job tarball function (assume TreeAll variant)
         let site_ids = if let Some(sid) = site_id {
             vec![sid]
         } else {

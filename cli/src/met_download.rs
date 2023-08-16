@@ -5,7 +5,7 @@ use anyhow::Context;
 use clap::{self, Args};
 use chrono::{NaiveDate, Duration};
 use log::{warn, info, debug};
-use orm::{self, met::MetDayState};
+use orm::{self, met::MetDayState, utils::DateIterator};
 use sqlx::Connection;
 
 use crate::utils;
@@ -251,7 +251,9 @@ pub struct CheckDatesCli {
     /// The key identifying the section in the configuration file to use
     /// for the set of met files required. In a configuration file with
     /// sections "[[data.download.geosfpit]]", the key would be "geosfpit".
-    pub met_key: String,
+    /// If not given, the default met(s) are checked.
+    #[clap(short = 'm', long="met")]
+    pub met_key: Option<String>,
     /// The first date to check, in YYYY-MM-DD format
     pub start_date: NaiveDate,
     /// The day AFTER the last date to check, if omitted, only START_DATE is checked
@@ -299,12 +301,16 @@ impl Termination for CheckFileStatus {
 /// See [`check_files_for_dates`] for a function to use within the Rust code.
 pub async fn check_files_for_dates_cli(conn: &mut orm::MySqlConn, clargs: CheckDatesCli, cfg: &orm::config::Config) -> anyhow::Result<CheckFileStatus> {
     
-    let files_found = check_files_for_dates(
-        conn,
-        cfg,
-        &clargs.met_key,
-        clargs.start_date,
-        clargs.end_date).await?;
+    let files_found = if let Some(met_key) = &clargs.met_key {
+        check_one_config_set_files_for_dates(
+            conn,
+            cfg,
+            &met_key,
+            clargs.start_date,
+            clargs.end_date).await?
+    } else {
+        check_default_files_for_dates(conn, cfg, clargs.start_date, clargs.end_date).await?
+    };
 
     // Print the results out in chronological order
     let mut any_missing = false;
@@ -346,7 +352,7 @@ pub async fn check_files_for_dates_cli(conn: &mut orm::MySqlConn, clargs: CheckD
 /// # Returns
 /// A HashMap with the dates as keys and a day status as values. A `None` indicates that an error occurred
 /// while trying to check that date. Returns an `Err` if the end date is not after the start date.
-pub async fn check_files_for_dates(
+pub async fn check_one_config_set_files_for_dates(
     conn: &mut orm::MySqlConn,
     cfg: &orm::config::Config,
     met_key: &str,
@@ -376,6 +382,31 @@ pub async fn check_files_for_dates(
         curr_date += Duration::days(1);
     }
     
+    Ok(files_map)
+}
+
+pub async fn check_default_files_for_dates(
+    conn: &mut orm::MySqlConn,
+    cfg: &orm::config::Config,
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>
+) -> anyhow::Result<HashMap<NaiveDate, Option<orm::met::MetDayState>>> {
+    let end_date = check_start_end_date(start_date, end_date)?;
+    let mut files_map = HashMap::new();
+    
+    for date in DateIterator::new_one_range(start_date, end_date) {
+        let default_config = cfg.get_defaults_for_date(date)?;
+        let dl_configs = cfg.get_met_configs(&default_config.met)?;
+        let files_found = match orm::met::MetFile::is_date_complete_for_config_set(conn, date, dl_configs).await {
+            Ok(state) => Some(state),
+            Err(e) => {
+                warn!("Error checking met files for date {date}: {e:?}");
+                None
+            }
+        };
+        files_map.insert(date, files_found);
+    }
+
     Ok(files_map)
 }
 

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use chrono::{NaiveDate, Duration};
 use serial_test::serial;
 use orm::met::{MetDayState, MetLevels, MetDataType, MetFile};
-use tccon_priors_cli::{met_download::{check_files_for_dates, self}, utils::{WgetDownloader, Downloader}};
+use tccon_priors_cli::{met_download::{check_one_config_set_files_for_dates, self}, utils::{WgetDownloader, Downloader}};
 mod common;
 
 static EXPECTED_GEOSFPIT_FILES_20180102: [&'static str; 24] = [
@@ -163,7 +163,7 @@ async fn test_check_met() {
     let mut conn = common::multiline_sql_init!("sql/check_met.sql");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
-    let stat_map = check_files_for_dates(
+    let stat_map = check_one_config_set_files_for_dates(
         &mut conn,
         &config,
         common::TEST_MET_KEY,
@@ -176,7 +176,7 @@ async fn test_check_met() {
 
     // Should be marked as incomplete because they are each missing one of one type of file
 
-    let stat_map = check_files_for_dates(
+    let stat_map = check_one_config_set_files_for_dates(
         &mut conn, 
         &config,
         common::TEST_MET_KEY,
@@ -194,7 +194,7 @@ async fn test_check_met() {
     assert_eq!(stat, MetDayState::Incomplete, "Day missing one eta chem file not marked Incomplete");
 
     // Should also be marked as incomplete - missing all of one type of file
-    let stat_map = check_files_for_dates(
+    let stat_map = check_one_config_set_files_for_dates(
         &mut conn, 
         &config,
         common::TEST_MET_KEY,
@@ -212,7 +212,7 @@ async fn test_check_met() {
     assert_eq!(stat, MetDayState::Incomplete, "Day missing all eta chem files not marked Incomplete");
 
     // This day isn't in the database at all, should be marked as missing
-    let stat_map = check_files_for_dates(
+    let stat_map = check_one_config_set_files_for_dates(
         &mut conn, 
         &config,
         common::TEST_MET_KEY,
