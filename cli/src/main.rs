@@ -23,6 +23,8 @@ use tccon_priors_cli::config::ConfigActions;
 use tccon_priors_cli::config::ConfigCli;
 use tccon_priors_cli::siteinfo::StdSiteActions;
 use tccon_priors_cli::siteinfo::StdSiteCli;
+use tccon_priors_cli::stdsites::StdSiteJobActions;
+use tccon_priors_cli::stdsites::StdSiteJobCli;
 use tokio;
 
 use tccon_priors_cli::utils;
@@ -199,36 +201,46 @@ async fn main() -> anyhow::Result<()> {
         Commands::PrintJobs(subargs) => {
             let mut conn = db.get_connection().await?;
             jobs::print_jobs_table_cli(&mut conn, subargs).await?;
-        }
+        },
 
         Commands::StdSites(StdSiteCli { command: StdSiteActions::AddSite(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::add_new_std_site_cli(&mut conn, subargs).await?;
-        }
+        },
 
         Commands::StdSites(StdSiteCli { command: StdSiteActions::EditSite(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::edit_std_site_cli(&mut conn, subargs).await?;
-        }
+        },
 
         Commands::StdSites(StdSiteCli { command: StdSiteActions::PrintSites(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::print_sites_cli(&mut conn, subargs).await?;
-        }
+        },
 
         Commands::StdSites(StdSiteCli { command: StdSiteActions::AddInfo(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::add_std_site_info_range_cli(&mut conn, subargs).await?;
-        }
+        },
 
         Commands::StdSites(StdSiteCli { command: StdSiteActions::PrintInfo(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::print_locations_for_site_cli(&mut conn, subargs).await?;
-        }
+        },
 
-        Commands::StdSiteJobs(subargs) => {
+        Commands::StdSiteJobs( StdSiteJobCli { command: StdSiteJobActions::UpdateJobsTable(subargs) } ) => {
             let mut conn = db.get_connection().await?;
-            stdsites::standard_site_driver(&mut conn, subargs, &config).await?
+            stdsites::update_std_site_job_table_cli(&mut conn, &config, subargs).await?;
+        },
+
+        Commands::StdSiteJobs( StdSiteJobCli { command: StdSiteJobActions::AddJobs } ) => {
+            // let mut conn = db.get_connection().await?;
+            todo!();
+        },
+
+        Commands::StdSiteJobs( StdSiteJobCli { command: StdSiteJobActions::TarFiles } ) => {
+            // let mut conn = db.get_connection().await?;
+            todo!();
         },
 
         Commands::SiteInfoJson(subargs) => {

@@ -181,10 +181,41 @@ pub struct DateIterator {
 }
 
 impl DateIterator {
+    /// Create a new date iterator over one or more date ranges
+    /// 
+    /// The input `date_ranges` is a vector of tuples each containing two [`NaiveDate`]s. Each tuple defines
+    /// the start and end date of a date range (end date is exclusive).
+    /// 
+    /// # Example
+    /// ```
+    /// use chrono::NaiveDate;
+    /// 
+    /// let ranges = vec![
+    ///     (NaiveDate::from_ymd_opt(2010,1,1).unwrap(), NaiveDate::from_ymd_opt(2010,1,3)),
+    ///     (NaiveDate::from_ymd_opt(2010,1,30).unwrap(), NaiveDate::from_ymd_opt(2010,2,2)),
+    /// ]
+    /// 
+    /// let iter_dates: Vec<_> = DateIterator::new(ranges).collect();
+    /// let expected_dates = vec![
+    ///     NaiveDate::from_ymd_opt(2010,1,1).unwrap(),
+    ///     NaiveDate::from_ymd_opt(2010,1,2).unwrap(),
+    ///     NaiveDate::from_ymd_opt(2010,1,30).unwrap(),
+    ///     NaiveDate::from_ymd_opt(2010,1,31).unwrap(),
+    ///     NaiveDate::from_ymd_opt(2010,2,1).unwrap(),
+    /// ];
+    /// 
+    /// assert_eq!(iter_dates, expected_dates);
+    /// ```
     pub fn new(date_ranges: Vec<(NaiveDate, NaiveDate)>) -> Self {
         Self { date_ranges, curr_date: None, range_idx: 0, not_before: None, not_after: None, first: true }
     }
 
+    /// Create a new date iterator that will skip dates before and/or after given dates
+    /// 
+    /// # Inputs
+    /// - `date_ranges`: same as for [`new`]
+    /// - `not_before`: if this is `Some(date)` then the iterator will start on `date`
+    /// - `not_after`: if this is `Some(date)` then the iterator will stop on the *day before* `date`
     pub fn new_with_bounds(date_ranges: Vec<(NaiveDate, NaiveDate)>, not_before: Option<NaiveDate>, not_after: Option<NaiveDate>) -> Self {
         Self { date_ranges, curr_date: None, range_idx: 0, not_before, not_after, first: true }
 

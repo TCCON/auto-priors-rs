@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use clap::{self, Subcommand, Args};
 use orm::{stdsitejobs,MySqlConn};
 
@@ -5,11 +6,13 @@ use orm::{stdsitejobs,MySqlConn};
 #[derive(Debug, Args)]
 pub struct StdSiteJobCli {
     #[clap(subcommand)]
-    pub command: Actions
+    pub command: StdSiteJobActions
 }
 
 #[derive(Debug, Subcommand)]
-pub enum Actions {
+pub enum StdSiteJobActions {
+    UpdateJobsTable(UpdateTableCli),
+
     /// Add jobs to generate standard sites' priors for days in need of priors
     /// for which met data is available.
     AddJobs,
@@ -19,19 +22,28 @@ pub enum Actions {
     TarFiles
 }
 
-pub async fn standard_site_driver(conn: &mut MySqlConn, args: StdSiteJobCli, config: &orm::config::Config) -> anyhow::Result<()> {
-    match args.command {
-        Actions::AddJobs => add_standard_site_jobs_from_geos(conn, config).await,
-        Actions::TarFiles => todo!()
-    }
+#[derive(Debug, Args)]
+pub struct UpdateTableCli {
+    not_before: Option<NaiveDate>
 }
 
-async fn add_standard_site_jobs_from_geos(conn: &mut MySqlConn, config: &orm::config::Config) -> anyhow::Result<()> {
-    stdsitejobs::StdSiteJob::add_new_std_jobs_up_to_date(
+// pub async fn standard_site_driver(conn: &mut MySqlConn, args: StdSiteJobCli, config: &orm::config::Config) -> anyhow::Result<()> {
+//     match args.command {
+//         Actions::UpdateJobsTable()
+//         Actions::AddJobs => todo!(),
+//         Actions::TarFiles => todo!()
+//     }
+// }
+
+pub async fn update_std_site_job_table_cli(conn: &mut MySqlConn, config: &orm::config::Config, args: UpdateTableCli) -> anyhow::Result<()> {
+    update_std_site_job_table(conn, config, args.not_before).await
+}
+
+pub async fn update_std_site_job_table(conn: &mut MySqlConn, config: &orm::config::Config, not_before: Option<NaiveDate>) -> anyhow::Result<()> {
+    stdsitejobs::StdSiteJob::update_std_site_job_table(
         conn, 
         config,
-        None, 
-        &config.execution.std_sites_output_base)
-    .await?;
+        not_before
+    ).await?;
     Ok(())
 }

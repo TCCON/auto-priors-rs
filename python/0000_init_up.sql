@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS StdSiteJobs (
 
 CREATE OR REPLACE VIEW v_StdSiteJobs
 AS
-SELECT StdSiteJobs.*, StdSiteList.site_id FROM
+SELECT StdSiteJobs.*, StdSiteList.site_id, StdSiteList.site_type FROM
 StdSiteJobs LEFT JOIN StdSiteList ON StdSiteJobs.site = StdSiteList.id;
 
 -- If we knew what sites were possible ahead of time

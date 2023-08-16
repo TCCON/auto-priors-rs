@@ -513,6 +513,7 @@ impl SiteInfo {
         }
     }
 
+    /// Get all locations for a given site
     pub async fn get_site_locations(conn: &mut MySqlConn, site_id: &str) -> anyhow::Result<Vec<SiteInfo>> {
         let site_infos = sqlx::query_as!(
             SiteInfo,

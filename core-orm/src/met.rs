@@ -7,8 +7,6 @@ use sqlx::{self, Type, FromRow};
 
 use crate::{MySqlConn, config};
 
-const REQ_FILES_PER_DAY: i64 = 8;
-
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MetDayState {
     Complete,
@@ -318,64 +316,10 @@ impl MetFile {
         Ok(None)
     }
 
-    /// Get the most recent date that has a complete set of met files
-    /// 
-    /// # Parameters
-    /// * `conn` - connection to the MySQL database
-    /// * `met_levels` - which 3D levels to require for the meteorology, [`MetLevels::Eta`] or [`MetLevels::Pres`]
-    /// * `met_product` - which product to search for
-    /// * `req_chm` - whether to require chemistry files.
-    /// 
-    /// # Returns
-    /// If a day with complete met files is found, then that date is returned. If there is no such day,
-    /// `None` is returned.
-    /// 
-    /// # Errors
-    /// Returns an `Err` if the database query fails for any reason.
-    #[deprecated(since = "d9d77ed", note="Replace with `get_last_complete_date_for_config_set`")]
-    pub async fn get_last_complete_date(conn: &mut MySqlConn, met_levels: MetLevels, met_product: MetProduct, req_chm: bool) -> anyhow::Result<Option<NaiveDate>> {
-        // We find the date that has a complete set of 8 3D met files, 2D met files, and (optionally)
-        // 3D chemistry files by making subqueries for each file type where we count the number of 
-        // files for each date and join the subqueries on their dates. We limit the result to where
-        // there are the right number of files and take the max date. Note: for the chemistry files
-        // ONLY the WHERE clause uses >= instead of = to allow for chemistry files to be present if
-        // the amount wanted is 0.
-        let product_string = met_product.to_string();
-        let max_date = sqlx::query!(
-            r#"SELECT MAX(met3d.date) as max_date
-               FROM (
-                   SELECT DATE(filedate) AS date,COUNT(filedate) AS count
-                   FROM MetFiles 
-                   WHERE levels = ? AND data_type = "met" AND product = ?
-                   GROUP BY DATE(filedate)
-               ) AS met3d 
-               INNER JOIN (
-                   SELECT DATE(filedate) AS date,COUNT(filedate) AS count
-                   FROM MetFiles 
-                   WHERE levels = "surf" AND data_type = "met" AND product = ?
-                   GROUP BY DATE(filedate)
-               ) AS met2d
-               ON met3d.date = met2d.date 
-               INNER JOIN (
-                   SELECT DATE(filedate) AS date,COUNT(filedate) AS count
-                   FROM MetFiles
-                   WHERE levels = "eta" AND data_type = "chm" AND product = ?
-                   GROUP BY DATE(filedate)
-               ) AS chm3d
-               ON met3d.date = chm3d.date
-               WHERE met3d.count = ? AND met2d.count = ? AND chm3d.count >= ?"#,
-            met_levels.to_string(),
-            &product_string,
-            &product_string,
-            &product_string,
-            REQ_FILES_PER_DAY,
-            REQ_FILES_PER_DAY,
-            if req_chm { REQ_FILES_PER_DAY } else { 0 }
-        ).fetch_one(conn)
-        .await?
-        .max_date;
-
-        return Ok(max_date)
+    pub async fn is_date_complete_for_default_mets(conn: &mut MySqlConn, cfg: &config::Config, date: NaiveDate) -> anyhow::Result<MetDayState> {
+        let opts = cfg.get_defaults_for_date(date)?;
+        let met_opts = cfg.get_met_configs(&opts.met)?;
+        Self::is_date_complete_for_config_set(conn, date, met_opts).await
     }
 
     /// Returns whether a given date is complete, incomplete, or wholly missing for a given reanalysis download configuration.

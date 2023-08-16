@@ -493,15 +493,13 @@ pub async fn download_missing_files(
 /// Rescan the directories with met files and add any new files found to the database
 #[derive(Debug, Args)]
 pub struct RescanMetCli {
-    /// The first date to download data for, in yyyy-mm-dd format. If not given, it will default
-    /// to the most recent day that has all the expected met data for the given met_key. If no 
-    /// complete days are present, it will use the earliest "earliest_date" value in the TOML 
-    /// download sections for this met_key.
+    /// The first date to check for data, in yyyy-mm-dd format. If not given, it will default
+    /// to a sensible value, depending on the value of --met-key.
     #[clap(short = 's', long="start-date")]
     pub start_date: Option<NaiveDate>,
 
-    /// The last date (exclusive) to download data for, in yyyy-mm-dd format. If not given, it 
-    /// defaults to today (and so will try to download met data through yesterday).
+    /// The last date (exclusive) to check for data, in yyyy-mm-dd format. If not given, it 
+    /// will default to a sensible value, depending on the value of --met-key.
     #[clap(short = 'e', long="end-date")]
     pub end_date: Option<NaiveDate>,
 
@@ -510,6 +508,8 @@ pub struct RescanMetCli {
     #[clap(short = 'm', long = "met")]
     pub met_key: Option<String>,
 
+    /// Whether to ignore the default met types for different date ranges defined in the
+    /// configuration.
     #[clap(short = 'i', long)]
     pub ignore_defaults: bool,
 
@@ -558,6 +558,10 @@ pub async fn rescan_met_files(
 
         for dl_cfg in download_cfgs {
             for file in dl_cfg.expected_files_on_day(curr_date)? {
+                if !file.exists() {
+                    continue;
+                }
+                
                 match orm::met::MetFile::file_exists_by_type(&mut transaction, &file, dl_cfg).await {
                     Ok(true) => {
                         debug!("{} [{}] already in database", file.display(), dl_cfg);

@@ -1,15 +1,22 @@
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use anyhow::Context;
 use chrono::{NaiveDate, Duration};
 use futures::TryStreamExt;
-use log::{warn, info};
+use itertools::Itertools;
+use log::info;
+use log::warn;
 use serde::Serialize;
-use sqlx::{self, FromRow, Type, Acquire};
+use sqlx::{self, FromRow, Type, Connection};
 
 use crate::config::Config;
-use crate::{MySqlConn, config};
-use crate::{utils,met,jobs,siteinfo};
+use crate::met;
+use crate::siteinfo::SiteType;
+use crate::siteinfo::StdSite;
+use crate::utils::DateIterator;
+use crate::MySqlConn;
+use crate::siteinfo;
 
 
 #[derive(Debug, Type, Clone, Copy, Serialize)]
@@ -17,18 +24,18 @@ use crate::{utils,met,jobs,siteinfo};
 pub enum StdSiteJobState {
     /// Indicates an unexpected value for state
     Unknown = -99, 
-    /// Indicates this site/date combination is not present in the table and the GEOS FP-IT data is not available
-    MissingGeosUnavailable = -3,
     /// Indicates this site/date combination is not present in the table, but the GEOS FP-IT data needed to generate it has been downloaded.
-    MissingGeosPresent = -2,
+    MissingMet = -10,
+    /// Indicates that the priors for this day need regenerated (old files will be removed if needed)
+    RegenNeeded = -2,
     /// Indicates the site was not operational on this date and priors will never be generated for it
     Nonop = -1,
-    /// Indicates that priors will need to be generated for this site
-    Pending = 0,
+    /// Indicates that a job to generate priors is needed for this site
+    JobNeeded = 0,
+    /// Indicates that a job has been submitted for this site
+    InProgress = 1,
     /// Indicates that priors have been generated for this site
-    Complete = 1,
-    /// Indicates that the priors for this day need regenerated (old files will be removed if needed)
-    RegenNeeded = 2,
+    Complete = 2,
 }
 
 impl Default for StdSiteJobState {
@@ -40,9 +47,12 @@ impl Default for StdSiteJobState {
 impl From<i8> for StdSiteJobState {
     fn from(val: i8) -> Self {
         match val {
+            -10 => Self::MissingMet,
+            -2 => Self::RegenNeeded,
             -1 => Self::Nonop,
-            0 => Self::Pending,
-            1 => Self::Complete,
+            0 => Self::JobNeeded,
+            1 => Self::InProgress,
+            2 => Self::Complete,
             _ => Self::Unknown
         }
     }
@@ -54,16 +64,22 @@ pub struct StdSiteJob {
     pub site_id: String,
     pub date: NaiveDate,
     pub state: StdSiteJobState,
+    pub site_type: SiteType,
     pub job: Option<i32>,
     pub tarfile: Option<PathBuf>
 }
 
 impl From<QStdSiteJob> for StdSiteJob {
     fn from(query_job: QStdSiteJob) -> Self {
-        let site_id = query_job.site_id.unwrap_or("??".to_owned());
+        let site_id = query_job.site_id.unwrap_or_else(|| "??".to_owned());
+        let site_type = query_job.site_type
+            .map(|s| SiteType::try_from(s).unwrap())
+            .unwrap_or(SiteType::Unknown);
+
         return Self { 
             id: query_job.id, 
             site_id: site_id, 
+            site_type: site_type,
             date: query_job.date,
             state: query_job.state.into(),
             job: query_job.job,
@@ -72,7 +88,39 @@ impl From<QStdSiteJob> for StdSiteJob {
     }
 }
 
+// New workflow:
+//   Missing days get added to the table with state JobNeeded
+//   Days flagged for regeneration have any output deleted and their state changed to JobNeeded
+//   Entries with state == JobNeeded are grouped by date and jobs submitted for them
+//   Jobs from lines with state == InProgress are checked for when they are done, files are moved into std site tarballs, and the state changed to Complete
+
 impl StdSiteJob {
+    pub async fn update_std_site_job_table(conn: &mut MySqlConn, config: &Config, not_before: Option<NaiveDate>) -> anyhow::Result<()> {
+        let last_met_date = if let Some(d) = met::MetFile::get_last_complete_date_for_default_mets(conn, config).await
+            .context("Error occurred while trying to identify the last complete day for default meteorologies")? {
+                d
+            } else {
+                warn!("No available met data, nothing to be done to update the standard sites table");
+                return Ok(());
+            };
+
+        Self::fill_missing_dates_for_all_sites(conn, last_met_date, not_before).await
+            .map_err(|e| {
+                let n = e.len();
+                let msg = e.into_iter()
+                    .map(|(sid, err)| format!("  - {sid}, {err}"))
+                    .join("\n");
+                anyhow::anyhow!("{n} sites had an error while filling in missing dates:\n{msg}")
+            })
+            .context("Error occurred while filling in missing days in the standard site jobs table")?;
+        Self::reset_rows_for_regen(conn).await
+            .context("Error occurred while resetting rows flagged for regeneration in the standard site jobs table")?;
+        Self::try_reset_days_missing_met(conn, config).await
+            .context("Error occurred while checking for days previous missing meteorology in the standard site job table")?;
+
+        Ok(())
+    }
+
     pub async fn add_std_site_job_row_from_args(conn: &mut MySqlConn, site_id: &str, date: NaiveDate, state: StdSiteJobState, job: Option<i32>) -> anyhow::Result<()> {
         let site_prim_key = siteinfo::StdSite::site_id_to_primary_key(conn, site_id).await?;
         sqlx::query!(
@@ -85,6 +133,194 @@ impl StdSiteJob {
         .await?;
 
         return Ok(())
+    }
+
+    pub async fn fill_missing_dates_for_site(conn: &mut MySqlConn, site_id: &str, last_met_date: NaiveDate, not_before: Option<NaiveDate>) -> anyhow::Result<()> {
+        // First we get dates for which there is already an entry (in any state) for this site in the table
+        let extant_site_dates: HashSet<_> = sqlx::query!(
+            "SELECT date FROM v_StdSiteJobs WHERE site_id = ?",
+            site_id
+        ).fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|r| r.date)
+        .collect();
+
+        // Now we get all the expected date for this site
+        let locations = siteinfo::SiteInfo::get_site_locations(conn, site_id).await
+            .with_context(|| format!("Failed to get site locations for site {site_id} while filling missing dates for standard site jobs"))?;
+
+        if locations.is_empty() {
+            anyhow::bail!("No locations defined for site {site_id}");
+        }
+
+        let nopen = locations.iter()
+            .fold(0, |acc, loc| {
+                if loc.end_date.is_none() {
+                    acc + 1
+                } else {
+                    acc
+                }
+            });
+
+        if nopen > 1 {
+            anyhow::bail!("Multiple open-ended locations for site {site_id}, this is an invalid configuration for a site");
+        }
+
+        let date_ranges: Vec<_> = locations.iter()
+            .map(|loc| (loc.start_date, loc.end_date.unwrap_or_else(|| last_met_date + Duration::days(1))))
+            .collect();
+
+        // Last, we insert an "JobNeeded" entry for this site & date for each date missing. 
+        // We could use a transaction here, but it's not actually critical that we revert if only some 
+        // adds fail.  We don't worry about missing met here, we'll do that when we submit jobs
+        let date_iter = DateIterator::new_with_bounds(date_ranges, not_before, Some(last_met_date + Duration::days(1)));
+
+        let mut ndates = 0;
+        for date in date_iter {
+            if !extant_site_dates.contains(&date) {
+                Self::add_std_site_job_row_from_args(conn, site_id, date, StdSiteJobState::JobNeeded, None).await?;
+                ndates += 1;
+            }
+        }
+
+        info!("{ndates} row in StdSiteJobs added for site {site_id}");
+        Ok(())
+    }
+
+    /// Fill in date & site combinations missing from the standard site jobs table.
+    /// 
+    /// This takes all the sites defined in the standard sites table, and for each one checks that all the dates defined by
+    /// its locations are present in the standard site jobs table. Any missing dates will have a row added in the state
+    /// "JobNeeded" to later have a job submitted to fulfill it.
+    /// 
+    /// Note that this will try all sites, even if an error occurs while processing one. If any site errors, the returned `Err`
+    /// will contain the individual error messages from each site. 
+    pub async fn fill_missing_dates_for_all_sites(conn: &mut MySqlConn, last_met_date: NaiveDate, not_before: Option<NaiveDate>) -> Result<(), Vec<(String, anyhow::Error)>> {
+        let site_ids = siteinfo::StdSite::get_site_ids(conn, None).await
+            .map_err(|e| vec![("all".to_string(), e)])?;
+        let mut errors = Vec::new();
+        for site_id in site_ids {
+            if let Err(e) = Self::fill_missing_dates_for_site(conn, &site_id, last_met_date, not_before).await {
+                errors.push((site_id, e))
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Reset any rows flagged for regeneration
+    /// 
+    /// This will run [`clear_output_for_regen`] on each row in the standard site jobs table
+    /// with state equal to "RegenNeeded". That will delete the output tarfile associated with
+    /// that job (if it exists), set the state to "JobNeeded", and clear the job ID associated
+    /// with this row. 
+    pub async fn reset_rows_for_regen(conn: &mut MySqlConn) -> anyhow::Result<()> {
+        let stdjobs: Vec<_> = sqlx::query_as!(
+            QStdSiteJob,
+            "SELECT * FROM v_StdSiteJobs WHERE state = ?",
+            StdSiteJobState::RegenNeeded
+        ).fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|q| StdSiteJob::try_from(q))
+        .try_collect()?;
+
+        let mut njobs = 0;
+        for mut job in stdjobs {
+            job.clear_output_for_regen(conn).await?;
+            njobs += 1;
+        }
+
+        info!("{njobs} rows in StdSiteJobs changed from 'RegeNeeded' to 'JobNeeded' (outputs cleared if they were present)");
+        Ok(())
+    }
+
+    /// For any days in the standard site jobs table flagged as missing meteorology, check if the meteorology is available
+    /// and set their state to "JobNeeded" if it is.
+    /// 
+    /// Note that this assumes that any day that was missing meteorology will not have an output tarball nor an associated job ID.
+    /// If that is not the case, those tarballs will be left in place and the row will have the wrong job ID until a new job is
+    /// submitted.
+    pub async fn try_reset_days_missing_met(conn: &mut MySqlConn, config: &Config) -> anyhow::Result<()> {
+        // First identify all the unique days flagged as missing meteorology
+        let dates_missing_met = sqlx::query!(
+            "SELECT DISTINCT(date) as udate FROM StdSiteJobs WHERE state = ?",
+            StdSiteJobState::MissingMet
+        ).fetch_all(&mut *conn)
+        .await?
+        .iter()
+        .map(|r| r.udate)
+        .collect_vec();
+
+        for date in dates_missing_met {
+            if let met::MetDayState::Complete = met::MetFile::is_date_complete_for_default_mets(conn, config, date).await? {
+                // Assumes that if a date was missing met, it can't have an output file, so we only need to set the state
+                let res = sqlx::query!(
+                    "UPDATE StdSiteJobs SET state = ? WHERE date = ? AND state = ?",
+                    StdSiteJobState::JobNeeded,
+                    date,
+                    StdSiteJobState::MissingMet
+                ).execute(&mut *conn)
+                .await?;
+                info!("{} rows in StdSiteJobs for {date} changed from 'MissingMet' to 'JobNeeded'", res.rows_affected());
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn add_jobs_for_pending_rows(conn: &mut MySqlConn, config: &Config) -> anyhow::Result<()> {
+        let query = sqlx::query!(
+            r#"SELECT date,GROUP_CONCAT(DISTINCT site_id SEPARATOR ",") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR ",") AS row_ids FROM v_StdSiteJobs WHERE state = ? GROUP BY date"#,
+            StdSiteJobState::JobNeeded
+        ).fetch_all(&mut *conn)
+        .await?;
+
+        // TODO: need to figure out how to ensure the right rows get the right job.
+        // I think grouping the query by site type as well should help:
+        // SELECT date,site_type,GROUP_CONCAT(DISTINCT site_id SEPARATOR ",") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR ",") AS ids FROM v_stdsitejobs WHERE state = 0 GROUP BY date,site_type;
+        // The only problem is if there is a case where we do a site that isn't needed, but we shouldn't
+
+        for rec in query {
+            if let Some(site_ids) = rec.site_ids {
+                let date = rec.date;
+                let row_ids: Vec<_> = rec.row_ids
+                    .ok_or_else(|| anyhow::anyhow!("Inconsistent return from database: got site ID in query for distinct standard site days needing jobs, but not row ids"))?
+                    .split(",")
+                    .map(|s| s.parse::<i32>())
+                    .try_collect()
+                    .context("Unable to parse joined row IDs back into integers")?;
+                
+                // Need to split into TCCON and EM27 sites because they have different needs (EM27s might need .map files)
+                let mut tccon_site_ids = vec![];
+                let mut em27_site_ids = vec![];
+                let mut unknown_site_ids = vec![];
+                for sid in site_ids.split(",") {
+                    let site = StdSite::get_by_site_id(conn, sid).await?
+                        .map(|s| s.site_type);
+
+                    match site {
+                        Some(SiteType::TCCON) => tccon_site_ids.push(sid),
+                        Some(SiteType::EM27) => em27_site_ids.push(sid),
+                        Some(SiteType::Unknown) => {
+                            warn!("Site {sid} unknown type, defaulting to producing all files");
+                            unknown_site_ids.push(sid);
+                        },
+                        None => warn!("Side {sid} not defined in standard sites, skipping generation")
+                    }
+                    
+                }
+
+
+
+            }
+        }
+
+        Ok(())
     }
 
     /// Return information about whether jobs for standard sites have been queued, completed, etc.
@@ -147,153 +383,11 @@ impl StdSiteJob {
         return Ok(avail_std_site_days)
     }
 
-    /// Add jobs for standard sites for a single date
+    /// Flag rows in the standard site jobs table for a given site and a date range for priors regeneration.
     /// 
-    /// # Parameters
-    /// * `date` - the date to add jobs for.
-    /// 
-    /// # Returns
-    /// If this date is not present in the `StdSiteJobs` table, the return will be a 
-    /// `Some<AddStdJobSummary>`, and the structure will include which sites are included
-    /// in the new job and the ID of the job. If the date was already present, then this
-    /// returns `None`.
-    /// 
-    /// # Errors
-    /// Returns an `Err` if any of the database queries fail. Should any of the queries to create
-    /// the job or the new standard site job rows fail, all of the insert queries should be rolled back.
-    pub async fn add_new_std_jobs_for_date(conn: &mut MySqlConn, config: &Config, date: NaiveDate, save_dir: &Path) -> anyhow::Result<Option<AddStdJobSummary>> {
-        // First check if this date already has any sites - if so, return None (this function is not intended for backfilling)
-        let date_count = sqlx::query!("SELECT COUNT(*) as count FROM StdSiteJobs WHERE date = ?", date)
-            .fetch_one(&mut *conn)
-            .await?
-            .count;
-
-        if date_count > 0 { return Ok(None) }
-
-        // Now figure out which sites need priors generated and which are not operational
-        let active_site_info = siteinfo::SiteInfo::get_site_info_for_date(&mut *conn, date, true)
-            .await?;
-
-        let mut active_sites = HashSet::new();
-        for info in active_site_info {
-            if let Some(sid) = info.site_id {
-                active_sites.insert(sid);
-            }else{
-                warn!("An active site (id = {}) does not have a two-letter ID defined", info.id);
-            }
-        }
-
-        let all_sites = siteinfo::StdSite::get_site_ids(&mut *conn, None)
-            .await?;
-        let mut job_sites = vec![];
-        let mut nonop_sites = vec![];
-        for site in all_sites {
-            if active_sites.contains(&site) {
-                job_sites.push(site);
-            }else{
-                nonop_sites.push(site);
-            }
-        }
-
-        // Create a new job for the active sites, then add elements to the StdSiteJob table for both
-        // the operation and non-operational sites.
-        let latlon: Vec<Option<f32>> = (0..job_sites.len()).map(|_| None).collect();
-
-        let mut transaction = conn.begin().await?;
-        let trans_conn = transaction.acquire().await?;
-
-        let new_job_id = jobs::Job::add_job_from_args(
-            &mut *trans_conn, 
-            job_sites.clone(),
-            date,
-            date + Duration::days(1),
-            save_dir.to_owned(),
-            None,
-            latlon.clone(),
-            latlon,
-            &config.execution.std_site_job_queue,
-            Some(jobs::ModFmt::Text),
-            Some(jobs::VmrFmt::Text),
-            Some(jobs::MapFmt::None), // TODO: will need to be text for EM27s potentially
-            Some(10),
-            None,
-            Some(jobs::TarChoice::No)
-        ).await?;
-
-        for site in job_sites.iter() {
-            Self::add_std_site_job_row_from_args(
-                &mut *trans_conn,
-                site,
-                date,
-                StdSiteJobState::Pending,
-                Some(new_job_id)
-            ).await?;
-        }
-
-        for site in nonop_sites.iter() {
-            Self::add_std_site_job_row_from_args(
-                &mut *trans_conn,
-                site,
-                date,
-                StdSiteJobState::Nonop,
-                Some(new_job_id)
-            ).await?;
-        }
-        transaction.commit().await?;
-        
-        info!("Added job {new_job_id} for standard sites ({} active, {} nonoperational)", job_sites.len(), nonop_sites.len());
-        Ok(Some(AddStdJobSummary{
-            job_id: new_job_id,
-            sites_included: job_sites
-        }))
-    }
-
-    /// Add a batch of new standard site jobs from the last existing date up to some future date
-    /// 
-    /// # Parameters
-    /// * `pool` - a pool of MySQL connections
-    /// * `date` - the last date to add standard site jobs for. If not given, then this is inferred
-    ///   from the available GEOS eta and surface files.
-    /// * `save_dir` - directory to create the output directories in.
-    /// 
-    /// # Returns
-    /// If successful, returns a vector of `AddStdJobSummary` instances, one per date added.
-    /// 
-    /// # Errors
-    /// Returns an `Err` if:
-    /// * any of the database operations fail
-    /// * there are no existing standard site jobs, so cannot determine the starting date
-    /// * `date` is `None` and it cannot determine the last date with the full required suite of GEOS files
-    pub async fn add_new_std_jobs_up_to_date(conn: &mut MySqlConn, cfg: &config::Config, date: Option<NaiveDate>, save_dir: &Path) -> anyhow::Result<Vec<AddStdJobSummary>> {
-        let last_std_site_date = sqlx::query!(
-            "SELECT MAX(date) as date FROM StdSiteJobs"
-        ).fetch_one(&mut *conn)
-        .await?
-        .date
-        .ok_or(anyhow::Error::msg("Found no existing standard site jobs, cannot use the function add_new_std_jobs_up_to_date"))?;
-
-        let last_date = if let Some(d) = date {
-            d
-        }else{
-            // let default_opts = defaultopts::DefaultOptions::get_defaults_for_date(conn, date).await?;
-
-            met::MetFile::get_last_complete_date_for_default_mets(
-                &mut *conn, 
-                cfg
-            ).await?
-            .ok_or(anyhow::Error::msg("Could not determine most recent date with all required GEOS files, cannot use the function add_new_std_jobs_up_to_date"))?
-        };
-
-        let mut added = vec![];
-        for date in utils::date_range(last_std_site_date + Duration::days(1), last_date + Duration::days(1)) {
-            if let Some(res) = Self::add_new_std_jobs_for_date(conn, cfg, date, save_dir).await? {
-                added.push(res);
-            }
-        }
-
-        return Ok(added)
-    }
-
+    /// If `end_date` is `None`, then all rows from `start_date` on are flagged. Otherwise, rows up to but not
+    /// including `end_date` are flagged. Returns the number of rows affected if successful. Returns an `Err`
+    /// if the database query fails.
     pub async fn set_regen_flag(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<u64> {
         let q = if let Some(end) = end_date {
             sqlx::query!(
@@ -316,6 +410,52 @@ impl StdSiteJob {
 
         Ok(q.rows_affected())
     }
+
+    /// Update the state of this instance and the corresponding row in the database.
+    pub async fn set_state(&mut self, state: StdSiteJobState, conn: &mut MySqlConn) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE StdSiteJobs SET state = ? WHERE id = ?",
+            state,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.state = state;
+        Ok(())
+    }
+
+    /// For this row in the standard site table, reset its state to "JobNeeded" and delete the output file, if present
+    /// 
+    /// If an error occurs while deleting the output file, the database and this instance will not be updated. If the
+    /// reset is successful, both the database and this instance will have the state set to "JobNeeded" and the output
+    /// `tarfile` set to `None`.
+    async fn clear_output_for_regen(&mut self, conn: &mut MySqlConn) -> anyhow::Result<()> {
+        let mut trans = conn.begin().await?;        
+
+        sqlx::query!(
+            "UPDATE StdSiteJobs SET state = ?, job = ?, tarfile = ? WHERE id = ?",
+            StdSiteJobState::JobNeeded,
+            None::<i32>,
+            None::<String>,
+            self.id
+        ).execute(&mut *trans)
+        .await
+        .with_context(|| format!(""))?;
+
+        if let Some(output) = &self.tarfile {
+            std::fs::remove_file(output)
+                .with_context(|| format!("Failed removing output file ({}) for standard site job entry {}", output.display(), self.id))?;
+        }
+
+        // Using the transaction should ensure that if we can't remove the output file, the database doesn't think the file is missing when it
+        // actually isn't
+        trans.commit().await?;
+        
+        self.state = StdSiteJobState::JobNeeded;
+        self.tarfile = None;
+
+        Ok(())
+    }
 }
 
 pub struct AddStdJobSummary {
@@ -329,6 +469,7 @@ struct QStdSiteJob {
     #[allow(dead_code)]
     site: i32,
     site_id: Option<String>,
+    site_type: Option<String>,
     date: NaiveDate,
     state: i8,
     job: Option<i32>,
