@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use anyhow::Context;
 use chrono::{NaiveDate, Duration};
 use futures::TryStreamExt;
 use itertools::Itertools;
-use log::info;
-use log::warn;
+use log::{info, warn};
 use serde::Serialize;
 use sqlx::{self, FromRow, Type, Connection};
 
@@ -14,12 +14,13 @@ use crate::config::Config;
 use crate::jobs;
 use crate::met;
 use crate::siteinfo::SiteType;
+use crate::siteinfo::StdOutputStructure;
 use crate::utils::DateIterator;
 use crate::MySqlConn;
 use crate::siteinfo;
 
 
-#[derive(Debug, Type, Clone, Copy, Serialize)]
+#[derive(Debug, Type, Clone, Copy, Serialize, PartialEq, Eq)]
 #[repr(i8)]
 pub enum StdSiteJobState {
     /// Indicates an unexpected value for state
@@ -68,7 +69,8 @@ pub struct StdSiteJob {
     pub state: StdSiteJobState,
     pub site_type: SiteType,
     pub job: Option<i32>,
-    pub tarfile: Option<PathBuf>
+    pub tarfile: Option<PathBuf>,
+    pub output_structure: StdOutputStructure,
 }
 
 impl From<QStdSiteJob> for StdSiteJob {
@@ -77,6 +79,10 @@ impl From<QStdSiteJob> for StdSiteJob {
         let site_type = query_job.site_type
             .map(|s| SiteType::try_from(s).unwrap())
             .unwrap_or(SiteType::Unknown);
+        let output_structure = query_job.output_structure
+            .map(|s| StdOutputStructure::from_str(&s).ok())
+            .flatten()
+            .unwrap_or_default();
 
         return Self { 
             id: query_job.id, 
@@ -85,7 +91,8 @@ impl From<QStdSiteJob> for StdSiteJob {
             date: query_job.date,
             state: query_job.state.into(),
             job: query_job.job,
-            tarfile: query_job.tarfile.map(|s| PathBuf::from(s))
+            tarfile: query_job.tarfile.map(|s| PathBuf::from(s)),
+            output_structure
         }
     }
 }
@@ -365,6 +372,58 @@ impl StdSiteJob {
         Ok(())
     }
 
+    pub async fn make_standard_site_tarballs(conn: &mut MySqlConn, config: &Config) -> anyhow::Result<()> {
+        // Some things to keep in mind: (1) we should skip rows where the state != InProgress, because those
+        // were probably updated while the jobs were running. (2) Different sites will have different output
+        // structures, and we need to handle each one.
+        let std_job_rows: Vec<StdSiteJob> = sqlx::query_as!(
+            QStdSiteJob,
+            "SELECT * FROM v_stdsitejobs WHERE state = ? AND job IS NOT NULL;",
+            StdSiteJobState::InProgress
+        ).fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|q| StdSiteJob::try_from(q))
+        .try_collect()?;
+
+        let mut job_ids = HashSet::new();
+        for mut row in std_job_rows {
+            let jid = row.job.unwrap(); // SQL query ensures the job ID is not None
+            let job = jobs::Job::get_job_with_id(conn, jid).await?;
+            match job.state {
+                jobs::JobState::Complete => (), // ready to make tarball
+                jobs::JobState::Pending | jobs::JobState::Running => {
+                    info!("Job {jid} still running, cannot make standard site tarball from it yet");
+                    continue;
+                },
+                jobs::JobState::Errored => {
+                    anyhow::bail!("Job {jid} required for standard sites had an error");
+                },
+                jobs::JobState::Cleaned => {
+                    anyhow::bail!("Job {jid} required for standard sites was previous cleaned up");
+                },
+            }
+            
+            // Always want to clean up finished jobs, as long as there isn't an error
+            job_ids.insert(jid); 
+
+            if row.state != StdSiteJobState::InProgress {
+                warn!("Not making tarball for standard site job table row {}, state is not 'InProgress' suggesting a flag for regeneration or other change while the job was processing", row.id);
+                continue;
+            }
+
+            let output_tarball = row.output_structure.make_std_site_tarball(&config.execution.std_sites_tar_output, &row.site_id, &job)?;
+            row.set_complete(conn, output_tarball).await?;
+        }
+
+        for jid in job_ids {
+            let mut job = jobs::Job::get_job_with_id(conn, jid).await?;
+            job.set_cleaned(conn).await?;
+        }
+
+        Ok(())
+    }
+
     /// Return information about whether jobs for standard sites have been queued, completed, etc.
     /// 
     /// # Parameters
@@ -483,6 +542,20 @@ impl StdSiteJob {
         Ok(())
     }
 
+    pub async fn set_complete(&mut self, conn: &mut MySqlConn, tarball: PathBuf) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE StdSiteJobs SET state = ?, tarfile = ? WHERE id = ?",
+            StdSiteJobState::Complete,
+            tarball.to_str().ok_or_else(|| anyhow::anyhow!("Could not convert tarball path to valid unicode"))?,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.state = StdSiteJobState::Complete;
+        self.tarfile = Some(tarball);
+        Ok(())
+    }
+
     /// For this row in the standard site table, reset its state to "JobNeeded" and delete the output file, if present
     /// 
     /// If an error occurs while deleting the output file, the database and this instance will not be updated. If the
@@ -532,6 +605,7 @@ struct QStdSiteJob {
     date: NaiveDate,
     state: i8,
     job: Option<i32>,
-    tarfile: Option<String>
+    tarfile: Option<String>,
+    output_structure: Option<String>,
 }
 

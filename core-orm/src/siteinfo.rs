@@ -1,5 +1,5 @@
 //! Interface to the standard site information tables
-use std::{collections::HashMap, str::FromStr, borrow::Cow, fmt::Display};
+use std::{collections::HashMap, str::FromStr, borrow::Cow, fmt::Display, path::{PathBuf, Path}};
 
 use anyhow::{self, Context};
 use chrono::{NaiveDate, Duration};
@@ -9,7 +9,7 @@ use serde::Serialize;
 use sqlx::{self, FromRow, Type, Connection};
 use tabled::Tabled;
 
-use crate::{utils, stdsitejobs::StdSiteJob};
+use crate::{utils, stdsitejobs::StdSiteJob, jobs::Job};
 
 use super::MySqlConn;
 
@@ -86,6 +86,12 @@ impl FromStr for StdOutputStructure {
     }
 }
 
+impl Default for StdOutputStructure {
+    fn default() -> Self {
+        Self::TreeAll
+    }
+}
+
 impl Display for StdOutputStructure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -96,6 +102,193 @@ impl Display for StdOutputStructure {
             StdOutputStructure::TreeAll => write!(f, "TreeAll"),
             StdOutputStructure::TreeAllMapNc => write!(f, "TreeAllMapNc"),
         }
+    }
+}
+
+impl StdOutputStructure {
+    pub fn make_std_site_tarball(&self, root_save_dir: &Path, site_id: &str, job: &Job) -> anyhow::Result<PathBuf> {
+        if !root_save_dir.is_dir() {
+            anyhow::bail!("root_save_dir must be a preexisting directory");
+        }
+
+        let site_save_dir = root_save_dir.join(site_id);
+        if !site_save_dir.exists() {
+            std::fs::create_dir(&site_save_dir)
+                .with_context(|| format!("Error occurred while trying to create standard site save directory for site {site_id}"))?;
+        }
+
+        let tarball = site_save_dir.join(format!("{site_id}_ggg_inputs_{}.tgz", job.start_date.format("%Y%m%d")));
+
+        let files_for_tarball = self.get_files_for_tarball(job, Some(site_id))?;
+
+        // Clever combination of tar archive builder and gzip compressor taken from
+        // https://stackoverflow.com/a/46521163
+        let tgz_file = std::fs::File::create(&tarball)
+            .with_context(|| format!("Error occurred trying to create the initial .tgz file for job {}", job.job_id))?;
+        let encoder = flate2::write::GzEncoder::new(tgz_file, flate2::Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+
+        for (src, dest) in files_for_tarball {
+            archive.append_path_with_name(src, dest)?;
+        }
+
+        let encoder = archive.into_inner()
+            .with_context(|| format!("Error occurred while trying to finalize tar archive for job {}", job.job_id))?;
+
+        // Unsure if this is needed, but doesn't seem to hurt
+        encoder.finish()
+            .with_context(|| format!("Error occurred while trying to finalize the gzip compression for job {}", job.job_id))?;
+        
+        Ok(tarball)
+    }
+
+    pub fn get_files_for_tarball(&self, job: &Job, site_id: Option<&str>) -> anyhow::Result<Vec<(PathBuf, PathBuf)>> {
+        // TODO: use this in the regular job tarball function (assume TreeAll variant)
+        let site_ids = if let Some(sid) = site_id {
+            vec![sid]
+        } else {
+            job.site_id.iter().map(|s| s.as_str()).collect_vec()
+        };
+        match self {
+            StdOutputStructure::FlatModVmr => {
+                Self::get_files(
+                    Self::add_files_flat,
+                    job,
+                    &site_ids,
+                    true, true, false, false
+                )
+            },
+            StdOutputStructure::FlatAll => {
+                Self::get_files(
+                    Self::add_files_flat,
+                    job,
+                    &site_ids,
+                    true, true, true, false
+                )
+            },
+            StdOutputStructure::FlatAllMapNc => {
+                Self::get_files(
+                    Self::add_files_flat,
+                    job,
+                    &site_ids,
+                    true, true, false, true
+                )
+            },
+            StdOutputStructure::TreeModVmr => {
+                Self::get_files(
+                    Self::add_files_in_tree,
+                    job,
+                    &site_ids,
+                    true, true, false, false
+                )
+            },
+            StdOutputStructure::TreeAll => {
+                Self::get_files(
+                    Self::add_files_in_tree,
+                    job,
+                    &site_ids,
+                    true, true, true, false
+                )
+            },
+            StdOutputStructure::TreeAllMapNc => {
+                Self::get_files(
+                    Self::add_files_in_tree,
+                    job,
+                    &site_ids,
+                    true, true, false, true
+                )
+            },
+        }
+    }
+
+    fn get_files<F>(getter_fxn: F, job: &Job, site_ids: &[&str], mod_files: bool, vmr_files: bool, map_files: bool, map_nc_files: bool) -> anyhow::Result<Vec<(PathBuf, PathBuf)>>
+    where F: Fn(&mut Vec<(PathBuf, PathBuf)>, glob::Paths) -> anyhow::Result<()> 
+    {
+        let mut files = vec![];
+        for &sid in site_ids {
+            if mod_files {
+                let mod_dir = job.mod_output_dir(sid);
+                if !mod_dir.exists() {
+                    anyhow::bail!(".mod output directory does not exist for site {sid} in job #{}", job.job_id);
+                }
+                let mod_glob = glob::glob(&mod_dir.join("*.mod").to_string_lossy())
+                    .context("Error occurred while trying to make the glob pattern for .mod files")?;
+
+                getter_fxn(&mut files, mod_glob)
+                    .context("Error occurred while trying to add .mod files from glob pattern")?;
+            }
+
+            if vmr_files {
+                let vmr_dir = job.vmr_output_dir(sid);
+                if !vmr_dir.exists() {
+                    anyhow::bail!(".vmr output directory does not exist for site {sid} in job #{}", job.job_id);
+                }
+                let vmr_glob = glob::glob(&vmr_dir.join("*.vmr").to_string_lossy())
+                    .context("Error occurred while trying to make the glob pattern for .vmr files")?;
+
+                getter_fxn(&mut files, vmr_glob)
+                    .context("Error occurred while trying to add .vmr files from glob pattern")?;
+            }
+
+            if map_files {
+                let map_dir = job.map_output_dir(sid);
+                if !map_dir.exists() {
+                    anyhow::bail!(".map output directory does not exist for site {sid} in job #{}", job.job_id);
+                }
+                let map_glob = glob::glob(&map_dir.join("*.map").to_string_lossy())
+                    .context("Error occurred while trying to make the glob pattern for .map files")?;
+
+                getter_fxn(&mut files, map_glob)
+                    .context("Error occurred while trying to add .map files from glob pattern")?;
+            }
+
+            if map_nc_files {
+                let map_dir = job.mod_output_dir(sid);
+                if !map_dir.exists() {
+                    anyhow::bail!(".mod output directory does not exist for site {sid} in job #{}", job.job_id);
+                }
+                let map_glob = glob::glob(&map_dir.join("*.map.nc").to_string_lossy())
+                    .context("Error occurred while trying to make the glob pattern for .mod files")?;
+
+                getter_fxn(&mut files, map_glob)
+                    .context("Error occurred while trying to add .map.nc files from glob pattern")?;
+            }
+        }
+        Ok(files)
+    }
+
+    fn add_files_in_tree(files: &mut Vec<(PathBuf, PathBuf)>, glob_entries: glob::Paths) -> anyhow::Result<()> {
+        for entry in glob_entries {
+            let src_path = entry?.canonicalize()?;
+            let components = src_path.components()
+                .rev()
+                .take(5)
+                .collect_vec();
+
+            // We're assuming a directory structure like `jobN/fpit/site_id/vertical/*.mod`, hence taking the last five
+            // components will get us what we want
+            if components.len() != 5 {
+                anyhow::bail!("Fewer than expected number of path components (expected 5, got {})", components.len());
+            }
+
+            let dest_path = components.into_iter()
+                .fold(PathBuf::new(), |full_path, comp| full_path.join(comp));
+
+            files.push((src_path, dest_path));
+        }
+        Ok(())
+    }
+
+    fn add_files_flat(files: &mut Vec<(PathBuf, PathBuf)>, glob_entries: glob::Paths) -> anyhow::Result<()> {
+        for entry in glob_entries {
+            let src_path = entry?;
+            let basename = src_path.file_name()
+                .map(PathBuf::from)
+                .ok_or_else(|| anyhow::anyhow!("Could not get file name of {}", src_path.display()))?;
+
+            files.push((src_path, basename));
+        }
+        Ok(())
     }
 }
 

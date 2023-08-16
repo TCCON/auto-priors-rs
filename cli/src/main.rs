@@ -233,7 +233,7 @@ async fn main() -> anyhow::Result<()> {
             siteinfo::print_locations_for_site_cli(&mut conn, subargs).await?;
         },
 
-        Commands::StdSiteJobs( StdSiteJobCli { command: StdSiteJobActions::UpdateJobsTable(subargs) } ) => {
+        Commands::StdSiteJobs( StdSiteJobCli { command: StdSiteJobActions::UpdateTable(subargs) } ) => {
             let mut conn = db.get_connection().await?;
             stdsites::update_std_site_job_table_cli(&mut conn, &config, subargs).await?;
         },
@@ -244,8 +244,8 @@ async fn main() -> anyhow::Result<()> {
         },
 
         Commands::StdSiteJobs( StdSiteJobCli { command: StdSiteJobActions::TarFiles } ) => {
-            // let mut conn = db.get_connection().await?;
-            todo!();
+            let mut conn = db.get_connection().await?;
+            stdsites::make_std_site_tarballs(&mut conn, &config).await?;
         },
 
         Commands::SiteInfoJson(subargs) => {

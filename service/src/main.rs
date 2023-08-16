@@ -16,6 +16,8 @@ mod stdsitejobs;
 
 static MET_MANAGER: OnceCell<Mutex<met::MetManager<LoggingErrorHandler>>> = OnceCell::const_new();
 
+// TODO: modify where the component toggles are such that refreshing the config will enable/disable
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Uncomment this, and restore the console-subscriber dependency in the service Cargo.toml

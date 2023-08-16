@@ -6,12 +6,12 @@ edition = "2021"
 [dependencies]
 async-trait.workspace = true
 clokwerk = "0.4"
-glob = "0.3"
 signal-hook = "0.3"
 
 anyhow.workspace = true
 chrono.workspace = true
 env_logger.workspace = true
+glob.workspace = true
 log.workspace = true
 sqlx.workspace = true
 tokio.workspace = true

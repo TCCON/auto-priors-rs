@@ -2152,6 +2152,7 @@ dependencies = [
  "dotenv",
  "flate2",
  "futures",
+ "glob",
  "hostname",
  "itertools",
  "lettre",

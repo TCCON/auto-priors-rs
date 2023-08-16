@@ -12,6 +12,7 @@ async-trait = "0.1.72"
 chrono = "0.4"
 dotenv = "0.15.0"
 env_logger = "0.9"
+glob = "0.3"
 log = "0.4"
 sqlx = {version = "0.7", features = ["mysql", "runtime-tokio-rustls", "chrono"]}
 tabled = "0.14.0"

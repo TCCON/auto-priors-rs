@@ -589,6 +589,21 @@ impl Job {
         base_run_dir
     }
 
+    pub fn mod_output_dir(&self, site_id: &str) -> PathBuf {
+        let run_dir = self.run_dir(false);
+        run_dir.join("fpit").join(site_id).join("vertical")
+    }
+
+    pub fn vmr_output_dir(&self, site_id: &str) -> PathBuf {
+        let run_dir = self.run_dir(false);
+        run_dir.join("fpit").join(site_id).join("vmrs-vertical")
+    }
+
+    pub fn map_output_dir(&self, site_id: &str) -> PathBuf {
+        let run_dir = self.run_dir(false);
+        run_dir.join("fpit").join(site_id).join("maps-vertical")
+    }
+
     pub async fn get_jobs_list(conn: &mut MySqlConn, pending_and_running_only: bool) -> JobResult<Vec<Job>> {
         let qjobs = if pending_and_running_only{
             sqlx::query_as!(
@@ -1154,34 +1169,18 @@ impl Job {
         return Ok((n, t))
     }
 
+    pub async fn set_cleaned(&mut self, conn: &mut MySqlConn) -> anyhow::Result<()> {
+        self.delete_output_and_run_dir()?;
+        self.set_state(conn, JobState::Cleaned).await?;
+        self.state = JobState::Cleaned;
+        Ok(())
+    }
+
+
     /// Reset this job to pending, deleting the run directory or output directory/file as well
     pub async fn reset(&mut self, conn: &mut MySqlConn) -> anyhow::Result<()> {
-        if let Some(output) = &self.output_file {
-            if output.is_dir() {
-                std::fs::remove_dir_all(output)
-                    .unwrap_or_else(|e| warn!(
-                        "Error occurred while trying to remove output directory ({}) for job {}. Error was: {e}",
-                        self.save_dir.display(), self.job_id
-                    ));
-            }
-
-            if output.is_file() {
-                std::fs::remove_file(output)
-                    .unwrap_or_else(|e| warn!(
-                        "Error occurred while trying to remove output file ({}) for job {}. Error was: {e}",
-                        self.save_dir.display(), self.job_id
-                    ));
-            }
-        }
-
-        let run_dir = self.run_dir(false);
-        if run_dir.exists() {
-            std::fs::remove_dir_all(&run_dir)
-                .unwrap_or_else(|e| warn!(
-                    "Error occurred while trying to remove run directory ({}) for job {}. Error was: {e}",
-                    run_dir.display(), self.job_id
-                ));
-        }
+        self.delete_output_and_run_dir()
+            .unwrap_or_else(|e| warn!("Failed to clean up output files, error was: {e}"));
 
         sqlx::query!(
             "UPDATE Jobs SET state = ?, output_file = ?, complete_time = ? WHERE job_id = ?",
@@ -1199,10 +1198,41 @@ impl Job {
         Ok(())
     }
 
+    fn delete_output_and_run_dir(&self) -> anyhow::Result<()> {
+        if let Some(output) = &self.output_file {
+            if output.is_dir() {
+                std::fs::remove_dir_all(output)
+                .with_context(|| format!(
+                    "Error occurred while trying to remove output directory ({}) for job {}.",
+                    self.save_dir.display(), self.job_id
+                ))?;
+            }
+
+            if output.is_file() {
+                std::fs::remove_file(output)
+                .with_context(|| format!(
+                    "Error occurred while trying to remove output file ({}) for job {}.",
+                    self.save_dir.display(), self.job_id
+                ))?;
+            }
+        }
+
+        let run_dir = self.run_dir(false);
+        if run_dir.exists() {
+            std::fs::remove_dir_all(&run_dir)
+            .with_context(|| format!(
+                "Error occurred while trying to remove run directory ({}) for job {}.",
+                run_dir.display(), self.job_id
+            ))?;
+        }
+
+        Ok(())
+    }
+
     /// Delete this job, removing output/run files and deleting the job itself from the Jobs table
-    pub async fn delete(mut self, conn: &mut MySqlConn) -> anyhow::Result<u64> {
+    pub async fn delete(self, conn: &mut MySqlConn) -> anyhow::Result<u64> {
         // Only error is if setting the state fails, and since we're deleting the job, that doesn't matter
-        let _ = self.reset(conn).await;
+        self.delete_output_and_run_dir()?;
         let res = sqlx::query!("DELETE FROM Jobs WHERE job_id = ?", self.job_id)
             .execute(conn)
             .await?;

@@ -10,6 +10,7 @@ async-trait.workspace = true
 chrono = {workspace = true, features = ["serde"]}
 dotenv.workspace = true
 futures = "0.3"
+glob.workspace = true
 hostname = "0.3"
 itertools = "0.10.3"
 lettre = {version = "0.10", features = ["serde"]}
