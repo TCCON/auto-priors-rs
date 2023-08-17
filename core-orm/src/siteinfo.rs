@@ -421,6 +421,18 @@ impl StdSite {
         Ok(site)
     }
 
+    pub async fn set_site_id(&mut self, conn: &mut MySqlConn, new_site_id: String) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE StdSiteList SET site_id = ? WHERE id = ?",
+            new_site_id,
+            self.id
+        ).execute(conn)
+        .await?;
+
+        self.site_id = new_site_id;
+        Ok(())
+    }
+
     pub async fn set_name(&mut self, conn: &mut MySqlConn, site_name: String) -> anyhow::Result<()> {
         sqlx::query!(
             "UPDATE StdSiteList SET name = ? WHERE id = ?",

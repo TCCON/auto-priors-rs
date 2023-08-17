@@ -2,6 +2,7 @@ use std::str::FromStr;
 use anyhow;
 use chrono::NaiveDate;
 use clap::{self,Args, Subcommand};
+use log::warn;
 use orm::{self, siteinfo::{SiteType, StdSite, SiteInfo, StdOutputStructure}, MySqlConn};
 use sqlx::Connection;
 use tabled::Table;
@@ -117,6 +118,10 @@ pub struct EditSiteCli {
     /// The current two-letter ID for the site
     site_id: String,
 
+    /// A new two-letter ID for the site - must be unique among all sites
+    #[clap(long="site-id")]
+    new_site_id: Option<String>,
+
     /// If given, the new name to assign for this site
     #[clap(long="name")]
     site_name: Option<String>,
@@ -135,12 +140,13 @@ pub struct EditSiteCli {
 }
 
 pub async fn edit_std_site_cli(conn: &mut MySqlConn, args: EditSiteCli) -> anyhow::Result<()> {
-    edit_std_site(conn, &args.site_id, args.site_name, args.site_type, args.output_structure).await
+    edit_std_site(conn, &args.site_id, args.new_site_id, args.site_name, args.site_type, args.output_structure).await
 }
 
 pub async fn edit_std_site(
     conn: &mut MySqlConn, 
     site_id: &str, 
+    new_site_id: Option<String>,
     site_name: Option<String>, 
     site_type: Option<SiteType>,
     output_structure: Option<StdOutputStructure>,
@@ -153,7 +159,11 @@ pub async fn edit_std_site(
         anyhow::bail!("No site with site ID '{site_id}'");
     };
 
-    // TODO: allow changing the site id?
+    if let Some(sid) = new_site_id {
+        site.set_site_id(&mut trans, sid.clone()).await?;
+        warn!("Site ID has been changed from '{site_id}' to '{sid}', but any standard site tarballs will not be renamed. Please see to that manually.");
+    }
+
     if let Some(name) = site_name {
         site.set_name(&mut trans, name).await?;
     }
