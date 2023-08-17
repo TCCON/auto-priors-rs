@@ -919,7 +919,10 @@ impl SiteInfo {
         let overlapped_locs = Self::get_site_locations_for_date_range(conn, site_id, start_date, end_date).await?;
 
         // Get the location string, longitude, and latitude from existing overlapped site information if these
-        // values are not provided as inputs.
+        // values are not provided as inputs. Note that changing the location description or comment does not 
+        // require regenerating priors
+        let regen_needed = longitude.is_some() || latitude.is_some();
+
         let location = location
             .map(|loc| Ok(loc))
             .unwrap_or_else(|| {
@@ -998,7 +1001,9 @@ impl SiteInfo {
 
         // Finally, mark any past or pending job as needed regenerated
         // TODO: make sure that when a job runs, it doesn't set the state to "complete" if it was marked as "regen needed", since presumably the job was launched before that regen needed flag was set
-        StdSiteJob::set_regen_flag(&mut trans, site_id, start_date, end_date).await?;
+        if regen_needed{
+            StdSiteJob::set_regen_flag(&mut trans, site_id, start_date, end_date).await?;
+        }
 
         trans.commit().await?;
 

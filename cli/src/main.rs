@@ -248,6 +248,11 @@ async fn main() -> anyhow::Result<()> {
             stdsites::make_std_site_tarballs(&mut conn, &config).await?;
         },
 
+        Commands::StdSiteJobs( StdSiteJobCli { command: StdSiteJobActions::FlagForRegen(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            stdsites::flag_for_regen_cli(&mut conn, subargs).await?;
+        },
+
         Commands::SiteInfoJson(subargs) => {
             let mut conn = db.get_connection().await?;
             siteinfo::site_info_json(&mut conn, &subargs).await?;
