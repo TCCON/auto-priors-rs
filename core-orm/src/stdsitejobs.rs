@@ -422,6 +422,7 @@ impl StdSiteJob {
                 continue;
             }
 
+            info!("Making standard site tarball ({} format) for {} on {}", row.output_structure, row.site_id, row.date);
             let output_tarball = row.output_structure.make_std_site_tarball(&config.execution.std_sites_tar_output, &row.site_id, &job)?;
             row.set_complete(conn, output_tarball).await?;
         }
@@ -429,6 +430,7 @@ impl StdSiteJob {
         for jid in job_ids {
             let mut job = jobs::Job::get_job_with_id(conn, jid).await?;
             job.set_cleaned(conn).await?;
+            info!("Standard site job {jid} cleaned up");
         }
 
         Ok(())
