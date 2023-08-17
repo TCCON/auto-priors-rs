@@ -996,8 +996,12 @@ impl Job {
                 site_id.len(), lat.len(), lon.len());
         }
 
-        // TODO: confirm that the job's date range does not cover multiple locations for any requested site,
-        // this is necessary for the Python interface, since it must fill in any lat/lons once for the whole job.
+        // Originally, I thought we needed to confirm that the job's date range does not cover multiple locations 
+        // for any requested site, since for the Python interface it must fill in any lat/lons once for the whole job.
+        // This should not be the case now: I had to break the jobs down into one-day sub-jobs anyway to deal
+        // with changing default met and ginput versions, and in doing so also allow the default lat/lons to change
+        // from day to day.
+        // TODO: should run a test on this
 
         // Also verify that any site_ids for which we do not have defined lat/lons in the inputs are
         // standard sites with at least one time period defined. At the same time, check that we don't 

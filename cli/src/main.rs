@@ -1,17 +1,5 @@
 // TODOs:
-//  * Commands:
-//      - Status of jobs
-//      - Cancel pending job(s)
-//  * Update GEOS file database
-//  * Download new GEOS files
-//  * Check for missing GEOS files
 //  * Delete expired output files
-//  * Reset running jobs to pending (in case of crash)
-//  * Standard sites:
-//      - Scan for failed standard site jobs
-//      - Proper backfilling (both forced and based on updated site dates)
-//      - Make tarballs
-//      - Create a new standard site/update an existing one?
 use clap::{self, Parser, Subcommand, Args};
 use clap_verbosity_flag::{Verbosity,InfoLevel};
 use dotenv;

@@ -1012,7 +1012,6 @@ impl SiteInfo {
         }
 
         // Finally, mark any past or pending job as needed regenerated
-        // TODO: make sure that when a job runs, it doesn't set the state to "complete" if it was marked as "regen needed", since presumably the job was launched before that regen needed flag was set
         if regen_needed{
             StdSiteJob::set_regen_flag(&mut trans, site_id, start_date, end_date).await?;
         }

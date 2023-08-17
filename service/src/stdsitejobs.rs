@@ -8,12 +8,6 @@ use tokio::sync::RwLock;
 
 use crate::error::ErrorHandler;
 
-// TODO:
-//  - Periodically add jobs for the standard sites for new days AND days marked for regen
-//  - (If marked for regen, need to make sure that previous days are cleared out first)
-//  - After jobs are submitted, periodically check if they are done. If so, make the standard site tarball and update the StdSiteJobs table plus the Jobs table
-//  - EM27 sites: add a flag for how to organize the output tarball - EGI/PROFFAST or straight GGG?
-//      No, inclined to keep them flat and work with Jacob/Benedikt/Lena to handle the flat output format.
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum StdSiteMessage {
