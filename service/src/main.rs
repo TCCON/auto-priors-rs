@@ -14,9 +14,9 @@ mod jobs;
 mod met;
 mod stdsitejobs;
 
+const MSG_BUFFER_SIZE: usize = 256;
 static MET_MANAGER: OnceCell<Mutex<met::MetManager<LoggingErrorHandler>>> = OnceCell::const_new();
 
-// TODO: modify where the component toggles are such that refreshing the config will enable/disable
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
 
     // JOB MANAGER SETUP //
 
-    let (tx_jobs, rx_jobs) = mpsc::channel::<jobs::JobMessage>(256);        
+    let (tx_jobs, rx_jobs) = mpsc::channel::<jobs::JobMessage>(MSG_BUFFER_SIZE);        
     let job_man_handle = {
         let db = db.clone();
         let shared_config = Arc::clone(&config);
@@ -71,44 +71,36 @@ async fn main() -> anyhow::Result<()> {
         })  
     };
 
-    if !timing_config.disable_job {
-        info!("Setting up job parsing and execution to run");
-        let tx_run_jobs = tx_jobs.clone();
-        sync_scheduler
-            .every(timing_config.job_start_seconds.seconds())
-            .run(move || {
-                debug!("Scheduler: sending StartJobs message");
-                match tx_run_jobs.try_send(jobs::JobMessage::StartJobs) {
-                    Ok(_) => debug!("Scheduler: StartJobs message sent"),
-                    Err(TrySendError::Closed(_)) => warn!("Could not send StartJobs message, channel closed"),
-                    Err(TrySendError::Full(_)) => warn!("Could not send StartJobs message, channel full"),
-                }
-                
-            });
-    } else {
-        warn!("Job parsing/execution will NOT run");
-    }
-
-    if !timing_config.disable_lut_regen {
-        info!("Setting up strat LUT regen to run");
-        let tx_lut_regen = tx_jobs.clone();
-        let lut_job = sync_scheduler
-            .every(timing_config.lut_regen_days.days())
-            .run(move || {
-                debug!("Scheduler: sending RegenLut message");
-                match tx_lut_regen.try_send(jobs::JobMessage::RegenLut) {
-                    Ok(_) => (),
-                    Err(TrySendError::Closed(_)) => warn!("Could not send RegenLut message, channel closed"),
-                    Err(TrySendError::Full(_)) => warn!("Could not send RegenLut message, channel closed")
-                }
-            });
-        if let Some(at) = timing_config.lut_regen_at {
-            lut_job.at(&at);
+    info!("Setting up job parsing and execution to run");
+    let tx_run_jobs = tx_jobs.clone();
+    sync_scheduler
+        .every(timing_config.job_start_seconds.seconds())
+        .run(move || {
+            debug!("Scheduler: sending StartJobs message");
+            match tx_run_jobs.try_send(jobs::JobMessage::StartJobs) {
+                Ok(_) => debug!("Scheduler: StartJobs message sent"),
+                Err(TrySendError::Closed(_)) => warn!("Could not send StartJobs message, channel closed"),
+                Err(TrySendError::Full(_)) => warn!("Could not send StartJobs message, channel full"),
             }
-    } else {
-        warn!("LUT regen will NOT be run");
-    }
+        });
 
+    
+    info!("Setting up strat LUT regen to run");
+    let tx_lut_regen = tx_jobs.clone();
+    let lut_job = sync_scheduler
+        .every(timing_config.lut_regen_days.days())
+        .run(move || {
+            debug!("Scheduler: sending RegenLut message");
+            match tx_lut_regen.try_send(jobs::JobMessage::RegenLut) {
+                Ok(_) => (),
+                Err(TrySendError::Closed(_)) => warn!("Could not send RegenLut message, channel closed"),
+                Err(TrySendError::Full(_)) => warn!("Could not send RegenLut message, channel closed")
+            }
+        });
+    if let Some(at) = timing_config.lut_regen_at {
+        lut_job.at(&at);
+    }
+    
     // END JOB MANAGER SETUP //
 
     // MET MANAGER SETUP //
@@ -137,6 +129,54 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // END MET MANAGER SETUP //
+
+    // STD SITE MANAGER SETUP //
+
+    let (tx_std_sites, rx_std_sites) = mpsc::channel::<stdsitejobs::StdSiteMessage>(MSG_BUFFER_SIZE);  
+    let std_site_manager_handler = {
+        let db = db.clone();
+        let shared_config = Arc::clone(&config);
+        let err_handler = err_handler.clone();
+        tokio::spawn(async move {
+            let mut std_site_manager = stdsitejobs::StdSiteManager::new_with_pool(
+                db,
+                shared_config,
+                err_handler,
+                rx_std_sites
+            ).await;
+
+            std_site_manager.message_loop().await;
+        })
+    };
+
+    info!("Setting up job parsing and execution to run");
+    let tx_std_site_submit = tx_std_sites.clone();
+    let std_site_add_job = sync_scheduler
+        .every(timing_config.std_site_gen_hours.hours())
+        .run(move || {
+            debug!("Scheduler: sending AddJobs message to StdSiteManager");
+            match tx_std_site_submit.try_send(stdsitejobs::StdSiteMessage::AddJobs) {
+                Ok(_) => debug!("Scheduler: AddJobs message sent"),
+                Err(TrySendError::Closed(_)) => warn!("Could not send AddJobs message, channel closed"),
+                Err(TrySendError::Full(_)) => warn!("Could not send AddJobs message, channel full"),
+            }
+        });
+    if let Some(at) = timing_config.std_site_gen_offset_minutes {
+        std_site_add_job.plus(at.minutes());
+    }
+
+    let tx_std_site_tar = tx_std_sites.clone();
+    sync_scheduler
+        .every(timing_config.std_site_tar_minutes.minutes())
+        .run(move || {
+            debug!("Scheduler: sending MakeTarballs message to StdSiteManager");
+            match tx_std_site_tar.try_send(stdsitejobs::StdSiteMessage::MakeTarballs) {
+                Ok(_) => debug!("Scheduler MakeTarballs message sent"),
+                Err(TrySendError::Closed(_)) => warn!("Could not send MakeTarballs message, channel closed"),
+                Err(TrySendError::Full(_)) => warn!("Could not send MakeTarballs message, channel full"),
+            }
+        });
+    // END STD SITE MANAGER SETUP //
 
     // Start scheduler
 
@@ -168,15 +208,16 @@ async fn main() -> anyhow::Result<()> {
     let signal_handle = {
         let config = Arc::clone(&config);
         tokio::spawn(async move {
-            process_signals(signals, config, tx_scheduler, tx_jobs).await
+            process_signals(signals, config, tx_scheduler, tx_jobs, tx_std_sites).await
                 .unwrap_or_else(|e| error!("Error occurred while processing signals: {e}"));
         })
     };
 
     tokio::try_join!(
         job_man_handle,
+        std_site_manager_handler,
         schedule_handle,
-        signal_handle
+        signal_handle,
     ).map(|_| ())
     .unwrap_or_else(|e| {
         err_handler.report_error_with_context(&e, "Error occurred in join on all top level threads");
@@ -216,7 +257,8 @@ async fn process_signals(
     mut signals: Signals, 
     config: Arc<RwLock<orm::config::Config>>, 
     tx_scheduler: Sender<bool>,
-    tx_jobs: Sender<JobMessage>
+    tx_jobs: Sender<jobs::JobMessage>,
+    tx_std_sites: Sender<stdsitejobs::StdSiteMessage>,
     ) -> anyhow::Result<()> {
     // If I understand the signal_hook docs correctly, this should be an infinite loop.
     for sig in &mut signals {
@@ -226,18 +268,18 @@ async fn process_signals(
                 info!("Reloading configuration");
                 let new_config = orm::config::load_config_file_or_default(config_file)?;
                 let mut global_config = config.write().await;
-                *global_config = new_config; // todo: verify this works
+                *global_config = new_config;
                 
             }, // reload config
             signal::SIGINT => {
                 info!("Beginning graceful shutdown");
-                shutdown_components(ExitCommand::Graceful, tx_scheduler, tx_jobs).await;
+                shutdown_components(ExitCommand::Graceful, tx_scheduler, tx_jobs, tx_std_sites).await;
                 info!("Graceful shutdown complete");
                 break;
             },
             signal::SIGTERM | signal::SIGQUIT => {
                 info!("Beginning rapid shutdown");
-                shutdown_components(ExitCommand::Rapid, tx_scheduler, tx_jobs).await;
+                shutdown_components(ExitCommand::Rapid, tx_scheduler, tx_jobs, tx_std_sites).await;
                 info!("Rapid shutdown complete");
                 break;
             },
@@ -253,19 +295,24 @@ async fn process_signals(
 async fn shutdown_components(
     exit_cmd: ExitCommand, 
     tx_scheduler: Sender<bool>,
-    tx_jobs: Sender<JobMessage>
+    tx_jobs: Sender<jobs::JobMessage>,
+    tx_std_sites: Sender<stdsitejobs::StdSiteMessage>
 ) {
     tx_scheduler.send(true).await
         .unwrap_or_else(|e| error!("Could not send shutdown message to scheduler: {e}"));
 
     match exit_cmd {
         ExitCommand::Graceful => {
-            tx_jobs.send(JobMessage::StopGracefully).await
+            tx_jobs.send(jobs::JobMessage::StopGracefully).await
                 .unwrap_or_else(|e| error!("Could not send graceful shutdown message to jobs manager: {e}"));
+            tx_std_sites.send(stdsitejobs::StdSiteMessage::StopGracefully).await
+                .unwrap_or_else(|e| error!("Could not send graceful shutdown message to std. sites manager: {e}"));
         },
         ExitCommand::Rapid => {
             tx_jobs.send(JobMessage::StopRapidly).await
-            .unwrap_or_else(|e| error!("Could not send rapid shutdown message to jobs manager: {e}"));
+                .unwrap_or_else(|e| error!("Could not send rapid shutdown message to jobs manager: {e}"));
+            tx_std_sites.send(stdsitejobs::StdSiteMessage::StopRapidly).await
+                .unwrap_or_else(|e| error!("Could not send rapid shutdown message to std. sites manager: {e}"));
         },
     }
 }

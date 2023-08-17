@@ -628,15 +628,13 @@ pub struct ServiceTimingOptions {
     /// 06:00, 12:00, and 18:00
     pub met_download_hours: u32,
 
-    /// Set to true to disable parsing input files and starting jobs
+    /// Set to true to disable all aspects of running jobs: parsing input
+    /// files, starting jobs, regenerating the stratospheric LUTs, etc.
     pub disable_job: bool,
 
     /// How many seconds between attempts to start jobs. As with met,
     /// the attempts run on even multiples of this value.
     pub job_start_seconds: u32,
-
-    /// Set to true to disable regenerating the stratospheric LUTs
-    pub disable_lut_regen: bool,
 
     /// How frequently (in days) to insert jobs to regenerate the stratosphere
     /// look up tables for ginput. 
@@ -656,7 +654,11 @@ pub struct ServiceTimingOptions {
     /// How many minutes to add to the hours when determining when to run the
     /// standard sites. E.g., setting this to 180 when `std_site_gen_hours` is 24
     /// would run the standard sites at 03:00 every day.
-    pub std_site_gen_offset_minutes: Option<u32>
+    pub std_site_gen_offset_minutes: Option<u32>,
+
+    /// How frequently (in minutes) to check for standard site days ready to be
+    /// compressed into tarballs
+    pub std_site_tar_minutes: u32,
 }
 
 impl Default for ServiceTimingOptions {
@@ -666,12 +668,12 @@ impl Default for ServiceTimingOptions {
             met_download_hours: 6, 
             disable_job: false,
             job_start_seconds: 60, 
-            disable_lut_regen: false,
             lut_regen_days: 24, 
             lut_regen_at: Some("00:00".to_string()), 
             disable_std_site_gen: false,
             std_site_gen_hours: 24, 
-            std_site_gen_offset_minutes: Some(180) 
+            std_site_gen_offset_minutes: Some(180),
+            std_site_tar_minutes: 30,
         }
     }
 }

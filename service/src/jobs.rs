@@ -163,7 +163,9 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         loop {
             debug!("Job manager waiting for next message");
             let msg = self.msg_recv.recv().await;
-            if let Some(m) = msg {
+            if self.am_i_disabled().await {
+                warn!("Job management disabled in configuration");
+            } else if let Some(m) = msg {
                 debug!("Job manager received message: {m:?}");
                 match m {
                     JobMessage::StartJobs => self.start_jobs_entry_point().await,
@@ -185,6 +187,10 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                 break;
             }
         }
+    }
+
+    async fn am_i_disabled(&self) -> bool {
+        self.shared_config.read().await.timing.disable_job
     }
 
     /// The main driver function to be called in a loop or frequently scheduled task.
