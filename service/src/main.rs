@@ -5,7 +5,7 @@ use error::LoggingErrorHandler;
 use jobs::JobMessage;
 use log::{info, warn, error, debug};
 use signal_hook::{consts::signal, iterator::Signals};
-use tokio::sync::{RwLock, Mutex, OnceCell, mpsc::{self, error::TrySendError, error::TryRecvError, Sender}};
+use tokio::sync::{RwLock, mpsc::{self, error::TrySendError, error::TryRecvError, Sender}};
 
 use crate::error::ErrorHandler;
 
@@ -15,7 +15,6 @@ mod met;
 mod stdsitejobs;
 
 const MSG_BUFFER_SIZE: usize = 256;
-static MET_MANAGER: OnceCell<Mutex<met::MetManager<LoggingErrorHandler>>> = OnceCell::const_new();
 
 
 #[tokio::main]
@@ -42,7 +41,6 @@ async fn main() -> anyhow::Result<()> {
 
     let err_handler = error::LoggingErrorHandler{};
 
-    let mut scheduler = clokwerk::AsyncScheduler::new();
     let mut sync_scheduler = clokwerk::Scheduler::new();
     let signals = setup_signals().expect("Could not set up signal handling");
 
@@ -94,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
             match tx_lut_regen.try_send(jobs::JobMessage::RegenLut) {
                 Ok(_) => (),
                 Err(TrySendError::Closed(_)) => warn!("Could not send RegenLut message, channel closed"),
-                Err(TrySendError::Full(_)) => warn!("Could not send RegenLut message, channel closed")
+                Err(TrySendError::Full(_)) => warn!("Could not send RegenLut message, channel full")
             }
         });
     if let Some(at) = timing_config.lut_regen_at {
@@ -105,27 +103,35 @@ async fn main() -> anyhow::Result<()> {
 
     // MET MANAGER SETUP //
 
-    let met_manager: met::MetManager::<LoggingErrorHandler> = met::MetManager::new_with_pool(
-        db.clone(), 
-        Arc::clone(&config), 
-        LoggingErrorHandler {  }
-    ).await;
+    let (tx_met, rx_met) = mpsc::channel::<met::MetMessage>(MSG_BUFFER_SIZE);
+    let met_manager_handle = {
+        let db = db.clone();
+        let shared_config = Arc::clone(&config);
+        tokio::spawn(async move {
+            let mut met_manager = met::MetManager::new_with_pool(
+                db.clone(), 
+                shared_config, 
+                LoggingErrorHandler {  },
+                rx_met
+            ).await;
 
-    MET_MANAGER.set(Mutex::new(met_manager)).expect("Could not set the global met manager");
+            met_manager.message_loop().await;
+        })
+    };
+    
 
-    if !timing_config.disable_met_download {
-        info!("Setting up met download to run");
-        scheduler
+    {
+        let tx_met_dl = tx_met.clone();
+        sync_scheduler
             .every(timing_config.met_download_hours.hours())
-            .run(|| async {
-                // Should be safe to unwrap, will only be None if MET_MANAGER wasn't set, and 
-                // we did that above
-                let mutex = MET_MANAGER.get().unwrap();
-                let mut mm = mutex.lock().await;
-                mm.scheduler_entry_point().await;
+            .run(move || {
+                debug!("Scheduler: sending DownloadMet message");
+                match tx_met_dl.try_send(met::MetMessage::DownloadMet) {
+                    Ok(_) => (),
+                    Err(TrySendError::Closed(_)) => warn!("Could not send DownloadMet message, channel closed"),
+                    Err(TrySendError::Full(_)) => warn!("Could not send DownloadMet message, channel full")
+                }
             });
-    } else {
-        warn!("Met downloads will NOT run");
     }
 
     // END MET MANAGER SETUP //
@@ -208,12 +214,13 @@ async fn main() -> anyhow::Result<()> {
     let signal_handle = {
         let config = Arc::clone(&config);
         tokio::spawn(async move {
-            process_signals(signals, config, tx_scheduler, tx_jobs, tx_std_sites).await
+            process_signals(signals, config, tx_scheduler, tx_met, tx_jobs, tx_std_sites).await
                 .unwrap_or_else(|e| error!("Error occurred while processing signals: {e}"));
         })
     };
 
     tokio::try_join!(
+        met_manager_handle,
         job_man_handle,
         std_site_manager_handler,
         schedule_handle,
@@ -257,6 +264,7 @@ async fn process_signals(
     mut signals: Signals, 
     config: Arc<RwLock<orm::config::Config>>, 
     tx_scheduler: Sender<bool>,
+    tx_met: Sender<met::MetMessage>,
     tx_jobs: Sender<jobs::JobMessage>,
     tx_std_sites: Sender<stdsitejobs::StdSiteMessage>,
     ) -> anyhow::Result<()> {
@@ -273,13 +281,13 @@ async fn process_signals(
             }, // reload config
             signal::SIGINT => {
                 info!("Beginning graceful shutdown");
-                shutdown_components(ExitCommand::Graceful, tx_scheduler, tx_jobs, tx_std_sites).await;
+                shutdown_components(ExitCommand::Graceful, tx_scheduler, tx_met, tx_jobs, tx_std_sites).await;
                 info!("Graceful shutdown complete");
                 break;
             },
             signal::SIGTERM | signal::SIGQUIT => {
                 info!("Beginning rapid shutdown");
-                shutdown_components(ExitCommand::Rapid, tx_scheduler, tx_jobs, tx_std_sites).await;
+                shutdown_components(ExitCommand::Rapid, tx_scheduler, tx_met, tx_jobs, tx_std_sites).await;
                 info!("Rapid shutdown complete");
                 break;
             },
@@ -295,6 +303,7 @@ async fn process_signals(
 async fn shutdown_components(
     exit_cmd: ExitCommand, 
     tx_scheduler: Sender<bool>,
+    tx_met: Sender<met::MetMessage>,
     tx_jobs: Sender<jobs::JobMessage>,
     tx_std_sites: Sender<stdsitejobs::StdSiteMessage>
 ) {
@@ -303,12 +312,16 @@ async fn shutdown_components(
 
     match exit_cmd {
         ExitCommand::Graceful => {
+            tx_met.send(met::MetMessage::StopGracefully).await
+                .unwrap_or_else(|e| error!("Could not send graceful shutdown message to met manager: {e}"));
             tx_jobs.send(jobs::JobMessage::StopGracefully).await
                 .unwrap_or_else(|e| error!("Could not send graceful shutdown message to jobs manager: {e}"));
             tx_std_sites.send(stdsitejobs::StdSiteMessage::StopGracefully).await
                 .unwrap_or_else(|e| error!("Could not send graceful shutdown message to std. sites manager: {e}"));
         },
         ExitCommand::Rapid => {
+            tx_met.send(met::MetMessage::StopRapidly).await
+                .unwrap_or_else(|e| error!("Could not send rapid shutdown message to met manager: {e}"));
             tx_jobs.send(JobMessage::StopRapidly).await
                 .unwrap_or_else(|e| error!("Could not send rapid shutdown message to jobs manager: {e}"));
             tx_std_sites.send(stdsitejobs::StdSiteMessage::StopRapidly).await
