@@ -82,6 +82,19 @@ async fn main() -> anyhow::Result<()> {
             }
         });
 
+    info!("Setting up job cleanup to run");
+    let tx_cleanup_jobs = tx_jobs.clone();
+    sync_scheduler
+        .every(timing_config.delete_expired_jobs_minutes.hours())
+        .run(move || {
+            debug!("Scheduler: sending CleanUpJobs message");
+            match tx_cleanup_jobs.try_send(jobs::JobMessage::CleanUpJobs) {
+                Ok(_) => debug!("Scheduler: CleanUpJobs message sent"),
+                Err(TrySendError::Closed(_)) => warn!("Could not send CleanUpJobs message, channel closed"),
+                Err(TrySendError::Full(_)) => warn!("Could not send CleanUpJobs message, channel full"),
+            }
+        });
+
     
     info!("Setting up strat LUT regen to run");
     let tx_lut_regen = tx_jobs.clone();

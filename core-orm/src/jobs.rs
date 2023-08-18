@@ -1073,6 +1073,32 @@ impl Job {
         Ok(new_id as i32)
     }
 
+    /// For any job whose delete_time is in the past, remove its output and set the state to "Cleaned"
+    /// 
+    /// Note that if an error occurs while cleaning up one job, any following jobs will not be cleaned
+    /// up. However, rerunning this function (after the root cause of the error has been fixed) should
+    /// pick up where it left off.
+    pub async fn clean_up_expired_jobs(conn: &mut MySqlConn) -> anyhow::Result<()> {
+        let jobs: Vec<_> = sqlx::query_as!(
+            QJob,
+            "SELECT * FROM Jobs WHERE delete_time IS NOT NULL and delete_time <= ?",
+            chrono::Local::now().naive_local()
+        ).fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|q| Job::try_from(q))
+        .try_collect()?;
+
+        info!("{} jobs output expired, starting clean up", jobs.len());
+
+        for mut job in jobs {
+            job.set_cleaned(conn).await?;
+            debug!("Job {} cleaned up", job.job_id);
+        }
+
+        Ok(())
+    }
+
     /// Delete a job from the queue
     /// 
     /// # Parameters
@@ -1185,6 +1211,7 @@ impl Job {
         return Ok((n, t))
     }
 
+    /// Remove output from this job and set its state to "Cleaned"
     pub async fn set_cleaned(&mut self, conn: &mut MySqlConn) -> anyhow::Result<()> {
         self.delete_output_and_run_dir()?;
         self.set_state(conn, JobState::Cleaned).await?;

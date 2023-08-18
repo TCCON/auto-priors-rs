@@ -644,6 +644,17 @@ pub struct ServiceTimingOptions {
     /// omitted, then that will run at midnight.
     pub lut_regen_at: Option<String>,
 
+    /// How many hours between tries to clean up jobs whose output is ready
+    /// to be deleted.
+    pub delete_expired_jobs_minutes: u32,
+
+    /// How many minutes to add to the time when determining when to clean
+    /// up expired jobs' output. For example, setting this to 15 when 
+    /// delete_expired_jobs_minutes` is 60 would run the standard sites at 
+    /// 15 minutes past each hour.
+    #[serde(default)]
+    pub delete_expired_jobs_offset_minutes: u32,
+
     /// Set to true to disable generating standard site jobs/priors
     pub disable_std_site_gen: bool,
 
@@ -654,6 +665,7 @@ pub struct ServiceTimingOptions {
     /// How many minutes to add to the hours when determining when to run the
     /// standard sites. E.g., setting this to 180 when `std_site_gen_hours` is 24
     /// would run the standard sites at 03:00 every day.
+    #[serde(default)]
     pub std_site_gen_offset_minutes: Option<u32>,
 
     /// How frequently (in minutes) to check for standard site days ready to be
@@ -669,7 +681,9 @@ impl Default for ServiceTimingOptions {
             disable_job: false,
             job_start_seconds: 60, 
             lut_regen_days: 24, 
-            lut_regen_at: Some("00:00".to_string()), 
+            lut_regen_at: Some("00:00".to_string()),
+            delete_expired_jobs_minutes: 12,
+            delete_expired_jobs_offset_minutes: 0,
             disable_std_site_gen: false,
             std_site_gen_hours: 24, 
             std_site_gen_offset_minutes: Some(180),

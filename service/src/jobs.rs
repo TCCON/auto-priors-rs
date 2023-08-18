@@ -16,6 +16,7 @@ static LUT_QUEUE_NAME: &'static str = "LUT_REGEN";
 pub(crate) enum JobMessage {
     StartJobs,
     RegenLut,
+    CleanUpJobs,
     StopGracefully,
     StopRapidly,
 }
@@ -155,7 +156,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             error_handler,
             msg_recv
         };
-        me.schedule_lut_regen().await;
+        me.schedule_lut_regen().await?;
         Ok(me)
     }
 
@@ -167,9 +168,10 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                 warn!("Job management disabled in configuration");
             } else if let Some(m) = msg {
                 debug!("Job manager received message: {m:?}");
-                match m {
-                    JobMessage::StartJobs => self.start_jobs_entry_point().await,
-                    JobMessage::RegenLut => self.schedule_lut_regen().await,
+                let res = match m {
+                    JobMessage::StartJobs => self.start_jobs_entry_point().await.context("Error occurred while starting jobs"),
+                    JobMessage::RegenLut => self.schedule_lut_regen().await.context("Error occurred while scheduling LUT regeneration"),
+                    JobMessage::CleanUpJobs => self.clean_up_expired_jobs().await.context("Error occurred while cleaning up jobs"),
                     JobMessage::StopGracefully => {
                         self.msg_recv.close();
                         self.wait_for_jobs_to_finish().await;
@@ -180,7 +182,12 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                         self.stop_and_reset_jobs().await;
                         break;
                     }
+                };
+
+                if let Err(e) = res {
+                    self.error_handler.report_error(e.as_ref());
                 }
+
                 debug!("Job manager finished handling message: {m:?}");
             } else {
                 info!("JobManager: receiver closed, exiting message loop");
@@ -200,40 +207,28 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     /// 
     /// Note that while errors may occur in this function, they are passed to the instance's
     /// error handler to report (usually to a log file and/or email). 
-    async fn start_jobs_entry_point(&mut self) {
+    async fn start_jobs_entry_point(&mut self) -> anyhow::Result<()> {
         // TODO: check if the configuration queues still match the ones we have stored
         // and update if needed. Alternatively, pop any empty queues from the HashMap
         // so that they eventually get updated. The former approach would benefit from
         // switching the config to a tokio watcher tunnel.
 
-        self.scan_for_job_submissions()
-            .await
-            .unwrap_or_else(|e| {
-                self.error_handler.report_error(e.as_ref())
-            });
+        self.scan_for_job_submissions().await?;
 
-        self.add_pending_jobs_to_queues()
-            .await
-            .unwrap_or_else(|e| {
-                self.error_handler.report_error(e.as_ref())
-            });
+        self.add_pending_jobs_to_queues().await?;
 
-        self.start_queues_with_jobs()
-            .await
-            .unwrap_or_else(|e| {
-                self.error_handler.report_error(e.as_ref())
-            });
+        self.start_queues_with_jobs().await?;
 
         debug!("Finished in scheduler_entry_point");
         
-        // TODO: delete expired jobs' output
+        Ok(())
     }
 
     /// Insert special jobs to regenerate ginput's chemical LUTs into the queues
     /// 
     /// This should be called about once per day to ensure that the LUTs are up to date,
     /// as they will periodically need to extrapolate further into the future.
-    pub(crate) async fn schedule_lut_regen(&mut self) {
+    pub(crate) async fn schedule_lut_regen(&mut self) -> anyhow::Result<()> {
         // For each ginput defined in the config, add a blocking job to the special queue
         // to regenerate its LUTs
         let lut_queue = self.job_queues.entry(LUT_QUEUE_NAME.to_string())
@@ -254,6 +249,16 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
                 )
             }
         }
+
+        Ok(())
+    }
+
+    async fn clean_up_expired_jobs(&self) -> anyhow::Result<()> {
+        let mut conn = self.pool.get_connection().await
+            .context("Could not get database connection to clean up expired jobs")?;
+        Job::clean_up_expired_jobs(&mut conn).await
+            .context("Error occurred in call to Job::clean_up_expired_jobs")?;
+        Ok(())
     }
 
     pub(crate) async fn reset_running_jobs(&self) -> anyhow::Result<()> {
@@ -1027,7 +1032,7 @@ mod tests {
         let mut lut_queue = Queue::new_blocking(usize::MAX, LUT_REGEN_BLOCKING_PRIORITY);
         lut_queue.add(lut_job).await;
 
-        manager.start_jobs_entry_point().await;
+        manager.start_jobs_entry_point().await.unwrap();
         let n_running = manager.job_queues
             .get(TEST_QUEUE_NAME)
             .unwrap()
@@ -1039,7 +1044,7 @@ mod tests {
             .get_mut(TEST_QUEUE_NAME)
             .unwrap()
             .add(test_job).await;
-        manager.start_jobs_entry_point().await;
+        manager.start_jobs_entry_point().await.unwrap();
 
         let n_running = manager.job_queues
             .get(TEST_QUEUE_NAME)
@@ -1056,7 +1061,7 @@ mod tests {
         // Now wait long enough that the first standard job should *definitely* finish
         tokio::time::sleep(Duration::from_secs(10)).await;
         
-        manager.start_jobs_entry_point().await;
+        manager.start_jobs_entry_point().await.unwrap();
         let n_in_queue = manager.job_queues
             .get(TEST_QUEUE_NAME)
             .unwrap()
@@ -1078,7 +1083,7 @@ mod tests {
         // Now wait for the LUT job to finish
         tokio::time::sleep(Duration::from_secs(10)).await;
 
-        manager.start_jobs_entry_point().await;
+        manager.start_jobs_entry_point().await.unwrap();
 
         let n_lut_in_queue = manager.job_queues
             .get("LUT")
