@@ -778,6 +778,18 @@ impl Job {
         Self::claim_next_job_in_queue_with_opts(conn, queue, fair_share, 1.0, 5).await
     }
 
+    pub async fn get_distinct_submitter_emails(conn: &mut MySqlConn) -> JobResult<Vec<String>> {
+        let emails = sqlx::query!(
+            "SELECT DISTINCT(email) FROM Jobs WHERE email IS NOT NULL",
+        ).fetch_all(conn)
+        .await?
+        .into_iter()
+        .map(|rec| rec.email.unwrap()) // SQL query ensures email is not null
+        .collect_vec();
+
+        Ok(emails)
+    }
+
     /// Convert a user-inputted string of site IDs into a proper vector of site IDs
     /// 
     /// # Parameters

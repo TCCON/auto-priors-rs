@@ -48,6 +48,7 @@ enum Commands {
     ResetJob(jobs::ResetJobCli),
     DeleteJob(jobs::DeleteJobCli),
     PrintJobs(jobs::PrintJobsCli),
+    EmailSubmitters(jobs::EmailSubmittersCli),
     StdSites(siteinfo::StdSiteCli),
     #[clap(alias="ssj")]
     StdSiteJobs(stdsites::StdSiteJobCli),
@@ -194,6 +195,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::PrintJobs(subargs) => {
             let mut conn = db.get_connection().await?;
             jobs::print_jobs_table_cli(&mut conn, subargs).await?;
+        },
+
+        Commands::EmailSubmitters(subargs) => {
+            let mut conn = db.get_connection().await?;
+            jobs::email_past_job_submitters_cli(&mut conn, &config, subargs).await?;
         },
 
         Commands::StdSites(StdSiteCli { command: StdSiteActions::AddSite(subargs) }) => {

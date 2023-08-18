@@ -115,3 +115,5 @@ impl Display for EmailError {
         }
     }
 }
+
+impl Error for EmailError {}
