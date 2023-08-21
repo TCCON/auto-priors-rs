@@ -528,7 +528,7 @@ pub(crate) trait Queueable {
     fn has_started(&self) -> bool;
 
     /// Mark that this item should be cleaned up the next time the queue is tidied up.
-    fn make_for_cleanup(&mut self);
+    fn mark_for_cleanup(&mut self);
 
     /// Return whether a job is waiting to start/actively running (`false`) or completed/errored (`true`).
     /// This should also do any finalization 
@@ -600,7 +600,7 @@ impl<T: Queueable> Queue<T> {
                 let conn = match pool.get_connection().await {
                     Ok(c) => c,
                     Err(e) => {
-                        item.make_for_cleanup();
+                        item.mark_for_cleanup();
                         error_handler.report_error_with_context(
                             e.as_ref(),
                             "Failed to acquire database connection while trying to start a job"
@@ -689,8 +689,8 @@ impl<T: Queueable> Queue<T> {
 ///    calling `ginput`. Right now, there is only a [`ShellGinputRunner`].
 #[derive(Debug)]
 pub enum ServiceJobRunner {
-    GinputJob{job: Job, join_handle: Option<GinputHandle>},
-    LutRegenJob{ginput_key: String, join_handle: Option<GinputHandle>}
+    GinputJob{job: Job, join_handle: Option<GinputHandle>, force_cleanup: bool},
+    LutRegenJob{ginput_key: String, join_handle: Option<GinputHandle>, force_cleanup: bool}
 }
 
 impl ServiceJobRunner {
@@ -796,17 +796,17 @@ impl ServiceJobRunner {
 impl Queueable for ServiceJobRunner {
     fn describe(&self) -> String {
         match self {
-            Self::GinputJob{job, join_handle: _} => format!("ServiceJobRunner(job = {})", job.job_id),
-            Self::LutRegenJob{ginput_key, join_handle: _} => format!("ServiceJobRunner(lut ginput = {ginput_key})")
+            Self::GinputJob{job, join_handle: _, force_cleanup: _} => format!("ServiceJobRunner(job = {})", job.job_id),
+            Self::LutRegenJob{ginput_key, join_handle: _, force_cleanup: _} => format!("ServiceJobRunner(lut ginput = {ginput_key})")
         }
     }
 
     fn new_from_job(job: Job, _config: &Config) -> Self {
-        Self::GinputJob { job, join_handle: None }
+        Self::GinputJob { job, join_handle: None, force_cleanup: false }
     }
 
     fn new_lut_job(ginput_key: String) -> Self {
-        Self::LutRegenJob { ginput_key, join_handle: None }
+        Self::LutRegenJob { ginput_key, join_handle: None, force_cleanup: false }
     }
 
     fn has_started(&self) -> bool {
@@ -814,34 +814,54 @@ impl Queueable for ServiceJobRunner {
         // takes a mutable ref, it can't be called at the same time as this function,
         // so we should never have a case where start is in progress when this is called
         match self {
-            Self::GinputJob{job: _, join_handle} => join_handle.is_some(),
-            Self::LutRegenJob{ginput_key: _, join_handle} => join_handle.is_some()
+            Self::GinputJob{job: _, join_handle, force_cleanup: _} => join_handle.is_some(),
+            Self::LutRegenJob{ginput_key: _, join_handle, force_cleanup: _} => join_handle.is_some()
         }
     }
 
-    fn make_for_cleanup(&mut self) {
-        // TODO: I think the cancel functions might also need fixed
-        todo!()
+    fn mark_for_cleanup(&mut self) {
+        match self {
+            Self::GinputJob{job: _, join_handle: _, force_cleanup} => *force_cleanup = true,
+            Self::LutRegenJob{ginput_key: _, join_handle: _, force_cleanup} => *force_cleanup = true,
+        }
     }
 
     async fn is_done(&mut self, conn: &mut MySqlPC) -> anyhow::Result<bool> {
         match self {
-            Self::GinputJob{job, join_handle} => Self::is_ginput_job_done(job, join_handle, conn).await,
-            Self::LutRegenJob{ginput_key, join_handle} => Self::is_lut_job_done(&ginput_key, join_handle).await
+            Self::GinputJob{job, join_handle, force_cleanup} => {
+                if *force_cleanup {
+                    Ok(true)
+                } else {
+                    Self::is_ginput_job_done(job, join_handle, conn).await
+                }
+            },
+            Self::LutRegenJob{ginput_key, join_handle, force_cleanup} => {
+                if *force_cleanup {
+                    Ok(true)
+                } else {
+                    Self::is_lut_job_done(&ginput_key, join_handle).await
+                }
+            }
         }
     }
 
     async fn start(&mut self, conn: MySqlPC, config: &Config) -> anyhow::Result<()> {
         match self {
-            Self::GinputJob{job, join_handle} => Self::start_ginput_job(conn, job.clone(), config.clone(), join_handle).await,
-            Self::LutRegenJob{ginput_key, join_handle} => Self::start_lut_job(ginput_key.clone(), join_handle, config.clone()).await,
+            Self::GinputJob{job, join_handle, force_cleanup: _} => Self::start_ginput_job(conn, job.clone(), config.clone(), join_handle).await,
+            Self::LutRegenJob{ginput_key, join_handle, force_cleanup: _} => Self::start_lut_job(ginput_key.clone(), join_handle, config.clone()).await,
         }
     }
 
     async fn cancel(&mut self, conn: &mut MySqlPC) -> anyhow::Result<bool> {
         match self {
-            Self::GinputJob{job, join_handle} => Self::cancel_ginput_job(job, join_handle, conn).await,
-            Self::LutRegenJob{ginput_key, join_handle} => Self::cancel_lut_job(ginput_key, join_handle).await,
+            Self::GinputJob{job, join_handle, force_cleanup} => {
+                *force_cleanup = true;
+                Self::cancel_ginput_job(job, join_handle, conn).await
+            },
+            Self::LutRegenJob{ginput_key, join_handle, force_cleanup} => {
+                *force_cleanup = true;
+                Self::cancel_lut_job(ginput_key, join_handle).await
+            },
         }
         
     }
@@ -863,13 +883,14 @@ mod tests {
     #[derive(Debug, Clone)]
     struct DummyJobRunner {
         delay: Duration,
-        start_time: Option<Instant>
+        start_time: Option<Instant>,
+        force_cleanup: bool,
     }
 
     impl DummyJobRunner {
         fn new_from_seconds(seconds: u64) -> Self {
             let delay = Duration::from_secs(seconds);
-            Self { delay, start_time: None }
+            Self { delay, start_time: None, force_cleanup: false }
         }
     }
 
@@ -896,11 +917,15 @@ mod tests {
             self.start_time.is_some()
         }
 
-        fn make_for_cleanup(&mut self) {
-            todo!()
+        fn mark_for_cleanup(&mut self) {
+            self.force_cleanup = true;
         }
 
         async fn is_done(&mut self, _conn: &mut MySqlPC) -> anyhow::Result<bool> {
+            if self.force_cleanup {
+                return Ok(true)
+            }
+
             let start = if let Some(t) = self.start_time {
                 t
             } else {
