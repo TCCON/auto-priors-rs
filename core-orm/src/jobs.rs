@@ -1407,13 +1407,45 @@ impl InnerGinputRunner for ShellGinputRunner {
     }
 
     async fn run_lut_regen(&self) -> JobResult<()> {
+        // Set up output files for the job: ideally put the logs in the same directory as the
+        // LUT tables, falling back to the ginput root directory. If we can't even get that, fall
+        // back to the current directory.
+        let ginput_dir = if let Some(parent) = self.run_ginput_path.parent() {
+            parent.to_path_buf()
+        } else {
+            warn!("Could not determine ginput directory from the ginput run path, outputting LUT logs to current directory");
+            PathBuf::from(".")
+        };
+
+        let ginput_data_dir = ginput_dir.join("ginput").join("data");
+
+        let lut_log_dir = if ginput_data_dir.exists() {
+            ginput_data_dir
+        } else {
+            warn!("Unexpected ginput directory structure (missing ginput/data subdirectory), writing LUT logs to {}", ginput_dir.display());
+            ginput_dir
+        };
+
+        let log_file = std::fs::File::create(
+            lut_log_dir.join("automation_lut_regen.out")
+        ).map_err(|e| JobError::RunDirectoryError(e))?;
+        let log_stdout = Stdio::from(log_file);
+    
+        let log_file = std::fs::File::create(
+            lut_log_dir.join("automation_lut_regen.err")
+        ).map_err(|e| JobError::RunDirectoryError(e))?;
+        let log_stderr = Stdio::from(log_file);
+
+        // Finally we can run the job
+
         let status = tokio::process::Command::new(&self.run_ginput_path)
             .arg("auto")
             .arg("regen-lut")
+            .stdout(log_stdout)
+            .stderr(log_stderr)
             .status()
             .await
             .map_err(|e| JobError::RunDirectoryError(e))?;
-            // TODO: send to LUT log file or log to the normal log file (capture output)
 
         if status.success() {
             Ok(())
