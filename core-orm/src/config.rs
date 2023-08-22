@@ -14,7 +14,7 @@ use chrono::{NaiveDate, NaiveDateTime, Duration};
 use hostname;
 use itertools::Itertools;
 use lettre::message::{Mailbox, Mailboxes};
-use log::{debug, warn, info};
+use log::{debug, info};
 use serde::{Serialize, Deserialize};
 use toml;
 use url::Url;
@@ -24,16 +24,95 @@ use crate::{met::{self, MetDataType}, error::{DefaultOptsQueryError, EmailError}
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct TestConfig {
-    pub default_options: Vec<DefaultOptions>, // errors if after data
-    pub execution: ExecutionConfig,
-    pub data: DataConfig,
-    // #[serde(default)]
-    // pub email: EmailConfig,
-    // pub admin: AdminConfig,
-    // #[serde(default)]
-    // pub timing: ServiceTimingOptions
+#[derive(Debug, Default)]
+pub struct ConfigValidationError(Vec<ConfigValErrorCause>);
+
+impl From<ConfigValidationError> for Result<(), ConfigValidationError> {
+    fn from(value: ConfigValidationError) -> Self {
+        if value.0.is_empty() {
+            Ok(())
+        } else {
+            Err(value)
+        }
+    }
+}
+
+impl Display for ConfigValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Configuration failed validation:")?;
+        for (idx, cause) in self.0.iter().enumerate() {
+            writeln!(f, " {}) {cause}", idx+1)?;
+        }
+        Ok(())
+    }
+}
+
+impl ConfigValidationError {
+    fn push(&mut self, err: ConfigValErrorCause) {
+        self.0.push(err);
+    }
+
+    fn extend(&mut self, other: Self) {
+        self.0.extend(other.0);
+    }
+}
+
+#[derive(Debug)]
+pub enum ConfigValErrorCause {
+    UnknownGinputKey{key: String, defaults_index: usize},
+    UnknownMetKey{key: String, defaults_index: usize},
+    BadMetConfig{key: String, reason: String},
+    DefaultsDateInverted(usize),
+    DefaultsOverlap(Vec<(String, String)>),
+    FtpPathsMismatch{ftp_root: PathBuf, output_path: PathBuf},
+    NoncanonicalPath{description: &'static str, path: PathBuf},
+    MissingPath(String),
+    MissingOptPath(String),
+    QueueSameName{q1: &'static str, q2: &'static str, name: String},
+    MissingEmail(&'static str),
+}
+
+impl Display for ConfigValErrorCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigValErrorCause::UnknownGinputKey { key, defaults_index } => {
+                write!(f, "Undefined ginput key '{key}' in default options #{}", defaults_index+1)
+            },
+            ConfigValErrorCause::UnknownMetKey { key, defaults_index } => {
+                write!(f, "Undefined met key '{key}' in default options #{}", defaults_index+1)
+            },
+            ConfigValErrorCause::BadMetConfig { key, reason } => {
+                write!(f, "The met download config '{key}' is not valid for use with ginput: {reason}")
+            },
+            ConfigValErrorCause::DefaultsDateInverted(idx) => {
+                write!(f, "Default options #{} has the end date before the start date", idx+1)
+            },
+            ConfigValErrorCause::DefaultsOverlap(pairs) => {
+                let overlaps = pairs.into_iter()
+                    .map(|(a,b)| format!("{a} and {b}"))
+                    .join(", ");
+                write!(f, "Some default options overlap: {overlaps}")
+            },
+            ConfigValErrorCause::FtpPathsMismatch { ftp_root, output_path } => {
+                write!(f, "The output path ({}) is not under the FTP root ({})", output_path.display(), ftp_root.display())
+            },
+            ConfigValErrorCause::NoncanonicalPath { description, path } => {
+                write!(f, "The {description} path ({}) cannot be canonicalized", path.display())
+            },
+            ConfigValErrorCause::MissingPath(description) => {
+                write!(f, "The {description} path is undefined or does not point to an extant file/directory")
+            },
+            ConfigValErrorCause::MissingOptPath(description) => {
+                write!(f, "The {description} path does not point to a valid file; remove the option entirely to make this a None")
+            },
+            ConfigValErrorCause::QueueSameName { q1, q2, name } => {
+                write!(f, "The {q1} and {q2} queues have the same name: {name}")
+            },
+            ConfigValErrorCause::MissingEmail(description) => {
+                write!(f, "The {description} email is empty")
+            },
+        }
+    }
 }
 
 /// Top level configuration structure, comprised of subsections represented by other structures:
@@ -96,6 +175,10 @@ impl Config {
         let mut chem_path = None;
         let mut ginput_met_key = None;
 
+        let mut found_eta_met = false;
+        let mut found_eta_chem = false;
+        let mut found_2d_met = false;
+
         for (i, cfg) in dl_cfgs.iter().enumerate() {
             let i = i + 1;
             let download_dir = cfg.download_dir.canonicalize()
@@ -133,6 +216,12 @@ impl Config {
                             parent_dir.display(), geos_path.unwrap().display()
                         );
                     }
+
+                    match &cfg.levels {
+                        met::MetLevels::Surf => { found_2d_met = true; },
+                        met::MetLevels::Eta => { found_eta_met = true; },
+                        _ => ()
+                    }
                 },
                 MetDataType::Chm => {
                     if chem_path.is_none() {
@@ -142,6 +231,10 @@ impl Config {
                             "Met type {met_key} defines inconsistent parent directories for its chem files: {} vs {}",
                             parent_dir.display(), chem_path.unwrap().display()
                         );
+                    }
+
+                    if let met::MetLevels::Eta = &cfg.levels {
+                        found_eta_chem = true;
                     }
                 },
                 MetDataType::Other(v) => {
@@ -154,14 +247,25 @@ impl Config {
             "Met type {met_key} defines no met files for download"
         ))?;
 
-        let chem_path = chem_path.unwrap_or_else(|| {
-            warn!("Met type {met_key} defines no chem files for download");
-            geos_path.clone()
-        });
+        let chem_path = chem_path.ok_or_else(|| anyhow::anyhow!(
+            "Met type {met_key} defines no chem files for download"
+        ))?;
 
         let ginput_met_key = ginput_met_key.ok_or_else(|| anyhow::anyhow!(
             "Met type {met_key} defines no files for download"
         ))?;
+
+        if !found_2d_met {
+            anyhow::bail!("2D met files not defined for download");
+        }
+
+        if !found_eta_met {
+            anyhow::bail!("Eta met files not defined for download");
+        }
+
+        if !found_eta_chem {
+            anyhow::bail!("Eta chem files not defined for download");
+        }
 
         Ok((geos_path, chem_path, ginput_met_key))
     }
@@ -211,12 +315,27 @@ impl Config {
     /// sets of default options do overlap in time.
     pub fn get_all_defaults_check_overlap(&self) -> Result<Vec<&DefaultOptions>, DefaultOptsQueryError> {
         let all_options = self.get_all_defaults();
+        let pairs = Self::check_defaults_overlap(&all_options, true);
+        if !pairs.is_empty() {
+            return Err(DefaultOptsQueryError::MatchesOverlap(pairs[0].0.to_string(), pairs[0].1.to_string()));
+        }
+
+        Ok(all_options)
+    }
+
+    fn check_defaults_overlap<'d>(all_options: &[&'d DefaultOptions], short_circuit: bool) -> Vec<(&'d DefaultOptions, &'d DefaultOptions)> {
+        let mut overlaps = vec![];
         for pair in all_options.iter().combinations(2) {
             if pair[0].overlaps(pair[1]) {
-                return Err(DefaultOptsQueryError::MatchesOverlap(pair[0].to_string(), pair[1].to_string()))
+                if short_circuit {
+                    return vec![(pair[0], pair[1])]
+                } else {
+                    overlaps.push((*pair[0], *pair[1]));
+                }
             }
         }
-        Ok(all_options)
+
+        return overlaps;
     }
 
 
@@ -269,6 +388,156 @@ impl Config {
         } else {
             Some(self.execution.simulation_delay)
         }
+    }
+
+    fn validate(&self) -> Result<(), ConfigValidationError> {
+        let mut errors = ConfigValidationError::default();
+
+        let default_opts_errors = self.validate_default_options();
+        errors.extend(default_opts_errors);
+
+        let exec_errors = self.validate_execution();
+        errors.extend(exec_errors);
+
+        let ginput_errors = self.validate_ginputs();
+        errors.extend(ginput_errors);
+
+        let data_errors = self.validate_data();
+        errors.extend(data_errors);
+
+        let email_errors = self.validate_emails();
+        errors.extend(email_errors);
+        
+        errors.into()
+    } 
+
+    fn validate_default_options(&self) -> ConfigValidationError {
+        let mut errors = ConfigValidationError::default();
+
+        for (idx, default_opts) in self.default_options.iter().enumerate() {
+            if !self.execution.ginput.contains_key(&default_opts.ginput) {
+                errors.push(ConfigValErrorCause::UnknownGinputKey { key: default_opts.ginput.clone(), defaults_index: idx });
+            }
+
+            if self.get_met_configs(&default_opts.met).is_err() {
+                errors.push(ConfigValErrorCause::UnknownMetKey { key: default_opts.met.clone(), defaults_index: idx });
+            }
+
+            if default_opts.start_date >= default_opts.end_date {
+                errors.push(ConfigValErrorCause::DefaultsDateInverted(idx));
+            }
+        }
+
+        let pairs = Self::check_defaults_overlap(&self.get_all_defaults(), false);
+        if !pairs.is_empty() {
+            let pairs = pairs.into_iter()
+                .map(|(a,b)| (a.to_string(), b.to_string()))
+                .collect_vec();
+            errors.push(ConfigValErrorCause::DefaultsOverlap(pairs));
+        }
+        
+        errors
+    }
+
+    fn validate_execution(&self) -> ConfigValidationError {
+        let mut errors = ConfigValidationError::default();
+
+        // Check paths are not empty
+        if !self.execution.ftp_download_root.exists() {
+            errors.push(ConfigValErrorCause::MissingPath("execution.ftp_download_root".to_string()));
+        }
+        if !self.execution.output_path.exists() {
+            errors.push(ConfigValErrorCause::MissingPath("execution.output_path".to_string()));
+        }
+        if !self.execution.std_sites_output_base.exists() {
+            errors.push(ConfigValErrorCause::MissingPath("execution.std_sites_output_base".to_string()));
+        }
+        if !self.execution.std_sites_tar_output.exists() {
+            errors.push(ConfigValErrorCause::MissingPath("execution.std_sites_tar_output".to_string()));
+        }
+
+        // Check output is in the FTP directory
+        let output = self.execution.output_path.canonicalize();
+        let ftp_root = self.execution.ftp_download_root.canonicalize();
+        if let (Ok(out), Ok(ftp)) = (&output, &ftp_root) {
+            if out.strip_prefix(ftp).is_err() {
+                errors.push(ConfigValErrorCause::FtpPathsMismatch { ftp_root: ftp.to_path_buf(), output_path: out.to_path_buf() });
+            }
+        } else {
+            if output.is_err() {
+                errors.push(ConfigValErrorCause::NoncanonicalPath { 
+                    description: "execution.output_path", 
+                    path: self.execution.output_path.clone() 
+                });
+            }
+
+            if ftp_root.is_err() {
+                errors.push(ConfigValErrorCause::NoncanonicalPath { 
+                    description: "execution.ftp_download_root", 
+                    path: self.execution.ftp_download_root.clone()
+                })
+            }
+        }
+
+        // Check queues
+        if self.execution.submitted_job_queue == self.execution.std_site_job_queue {
+            errors.push(ConfigValErrorCause::QueueSameName { 
+                q1: "submitted", 
+                q2: "std_site", 
+                name: self.execution.submitted_job_queue.clone() 
+            });
+        }
+
+        errors
+    }
+
+    fn validate_ginputs(&self) -> ConfigValidationError {
+        let mut errors = ConfigValidationError::default();
+
+        for (key, ginput) in self.execution.ginput.iter() {
+            match ginput {
+                GinputConfig::Script { entry_point_path } => {
+                    if !entry_point_path.is_file() {
+                        errors.push(ConfigValErrorCause::MissingPath(
+                            format!("execution.ginput.{key}.entry_point_path")
+                        ));
+                    }
+                },
+            }
+        }
+
+        errors
+    }
+
+    fn validate_data(&self) -> ConfigValidationError {
+        let mut errors = ConfigValidationError::default();
+
+        if self.data.zgrid_file.as_deref().map(|p| !p.exists()).unwrap_or(false) {
+            errors.push(ConfigValErrorCause::MissingPath("data.zgrid_file".to_string()));
+        }
+
+        if self.data.base_vmr_file.as_deref().map(|p| !p.exists()).unwrap_or(false) {
+            errors.push(ConfigValErrorCause::MissingPath("data.base_vmr_file".to_string()));
+        }
+
+        // Confirm that all mets are valid for ginput
+        for met_key in self.data.download.keys() {
+            if let Err(e) = self.get_ginput_met_args(met_key) {
+                errors.push(ConfigValErrorCause::BadMetConfig { key: met_key.to_string(), reason: e.to_string() });
+            }
+        }
+
+        errors
+    }
+
+    fn validate_emails(&self) -> ConfigValidationError {
+        let mut errors = ConfigValidationError::default();
+        
+        if self.email.admin_emails.iter().count() == 0 {
+            errors.push(ConfigValErrorCause::MissingEmail("admin emails list"));
+        }
+
+        errors
     }
 }
 
@@ -864,25 +1133,38 @@ where T: AsRef<Path>
 }
 
 
-/// Load an existing configuration .toml file from `path`
+/// Load an existing configuration .toml file from `path`. 
+/// 
+/// Disable validation by passing `false` as the second argument. The
+/// TOML file must still deserialize successfully for an `Ok(_)` to be
+/// returned.
 /// 
 /// # Errors
 /// An `Err` is returned if:
 /// 
 /// * it could not open the file at `path`
 /// * it could not read the contents of `path`
-/// * the .toml file could not be decoded
+/// * the .toml file could not be decoded or failed validation
 /// 
 /// # See also
 /// * [`load_env_config_file`]
 /// * [`load_config_file_or_default`]
-pub fn load_config_file<T>(path: T) -> anyhow::Result<Config> 
+pub fn load_config_file<T>(path: T, validate: bool) -> anyhow::Result<Config> 
 where T: AsRef<Path>
 {
     let mut f = File::open(path).context("Failed to open configuration file.")?;
     let mut toml_str = vec![];
     f.read_to_end(&mut toml_str)?;
-    Ok(toml::from_slice(&toml_str)?)
+    let config: Config = toml::from_slice(&toml_str)?;
+    if !validate {
+        return Ok(config);
+    } else if let Err(e) = config.validate() {
+        anyhow::bail!("{e}")
+    } else {
+        Ok(config)
+    }
+
+
 }
 
 
@@ -907,9 +1189,9 @@ pub fn get_env_config_path() -> anyhow::Result<PathBuf> {
 /// # See also
 /// * [`load_config_file`]
 /// * [`load_config_file_or_default`]
-pub fn load_env_config_file() -> anyhow::Result<Config> {
+pub fn load_env_config_file(validate: bool) -> anyhow::Result<Config> {
     let path = get_env_config_path()?;
-    return load_config_file(path);
+    return load_config_file(path, validate);
 }
 
 /// Load an existing configuration file *or* provide defaults.
@@ -952,7 +1234,7 @@ where T: AsRef<Path>
     if let Some(p) = path {
         if p.as_ref().exists() {
             debug!("Reading config file from {}", p.as_ref().display());
-            return load_config_file(p.as_ref()).with_context(|| {
+            return load_config_file(p.as_ref(), true).with_context(|| {
                 format!("Error loading configuration file {}", p.as_ref().display())
             })
         }else{
