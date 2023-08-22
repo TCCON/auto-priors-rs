@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::process::Termination;
 
 use anyhow::Context;
-use clap::{self, Args};
+use clap::{self, Args, Subcommand};
 use chrono::{NaiveDate, Duration};
 use log::{warn, info, debug};
 use orm::{self, met::MetDayState, utils::DateIterator};
@@ -10,6 +10,28 @@ use sqlx::Connection;
 
 use crate::utils;
 
+/// Manage meteorology downloads and database
+#[derive(Debug, Args)]
+pub struct MetCli {
+    #[clap(subcommand)]
+    pub command: MetActions
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MetActions {
+    /// Check whether the required model files are listed in the database for
+    /// a range of dates
+    Check(CheckDatesCli),
+
+    /// Download model files for a range of dates 
+    DownloadDates(DownloadDatesCli),
+
+    /// Download missing model files
+    DownloadMissing(DownloadMissingCli),
+
+    /// Rescan model download directories and add new files to the database
+    Rescan(RescanMetCli)
+}
 
 /// Check that a user-provided end date is after the start date OR set the default end date
 fn check_start_end_date(start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<NaiveDate> {

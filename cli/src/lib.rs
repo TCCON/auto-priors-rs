@@ -3,6 +3,7 @@ pub mod config;
 pub mod met_download;
 pub mod input_files;
 pub mod jobs;
+pub mod email;
 pub mod siteinfo;
 pub mod stdsites;
 

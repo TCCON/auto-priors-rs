@@ -7,6 +7,22 @@ use orm::{self, siteinfo::{SiteType, StdSite, SiteInfo, StdOutputStructure}, MyS
 use sqlx::Connection;
 use tabled::Table;
 
+/// Manage definition of standard sites and their locations
+#[derive(Debug, Args)]
+pub struct StdSiteCli {
+    #[clap(subcommand)]
+    pub command: StdSiteActions
+}
+
+#[derive(Debug, Subcommand)]
+pub enum StdSiteActions {
+    AddSite(AddNewStdSiteCli),
+    Edit(EditSiteCli),
+    Print(PrintSitesCli),
+    AddInfo(AddSiteInfoCli),
+    PrintInfo(PrintLocsCli),
+    Json(InfoJsonCli),
+}
 
 #[derive(Debug)]
 enum JsonType {
@@ -73,22 +89,6 @@ pub async fn site_info_json(db: &mut orm::MySqlConn, clargs: &InfoJsonCli) -> an
     }
 
     Ok(())
-}
-
-/// Manage definition of standard sites and their locations
-#[derive(Debug, Args)]
-pub struct StdSiteCli {
-    #[clap(subcommand)]
-    pub command: StdSiteActions
-}
-
-#[derive(Debug, Subcommand)]
-pub enum StdSiteActions {
-    AddSite(AddNewStdSiteCli),
-    EditSite(EditSiteCli),
-    PrintSites(PrintSitesCli),
-    AddInfo(AddSiteInfoCli),
-    PrintInfo(PrintLocsCli),
 }
 
 /// Define a new standard site

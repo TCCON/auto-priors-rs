@@ -1,11 +1,25 @@
 use std::path::PathBuf;
 
-use clap::{self, Args};
+use clap::{self, Args, Subcommand};
 use orm::MySqlConn;
 
+/// Manage job input files
+#[derive(Debug, Args)]
+pub struct InputFilesCli {
+    #[clap(subcommand)]
+    pub commands: InputFilesActions
+}
+
+#[derive(Debug, Subcommand)]
+pub enum InputFilesActions {
+    /// Manually parse specific input files.
+    Parse(ParseInputFilesManualCli)
+}
 
 #[derive(Debug, Args)]
-/// Parse input files specified on the command line [alias: pifm]
+/// Parse input files specified on the command line.  This does not parse all input files
+/// matching the pattern specified in the config, it only parses those files listed as 
+/// arguments here.
 pub struct ParseInputFilesManualCli {
     /// Paths to input files to parse. 
     input_files: Vec<PathBuf>

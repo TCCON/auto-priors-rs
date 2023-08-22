@@ -26,7 +26,7 @@ tokio-test = "0.4.2"
 toml = "0.5"
 
 [[bin]]
-name = "tccon_priors_cli"
+name = "tccon-priors-cli"
 path = "src/main.rs"
 
 [lib]
