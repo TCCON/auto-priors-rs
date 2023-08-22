@@ -335,7 +335,8 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             this_queue.clean_up_finished(&mut conn, &self.error_handler).await;
             let mut n_to_add = this_queue.num_can_add();
             let n_total = this_queue.max_num_items;
-            info!("Queue '{name}' is running {} of {n_total} allowed jobs", n_total - n_to_add);
+            let n_running = this_queue.num_jobs_running();
+            info!("Queue '{name}' has {} of {n_total} allowed jobs allotted, {n_running} are active", n_total - n_to_add);
             while n_to_add > 0 {
                 let next_job = Job::claim_next_job_in_queue(&mut conn, &name, &queue_options.fair_share_policy)
                     .await
