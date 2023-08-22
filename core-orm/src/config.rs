@@ -77,9 +77,10 @@ impl Config {
     /// the paths to provide to ginput for a given met key.
     /// 
     /// # Returns
-    /// If successful, a tuple containing the `geos_path` and `chem_path` in that order. If the
-    /// met configuration requested does not define any chemistry files, a warning will be logged
-    /// and the `chem_path` will be the same as the `geos_path`.
+    /// If successful, a tuple containing the `geos_path`, `chem_path`, and the string telling ginput
+    /// which met type these paths are for, in that order. If the met configuration requested does not 
+    /// define any chemistry files, a warning will be logged and the `chem_path` will be the same as the
+    /// `geos_path`.
     /// 
     /// This returns an error in a number of conditions:
     /// 1. Any of the `download_dir` paths cannot be canonicalized
@@ -87,12 +88,13 @@ impl Config {
     /// 3. The final component of any of the `download_dir` paths does not match the levels defined
     ///    for that file type.
     /// 4. Any of the `download_dir` paths does not have a parent directory
-    /// 5. Inconsistent `geos_path` or `chem_path` values are defined.
-    pub fn get_geos_and_chem_paths(&self, met_key: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
+    /// 5. Inconsistent `geos_path`, `chem_path`, or `ginput_met_key` values are defined.
+    pub fn get_ginput_met_args(&self, met_key: &str) -> anyhow::Result<(PathBuf, PathBuf, String)> {
         let dl_cfgs = self.get_met_configs(met_key)
             .context("Could not find meteorology while setting up geos & chem paths")?;
         let mut geos_path = None;
         let mut chem_path = None;
+        let mut ginput_met_key = None;
 
         for (i, cfg) in dl_cfgs.iter().enumerate() {
             let i = i + 1;
@@ -109,6 +111,17 @@ impl Config {
 
             let parent_dir = download_dir.parent()
                 .ok_or_else(|| anyhow::Error::msg(format!("In met type {met_key}, cannot get parent directory of file type {i}'s download path")))?;
+
+            // The met key value doesn't depend on the file type, so we handle it outside the match statement
+            if ginput_met_key.is_none() {
+                ginput_met_key = Some(cfg.ginput_met_key.clone());
+            } else if ginput_met_key.as_deref() != Some(&cfg.ginput_met_key) {
+                anyhow::bail!(
+                    "Met type {met_key} defines inconsistent values for `ginput_met_key`: {} vs {}",
+                    cfg.ginput_met_key,
+                    ginput_met_key.unwrap()
+                )
+            }
 
             match &cfg.data_type {
                 MetDataType::Met => {
@@ -137,8 +150,8 @@ impl Config {
             }
         }
 
-        let geos_path = geos_path.ok_or_else(|| anyhow::Error::msg(
-            format!("Met type {met_key} defines no met files for download")
+        let geos_path = geos_path.ok_or_else(|| anyhow::anyhow!(
+            "Met type {met_key} defines no met files for download"
         ))?;
 
         let chem_path = chem_path.unwrap_or_else(|| {
@@ -146,7 +159,11 @@ impl Config {
             geos_path.clone()
         });
 
-        Ok((geos_path, chem_path))
+        let ginput_met_key = ginput_met_key.ok_or_else(|| anyhow::anyhow!(
+            "Met type {met_key} defines no files for download"
+        ))?;
+
+        Ok((geos_path, chem_path, ginput_met_key))
     }
 
     /// Get the earliest start date for all the file types of a given met configuration
@@ -419,7 +436,11 @@ pub struct DownloadConfig {
     ///   Chemistry data can be in the same directory or separate, e.g. in this example, the eta-level
     ///   chem files could go in `/data/met/Nv` or a separate directory such as `/data/chm/Nv`. The
     ///   latter is recommended.
-    pub download_dir: PathBuf
+    pub download_dir: PathBuf,
+
+    /// The string that ginput's `mod` subcommand's `mode` argument takes to tell it to produce files
+    /// from this meteorology.
+    pub ginput_met_key: String,
 }
 
 impl Display for DownloadConfig {
@@ -805,7 +826,8 @@ where T: AsRef<Path>
             basename_pattern: Some("(omit to infer from url_pattern)".to_string()),
             file_freq_min: 180,
             earliest_date: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
-            download_dir: PathBuf::new()
+            download_dir: PathBuf::new(),
+            ginput_met_key: "fpit-eta".to_string(),
         }
     ]);
 

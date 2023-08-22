@@ -1428,6 +1428,8 @@ impl InnerGinputRunner for ShellGinputRunner {
 #[derive(Debug, Serialize)]
 struct GinputAutomationArgs {
     job_id: i32,
+    ginput_met_key: String, 
+
     start_date: NaiveDate,
     end_date: Option<NaiveDate>,
     met_path: PathBuf,
@@ -1582,7 +1584,7 @@ async fn setup_ginput_args_for_date(conn: &mut MySqlConn, date: NaiveDate, job: 
     };
 
     debug!("Job {}: Getting met and chem paths for met key '{met_key}'", job.job_id);
-    let (met_path, chem_path) = config.get_geos_and_chem_paths(&met_key)
+    let (met_path, chem_path, ginput_met_key) = config.get_ginput_met_args(&met_key)
         .map_err(|e| JobError::ConfigurationError(e))?;
 
     debug!("Job {}: Standardize site IDs, lats, and lons", job.job_id);
@@ -1601,6 +1603,7 @@ async fn setup_ginput_args_for_date(conn: &mut MySqlConn, date: NaiveDate, job: 
     debug!("Job {}: creating automation arguments", job.job_id);
     let ginput_args = GinputAutomationArgs {
         job_id: job.job_id,
+        ginput_met_key,
         start_date: date,
         end_date: None,
         met_path: met_path,
