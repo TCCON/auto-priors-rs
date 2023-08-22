@@ -1,4 +1,5 @@
-use clap::{self, Parser, Subcommand};
+use clap::{self, Parser, Subcommand, CommandFactory, Args};
+use clap_complete::Shell;
 use clap_verbosity_flag::{Verbosity,InfoLevel};
 use dotenv;
 use env_logger;
@@ -32,7 +33,9 @@ enum Commands {
     Email(EmailCli),
     SiteInfo(StdSiteCli),
     SiteJobs(StdSiteJobCli),
-    Config(ConfigCli)
+    Config(ConfigCli),
+    Completions(CompletionsCli),
+
 }
 
 // Had to change rust-analyzer settings as described in https://github.com/rust-lang/rust-analyzer/issues/12450
@@ -179,8 +182,36 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Config(ConfigCli { command: ConfigActions::DebugConfig }) => {
             config::debug_config(config);
+        },
+
+        Commands::Completions(CompletionsCli { commands: CompletionsActions::Generate(subargs) }) => {
+            generate_shell_completions(subargs.shell);
         }
     };
 
     Ok(())
+}
+
+#[derive(Debug, Args)]
+struct CompletionsCli {
+    #[clap(subcommand)]
+    commands: CompletionsActions
+}
+
+#[derive(Debug, Subcommand)]
+enum CompletionsActions {
+    Generate(GenCompletionsCli)
+}
+
+#[derive(Debug, Args)]
+/// Generate completions for a shell, printing to stdout
+struct GenCompletionsCli {
+    /// Which shell to generate for, options are "bash", "elvish", "fish",
+    /// "powershell", and "zsh"
+    shell: Shell
+}
+
+fn generate_shell_completions(shell: Shell) {
+    let mut tmp = Cli::into_app();
+    clap_complete::generate(shell, &mut tmp, "tccon-priors-cli", &mut std::io::stdout())
 }

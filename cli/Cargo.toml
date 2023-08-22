@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+clap_complete = "3"
 clap-verbosity-flag = "1.0"
 dotenv.workspace = true
 env_logger.workspace = true
