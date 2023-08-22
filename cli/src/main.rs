@@ -1,5 +1,3 @@
-// TODOs:
-//  * Delete expired output files
 use clap::{self, Parser, Subcommand, Args};
 use clap_verbosity_flag::{Verbosity,InfoLevel};
 use dotenv;

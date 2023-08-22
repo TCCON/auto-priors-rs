@@ -1013,7 +1013,8 @@ impl Job {
         // This should not be the case now: I had to break the jobs down into one-day sub-jobs anyway to deal
         // with changing default met and ginput versions, and in doing so also allow the default lat/lons to change
         // from day to day.
-        // TODO: should run a test on this
+        // TODO: should run a test on this, but not critical - jobs coming in as requests should not be for standard
+        // sites.
 
         // Also verify that any site_ids for which we do not have defined lat/lons in the inputs are
         // standard sites with at least one time period defined. At the same time, check that we don't 
@@ -1243,6 +1244,7 @@ impl Job {
 
     fn delete_output_and_run_dir(&self) -> anyhow::Result<()> {
         if let Some(output) = &self.output_file {
+            debug!("Cleaning out output {} for job {}", output.display(), self.job_id);
             if output.is_dir() {
                 std::fs::remove_dir_all(output)
                 .with_context(|| format!(
@@ -1258,15 +1260,20 @@ impl Job {
                     self.save_dir.display(), self.job_id
                 ))?;
             }
+        } else {
+            debug!("No output to clean up for job {}", self.job_id);
         }
 
         let run_dir = self.run_dir(false);
         if run_dir.exists() {
+            debug!("Cleaning up run directory {} for job {}", run_dir.display(), self.job_id);
             std::fs::remove_dir_all(&run_dir)
             .with_context(|| format!(
                 "Error occurred while trying to remove run directory ({}) for job {}.",
                 run_dir.display(), self.job_id
             ))?;
+        } else {
+            debug!("Not cleaning up run directory {} for job {}, does not exist", run_dir.display(), self.job_id);
         }
 
         Ok(())

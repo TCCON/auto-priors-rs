@@ -424,6 +424,8 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         for (name, queue) in self.job_queues.iter_mut() {
             let max_njobs = if let Some(cfg_queue) = config.get_queue(name) {
                 cfg_queue.max_num_procs
+            } else if name == LUT_QUEUE_NAME {
+                continue;
             } else {
                 debug!("Queue '{name}' not found in configuration, assuming only allowed 1 job at a time");
                 1
