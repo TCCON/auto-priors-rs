@@ -208,10 +208,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     /// Note that while errors may occur in this function, they are passed to the instance's
     /// error handler to report (usually to a log file and/or email). 
     async fn start_jobs_entry_point(&mut self) -> anyhow::Result<()> {
-        // TODO: check if the configuration queues still match the ones we have stored
-        // and update if needed. Alternatively, pop any empty queues from the HashMap
-        // so that they eventually get updated. The former approach would benefit from
-        // switching the config to a tokio watcher tunnel.
+        self.update_queue_max_jobs().await;
 
         self.scan_for_job_submissions().await?;
 
@@ -228,7 +225,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     /// 
     /// This should be called about once per day to ensure that the LUTs are up to date,
     /// as they will periodically need to extrapolate further into the future.
-    pub(crate) async fn schedule_lut_regen(&mut self) -> anyhow::Result<()> {
+    async fn schedule_lut_regen(&mut self) -> anyhow::Result<()> {
         // For each ginput defined in the config, add a blocking job to the special queue
         // to regenerate its LUTs
         let lut_queue = self.job_queues.entry(LUT_QUEUE_NAME.to_string())
@@ -419,6 +416,24 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         }
 
         Ok(queue_names)
+    }
+
+    async fn update_queue_max_jobs(&mut self) {
+        let config = self.shared_config.read().await;
+        
+        for (name, queue) in self.job_queues.iter_mut() {
+            let max_njobs = if let Some(cfg_queue) = config.get_queue(name) {
+                cfg_queue.max_num_procs
+            } else {
+                debug!("Queue '{name}' not found in configuration, assuming only allowed 1 job at a time");
+                1
+            };
+
+            if queue.max_num_items != max_njobs {
+                info!("Updating maximum number of jobs in queue '{name}' from {} to {}", queue.max_num_items, max_njobs);
+                queue.max_num_items = max_njobs;
+            }
+        }
     }
 
     /// Check if a queue with the given name is allowed to start jobs, based on blocking priority rules.
