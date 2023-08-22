@@ -346,7 +346,7 @@ pub async fn print_jobs_table(
     if detailed {
         let mut at_least_one = false;
         for job in jobs {
-            println!("{job}");
+            println!("{}", job.verbose_display());
             at_least_one = true;
         }
         if !at_least_one {

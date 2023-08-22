@@ -332,7 +332,10 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
             };
 
             let mut conn = self.pool.get_connection().await?;
-            this_queue.clean_up_finished(&mut conn, &self.error_handler).await;
+            {
+                let tmp_config = self.shared_config.read().await;
+                this_queue.clean_up_finished(&mut conn, &self.error_handler, &tmp_config).await;
+            }
             let mut n_to_add = this_queue.num_can_add();
             let n_total = this_queue.max_num_items;
             let n_running = this_queue.num_jobs_running();
@@ -485,8 +488,9 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         };
         loop {
             let mut njobs = 0;
+            let config = { self.shared_config.read().await.clone() };
             for (name, queue) in self.job_queues.iter_mut() {
-                queue.clean_up_finished(&mut conn, &self.error_handler).await;
+                queue.clean_up_finished(&mut conn, &self.error_handler, &config).await;
                 njobs += queue.num_jobs_running();
                 debug!("Jobs remaining in {name}: {}", queue.num_jobs_left());
             }
@@ -550,7 +554,7 @@ pub(crate) trait Queueable {
 
     /// Return whether a job is waiting to start/actively running (`false`) or completed/errored (`true`).
     /// This should also do any finalization 
-    async fn is_done(&mut self, conn: &mut MySqlPC) -> anyhow::Result<bool>;
+    async fn is_done(&mut self, conn: &mut MySqlPC, config: &Config) -> anyhow::Result<bool>;
 
     /// Stop this job prematurely, do whatever cleanup is required.
     async fn cancel(&mut self, conn: &mut MySqlPC) -> anyhow::Result<bool>;
@@ -640,10 +644,10 @@ impl<T: Queueable> Queue<T> {
     /// Typically, you would call this method before `add`
     /// or `num_can_add` to remove any completed jobs to
     /// make room for new ones.
-    pub async fn clean_up_finished<H: ErrorHandler>(&mut self, conn: &mut MySqlPC, error_handler: &H) {
+    pub async fn clean_up_finished<H: ErrorHandler>(&mut self, conn: &mut MySqlPC, error_handler: &H, config: &Config) {
         let old_items = std::mem::take(&mut self.items);
         for mut item in old_items {
-            let still_running = match item.is_done(conn).await {
+            let still_running = match item.is_done(conn, config).await {
                 Ok(done) => !done,
                 Err(e) => {
                     error_handler.report_error(e.as_ref());
@@ -713,7 +717,7 @@ pub enum ServiceJobRunner {
 
 impl ServiceJobRunner {
 
-    async fn is_ginput_job_done(job: &mut Job, join_handle: &mut Option<GinputHandle>, conn: &mut MySqlPC) -> anyhow::Result<bool> {
+    async fn is_ginput_job_done(job: &mut Job, join_handle: &mut Option<GinputHandle>, conn: &mut MySqlPC, config: &Config) -> anyhow::Result<bool> {
         let task = if let Some(runner) = join_handle {
             runner
         } else {
@@ -734,8 +738,8 @@ impl ServiceJobRunner {
                 Ok(true)
             },
             Err(e) => {
-                job.set_state(conn, JobState::Errored).await
-                    .map(|_| ())
+                let email_config = &config.email;
+                job.set_errored(conn, &e, Some(email_config)).await
                     .unwrap_or_else(|e| error!("Failed to set state for job {} to 'errored' because: {e}", job.job_id));
                 anyhow::bail!("Error occurred in job #{}: {e:?}", job.job_id)
             }
@@ -844,13 +848,13 @@ impl Queueable for ServiceJobRunner {
         }
     }
 
-    async fn is_done(&mut self, conn: &mut MySqlPC) -> anyhow::Result<bool> {
+    async fn is_done(&mut self, conn: &mut MySqlPC, config: &Config) -> anyhow::Result<bool> {
         match self {
             Self::GinputJob{job, join_handle, force_cleanup} => {
                 if *force_cleanup {
                     Ok(true)
                 } else {
-                    Self::is_ginput_job_done(job, join_handle, conn).await
+                    Self::is_ginput_job_done(job, join_handle, conn, config).await
                 }
             },
             Self::LutRegenJob{ginput_key, join_handle, force_cleanup} => {
@@ -939,7 +943,7 @@ mod tests {
             self.force_cleanup = true;
         }
 
-        async fn is_done(&mut self, _conn: &mut MySqlPC) -> anyhow::Result<bool> {
+        async fn is_done(&mut self, _conn: &mut MySqlPC, _config: &Config) -> anyhow::Result<bool> {
             if self.force_cleanup {
                 return Ok(true)
             }

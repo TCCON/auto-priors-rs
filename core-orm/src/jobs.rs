@@ -14,7 +14,7 @@ use sqlx::{self, FromRow, Type, Acquire};
 use tabled::Tabled;
 use tokio::task::JoinHandle;
 
-use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::Config, utils};
+use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::{Config, EmailConfig}, utils};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
@@ -343,7 +343,7 @@ impl TryFrom<Job> for QJob {
     /// * Could not convert the `save_dir` or `output_file` paths to UTF strings
     /// * Could not serialize the `site_id`, `lat`, or `lon` vectors to JSON strings.
     fn try_from(j: Job) -> Result<Self, Self::Error> {
-        let save_dir = j.save_dir
+        let save_dir = j.root_save_dir
             .to_str()
             .ok_or(anyhow::anyhow!("Failed to convert save_dir to a UTF string"))?
             .to_owned();
@@ -379,6 +379,55 @@ impl TryFrom<Job> for QJob {
             complete_time: j.complete_time,
             output_file: output_file
         })
+    }
+}
+
+pub struct VerboseDisplayJob<'j> {
+    job: &'j Job
+}
+
+impl<'j> Display for VerboseDisplayJob<'j> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let lats = self.job.lat.iter()
+            .map(|v| {
+                v.map(|y| format!("{y:.3}"))
+                .unwrap_or_else(|| "DEF".to_string())
+            }).join(", ");
+
+        let lons = self.job.lon.iter()
+            .map(|v| {
+                v.map(|x| format!("{x:.3}"))
+                .unwrap_or_else(|| "DEF".to_string())
+            }).join(", ");
+
+        let complete_string = if let Some(time) = self.job.complete_time {
+            format!("completed at {time}")
+        } else {
+            "not completed yet".to_string()
+        };
+        
+        writeln!(f, "Job {} ({}):", self.job.job_id, self.job.state)?;
+        writeln!(f, "  Submitted by {} at {}, {}", 
+            self.job.email.as_deref().unwrap_or("NONE"),
+            self.job.submit_time,
+            complete_string
+        )?;
+        writeln!(f, "  Priority {} in queue {}", self.job.priority, self.job.queue)?;
+        writeln!(f, "  Dates: {} to {}", self.job.start_date, self.job.end_date)?;
+        writeln!(f, "  Site IDs:   {}", self.job.site_id.join(", "))?;
+        writeln!(f, "  Latitudes:  {lats}")?;
+        writeln!(f, "  Longitudes: {lons}")?;
+        if let Some(out) = &self.job.output_file {
+            writeln!(f, "  Output stored in {}", out.display())?;
+        } else {
+            writeln!(f, "  Save under {} as tarball {}", self.job.root_save_dir.display(), self.job.save_tarball)?;
+        }
+        writeln!(f, "  Formats: mod = {}, vmr = {}, map = {}", self.job.mod_fmt, self.job.vmr_fmt, self.job.map_fmt)?;
+        writeln!(f, "  Met = {}, ginput = {}", 
+            self.job.met_key.as_deref().unwrap_or("DEFAULT"),
+            self.job.ginput_key.as_deref().unwrap_or("DEFAULT")
+        )?;
+        Ok(())
     }
 }
 
@@ -430,8 +479,9 @@ pub struct Job {
     /// job. If `None`, that indicates that the default version for the given dates should be used.
     pub ginput_key: Option<String>,
 
-    /// Where to save the output.
-    pub save_dir: PathBuf,
+    /// Where to save the output. This will be the output directory for ALL jobs, a particular job
+    /// will have a subdirectory or tarfile under here.
+    root_save_dir: PathBuf,
 
     /// Whether to generate a tarball of the output or not.
     /// May also indicate to give it an EGI-compatible name.
@@ -490,51 +540,6 @@ impl Tabled for Job {
     }
 }
 
-impl Display for Job {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let lats = self.lat.iter()
-            .map(|v| {
-                v.map(|y| format!("{y:.3}"))
-                .unwrap_or_else(|| "DEF".to_string())
-            }).join(", ");
-
-        let lons = self.lon.iter()
-            .map(|v| {
-                v.map(|x| format!("{x:.3}"))
-                .unwrap_or_else(|| "DEF".to_string())
-            }).join(", ");
-
-        let complete_string = if let Some(time) = self.complete_time {
-            format!("completed at {time}")
-        } else {
-            "not completed yet".to_string()
-        };
-        
-        writeln!(f, "Job {} ({}):", self.job_id, self.state)?;
-        writeln!(f, "  Submitted by {} at {}, {}", 
-            self.email.as_deref().unwrap_or("NONE"),
-            self.submit_time,
-            complete_string
-        )?;
-        writeln!(f, "  Priority {} in queue {}", self.priority, self.queue)?;
-        writeln!(f, "  Dates: {} to {}", self.start_date, self.end_date)?;
-        writeln!(f, "  Site IDs:   {}", self.site_id.join(", "))?;
-        writeln!(f, "  Latitudes:  {lats}")?;
-        writeln!(f, "  Longitudes: {lons}")?;
-        if let Some(out) = &self.output_file {
-            writeln!(f, "  Output stored in {}", out.display())?;
-        } else {
-            writeln!(f, "  Save under {} as tarball {}", self.save_dir.display(), self.save_tarball)?;
-        }
-        writeln!(f, "  Formats: mod = {}, vmr = {}, map = {}", self.mod_fmt, self.vmr_fmt, self.map_fmt)?;
-        writeln!(f, "  Met = {}, ginput = {}", 
-            self.met_key.as_deref().unwrap_or("DEFAULT"),
-            self.ginput_key.as_deref().unwrap_or("DEFAULT")
-        )?;
-        Ok(())
-    }
-}
-
 impl TryFrom<QJob> for Job {
     type Error = JobError;
 
@@ -567,7 +572,7 @@ impl TryFrom<QJob> for Job {
             queue: q.queue,
             met_key: q.met_key,
             ginput_key: q.ginput_key,
-            save_dir: PathBuf::from(q.save_dir),
+            root_save_dir: PathBuf::from(q.save_dir),
             save_tarball: TarChoice::try_from(q.save_tarball)?,
             mod_fmt: ModFmt::from_str(&q.mod_fmt)?,
             vmr_fmt: VmrFmt::from_str(&q.vmr_fmt)?,
@@ -579,27 +584,64 @@ impl TryFrom<QJob> for Job {
     }
 }
 
+impl Display for Job {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let job_id = self.job_id;
+        let dates = format!("{}-{}", self.start_date.format("%Y-%m-%d 00:00"), self.end_date.format("%Y-%m-%d 00:00"));
+        let n = self.site_id.len();
+        write!(f, "AutoModMaker Job {job_id} ({dates}, {n} sites)")
+    }
+}
+
 impl Job {
+    pub fn verbose_display(&self) -> VerboseDisplayJob {
+        VerboseDisplayJob { job: self }
+    }
+
+    pub fn to_long_string(&self) -> String {
+        let job_id = self.job_id;
+        let dates = format!("{}-{}", self.start_date.format("%Y-%m-%d 00:00"), self.end_date.format("%Y-%m-%d 00:00"));
+        let lons = self.lon.iter()
+            .map(|x| {
+                if let Some(x) = x {
+                    format!("{x:.2}")
+                } else {
+                    "[default]".to_string()
+                }
+            }).join(",");
+        let lats = self.lat.iter()
+            .map(|x| {
+                if let Some(x) = x {
+                    format!("{x:.2}")
+                } else {
+                    "[default]".to_string()
+                }
+            })
+            .join(",");
+        let sites = self.site_id.join(",");
+        format!("AutoModMaker Job {job_id} ({dates}, lons = {lons}, lats = {lats}, sites = {sites})")
+    }
+
     pub fn run_dir(&self, basename_only: bool) -> PathBuf {
         let job_subdir = format!("job{:09}", self.job_id);
         if basename_only {
             return PathBuf::from(job_subdir);
         }
-        let base_run_dir = self.save_dir.join(job_subdir);
+        let base_run_dir = self.root_save_dir.join(".running").join(job_subdir);
         base_run_dir
     }
 
-    pub fn mod_output_dir(&self, site_id: &str) -> PathBuf {
+    pub fn mod_run_output_dir(&self, site_id: &str) -> PathBuf {
         let run_dir = self.run_dir(false);
         run_dir.join("fpit").join(site_id).join("vertical")
     }
 
-    pub fn vmr_output_dir(&self, site_id: &str) -> PathBuf {
+    pub fn vmr_run_output_dir(&self, site_id: &str) -> PathBuf {
         let run_dir = self.run_dir(false);
         run_dir.join("fpit").join(site_id).join("vmrs-vertical")
     }
 
-    pub fn map_output_dir(&self, site_id: &str) -> PathBuf {
+    pub fn map_run_output_dir(&self, site_id: &str) -> PathBuf {
         let run_dir = self.run_dir(false);
         run_dir.join("fpit").join(site_id).join("maps-vertical")
     }
@@ -1220,6 +1262,14 @@ impl Job {
         Ok(())
     }
 
+    pub async fn set_errored<E: Debug>(&mut self, conn: &mut MySqlConn, err: &E, email_config: Option<&EmailConfig>) -> anyhow::Result<()> {
+        self.set_state(conn, JobState::Errored).await?;
+        if let Some(config) = email_config {
+            send_job_error_email(self, err, config)?;
+        }
+        Ok(())
+    }
+
 
     /// Reset this job to pending, deleting the run directory or output directory/file as well
     pub async fn reset(&mut self, conn: &mut MySqlConn) -> anyhow::Result<()> {
@@ -1249,7 +1299,7 @@ impl Job {
                 std::fs::remove_dir_all(output)
                 .with_context(|| format!(
                     "Error occurred while trying to remove output directory ({}) for job {}.",
-                    self.save_dir.display(), self.job_id
+                    output.display(), self.job_id
                 ))?;
             }
 
@@ -1257,7 +1307,7 @@ impl Job {
                 std::fs::remove_file(output)
                 .with_context(|| format!(
                     "Error occurred while trying to remove output file ({}) for job {}.",
-                    self.save_dir.display(), self.job_id
+                    output.display(), self.job_id
                 ))?;
             }
         } else {
@@ -1338,10 +1388,10 @@ impl FairShare for PsuedoRoundRobinFS {
 }
 
 pub async fn cleanup_cancelled_ginput_job(conn: &mut MySqlConn, job: &mut Job) -> JobResult<()> {
-    std::fs::remove_dir_all(&job.save_dir)
+    std::fs::remove_dir_all(&job.run_dir(false))
         .unwrap_or_else(|e| warn!(
             "Error occurred while trying to remove run directory ({}) for job {}. Error was: {e}",
-            job.save_dir.display(), job.job_id
+            job.run_dir(false).display(), job.job_id
         ));
 
     job.set_state(conn, JobState::Pending).await?;
@@ -1516,7 +1566,11 @@ async fn run_priors_gen_job(mut conn: MySqlConn, mut job: Job, config: Config) -
     }
 
     let (make_tarball, output_path) = match job.save_tarball {
-        TarChoice::No => (false, job.run_dir(false)),
+        TarChoice::No => {
+            let root_save_dir = &job.root_save_dir;
+            let dir_basename = job.run_dir(true);
+            (false, root_save_dir.join(dir_basename))
+        },
         TarChoice::Yes => {
             (true, make_std_tar_file_name(&mut conn, &job).await?)
         },
@@ -1526,51 +1580,55 @@ async fn run_priors_gen_job(mut conn: MySqlConn, mut job: Job, config: Config) -
     };
 
     if !make_tarball {
-        job.set_completed(&mut conn, &output_path, None).await?;
-        return Ok(())
-    }
+        // NB: the run directory MUST be on the same file system for this to work, which is why run_dir()
+        // is defined as a subdirectory of root_save_dir
+        std::fs::rename(job.run_dir(false), &output_path)
+            .with_context(|| format!("Failed to move run directory for job {} to its download location", job.job_id))?;
+    } else {
 
-    let job_dir = job.run_dir(false);
-    if !job_dir.exists() {
-        std::fs::create_dir_all(&job_dir)?;
-    }
-    let job_dir_name = job.run_dir(true);
-
-    // Clever combination of tar archive builder and gzip compressor taken from
-    // https://stackoverflow.com/a/46521163
-    let tgz_file = std::fs::File::create(&output_path)
-        .with_context(|| format!("Error occurred trying to create the initial .tgz file for job {}", job.job_id))?;
-    let encoder = flate2::write::GzEncoder::new(tgz_file, flate2::Compression::default());
-    let mut archive = tar::Builder::new(encoder);
-
-    // ginput will output the .mod/.vmr/.map files into subdirectories, the only files directly in the
-    // top directory will be the output logs and the args JSON. By appending only top level subdirectories,
-    // we ensure that even if the met name in the top subdirectory changes, we get all the output files.
-    for entry in std::fs::read_dir(&job_dir)
-        .with_context(|| format!("Error occurred while selecting output files for tarball in job {}", job.job_id))? 
-    {
-        let entry = entry.with_context(|| format!("Error getting directory entry while making tarball for job {}", job.job_id))?;
-        let src_path = entry.path();
-        if src_path.is_dir() {
-            let dest_path = src_path.file_name()
-                .with_context(|| format!("Error getting source directory file name from {} for job {}", src_path.display(), job.job_id))?;
-            let dest_path = job_dir_name.join(dest_path);
-            archive.append_dir_all(dest_path, &src_path)
-                .with_context(|| format!("Error adding directory {} to tarball for job {}", src_path.display(), job.job_id))?;
+        let job_dir = job.run_dir(false);
+        if !job_dir.exists() {
+            std::fs::create_dir_all(&job_dir)?;
         }
+        let job_dir_name = job.run_dir(true);
+
+        // Clever combination of tar archive builder and gzip compressor taken from
+        // https://stackoverflow.com/a/46521163
+        let tgz_file = std::fs::File::create(&output_path)
+            .with_context(|| format!("Error occurred trying to create the initial .tgz file for job {}", job.job_id))?;
+        let encoder = flate2::write::GzEncoder::new(tgz_file, flate2::Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+
+        // ginput will output the .mod/.vmr/.map files into subdirectories, the only files directly in the
+        // top directory will be the output logs and the args JSON. By appending only top level subdirectories,
+        // we ensure that even if the met name in the top subdirectory changes, we get all the output files.
+        for entry in std::fs::read_dir(&job_dir)
+            .with_context(|| format!("Error occurred while selecting output files for tarball in job {}", job.job_id))? 
+        {
+            let entry = entry.with_context(|| format!("Error getting directory entry while making tarball for job {}", job.job_id))?;
+            let src_path = entry.path();
+            if src_path.is_dir() {
+                let dest_path = src_path.file_name()
+                    .with_context(|| format!("Error getting source directory file name from {} for job {}", src_path.display(), job.job_id))?;
+                let dest_path = job_dir_name.join(dest_path);
+                archive.append_dir_all(dest_path, &src_path)
+                    .with_context(|| format!("Error adding directory {} to tarball for job {}", src_path.display(), job.job_id))?;
+            }
+        }
+
+        let encoder = archive.into_inner()
+            .with_context(|| format!("Error occurred while trying to finalize tar archive for job {}", job.job_id))?;
+
+        // Unsure if this is needed, but doesn't seem to hurt
+        encoder.finish()
+            .with_context(|| format!("Error occurred while trying to finalize the gzip compression for job {}", job.job_id))?;
+
+        std::fs::remove_dir_all(&job_dir)
+            .unwrap_or_else(|_| warn!("Failed to remove output directory for job {} after creating the tarball", job.job_id));
     }
-
-    let encoder = archive.into_inner()
-        .with_context(|| format!("Error occurred while trying to finalize tar archive for job {}", job.job_id))?;
-
-    // Unsure if this is needed, but doesn't seem to hurt
-    encoder.finish()
-        .with_context(|| format!("Error occurred while trying to finalize the gzip compression for job {}", job.job_id))?;
-
-    std::fs::remove_dir_all(&job_dir)
-        .unwrap_or_else(|_| warn!("Failed to remove output directory for job {} after creating the tarball", job.job_id));
 
     job.set_completed(&mut conn, &output_path, None).await?;
+    send_job_completion_email(&job, &config)?;
     Ok(())
 }
 
@@ -1684,7 +1742,7 @@ async fn make_std_tar_file_name(conn: &mut MySqlConn, job: &Job) -> JobResult<Pa
     let end = job.end_date.format("%Y%m%d").to_string();
 
     let filename = format!("job_{job_id:09}_{locstr}_{start}-{end}.tgz");
-    Ok(job.save_dir.join(filename))
+    Ok(job.root_save_dir.join(filename))
 }
 
 async fn make_egi_tar_file_name(conn: &mut MySqlConn, job: &Job) -> JobResult<PathBuf> {
@@ -1701,5 +1759,67 @@ async fn make_egi_tar_file_name(conn: &mut MySqlConn, job: &Job) -> JobResult<Pa
 
     let start = job.start_date.format("%Y%m%d").to_string();
     let filename = format!("EGI_{locstr}_{start}.tgz");
-    Ok(job.save_dir.join(filename))
+    Ok(job.root_save_dir.join(filename))
+}
+
+fn send_job_completion_email(job: &Job, config: &Config) -> anyhow::Result<()> {
+    let email = if let Some(e) = &job.email {
+        e
+    } else {
+        info!("No email for job {}, not sending completion email", job.job_id);
+        return Ok(())
+    };
+
+    let output = if let Some(path) = &job.output_file {
+        path
+    } else {
+        anyhow::bail!("Cannot call `send_completion_email` with a job that does not have an output file assigned")
+    };
+
+    let ftp_url = get_ftp_path(output, config)?;
+    let download_command = format!("wget --user=anonymous --password=your@email.address.com -r -nH {ftp_url}");
+    let subject = format!("{job} succeeded");
+    let mut body = format!("{} succeeded. You may retrieve it with:\n\n {download_command}\n\n", job.to_long_string());
+    if let Some(deldate) = job.delete_time {
+        println!("deldate");
+        body.push_str(&format!("Please note that it will be deleted at {deldate}"));
+    }
+
+    config.email.send_mail(&[email], None, None, &subject, &body)
+        .with_context(|| format!("Failed to send email about job {} to {}", job.job_id, email))
+}
+
+fn send_job_error_email<E: Debug>(job: &Job, err: &E, email_config: &EmailConfig) -> anyhow::Result<()> {
+    let email = if let Some(e) = &job.email {
+        e
+    } else {
+        return Ok(())
+    };
+
+    let subject = format!("{job} failed");
+    let body = format!("{} failed. The error was:\n\n{err:?}\n\nPlease review the input file for errors or contact the admins ({})", job.job_id, email_config.admin_emails_string_list());
+    email_config.send_mail(&[email], None, None, &subject, &body)
+        .with_context(|| format!("Failed to send error email for job {}", job.job_id))
+}
+
+fn get_ftp_path(output: &Path, config: &Config) -> anyhow::Result<url::Url> {
+    let server = &config.execution.ftp_download_server;
+    let ftp_root = &config.execution.ftp_download_root.canonicalize()
+        .context("Cannot get canonical representation of FTP root")?;
+    let output = output
+        .canonicalize()
+        .context("Cannot get canonical representation of output path")?;
+    let output = output
+        .strip_prefix(&ftp_root)
+        .with_context(|| format!("Could not make output {} relative to FTP root {}", output.display(), ftp_root.display()))?;
+
+    let output = if output.is_dir() {
+        format!("{}/", output.display())
+    } else {
+        output.to_string_lossy().to_string()
+    };
+    
+    println!("get_ftp_path: server.join");
+    server.join(&output)
+        .with_context(|| format!("Could not join FTP url and output relative path {output}"))
 }

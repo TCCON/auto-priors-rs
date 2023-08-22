@@ -206,7 +206,7 @@ impl StdOutputStructure {
         let mut files = vec![];
         for &sid in site_ids {
             if mod_files {
-                let mod_dir = job.mod_output_dir(sid);
+                let mod_dir = job.mod_run_output_dir(sid);
                 if !mod_dir.exists() {
                     anyhow::bail!(".mod output directory does not exist for site {sid} in job #{}", job.job_id);
                 }
@@ -218,7 +218,7 @@ impl StdOutputStructure {
             }
 
             if vmr_files {
-                let vmr_dir = job.vmr_output_dir(sid);
+                let vmr_dir = job.vmr_run_output_dir(sid);
                 if !vmr_dir.exists() {
                     anyhow::bail!(".vmr output directory does not exist for site {sid} in job #{}", job.job_id);
                 }
@@ -230,7 +230,7 @@ impl StdOutputStructure {
             }
 
             if map_files {
-                let map_dir = job.map_output_dir(sid);
+                let map_dir = job.map_run_output_dir(sid);
                 if !map_dir.exists() {
                     anyhow::bail!(".map output directory does not exist for site {sid} in job #{}", job.job_id);
                 }
@@ -242,9 +242,9 @@ impl StdOutputStructure {
             }
 
             if map_nc_files {
-                let map_dir = job.mod_output_dir(sid);
+                let map_dir = job.map_run_output_dir(sid);
                 if !map_dir.exists() {
-                    anyhow::bail!(".mod output directory does not exist for site {sid} in job #{}", job.job_id);
+                    anyhow::bail!(".map output directory does not exist for site {sid} in job #{}", job.job_id);
                 }
                 let map_glob = glob::glob(&map_dir.join("*.map.nc").to_string_lossy())
                     .context("Error occurred while trying to make the glob pattern for .mod files")?;

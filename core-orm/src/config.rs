@@ -771,6 +771,13 @@ impl EmailConfig {
             .collect();
         self.send_mail(to.as_slice(), None, None, subject, message)
     }
+
+    pub fn admin_emails_string_list(&self) -> String {
+        self.admin_emails
+            .iter()
+            .map(|email| email.to_string())
+            .join(", ")
+    }
 }
 
 /// An enum specifying which method to use to send emails
