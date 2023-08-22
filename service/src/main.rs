@@ -10,6 +10,7 @@ use tokio::sync::{RwLock, mpsc::{self, error::TrySendError, error::TryRecvError,
 use crate::error::ErrorHandler;
 
 mod error;
+mod logging;
 mod jobs;
 mod met;
 mod stdsitejobs;
@@ -25,9 +26,11 @@ async fn main() -> anyhow::Result<()> {
     // as well
     // console_subscriber::init();
 
-    env_logger::Builder::from_default_env()
-        .filter_module("sqlx", log::LevelFilter::Warn)
-        .init();
+    // env_logger::Builder::from_default_env()
+    //     .filter_module("sqlx", log::LevelFilter::Warn)
+    //     .init();
+
+    logging::ServiceLoggingCli::configure_logging();
 
     println!("Service starting");
     info!("Starting tccon-priors-service");

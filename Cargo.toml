@@ -10,6 +10,7 @@ exclude = ["deps/Rocket", "python-bindings", "rocket-app"]
 anyhow = "1.0"
 async-trait = "0.1.72"
 chrono = "0.4"
+clap = {version = "3.2", features = ["derive"]}
 dotenv = "0.15.0"
 env_logger = "0.9"
 glob = "0.3"
