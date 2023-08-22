@@ -1242,7 +1242,7 @@ impl Job {
         Ok(())
     }
 
-    fn delete_output_and_run_dir(&self) -> anyhow::Result<()> {
+    pub fn delete_output_and_run_dir(&self) -> anyhow::Result<()> {
         if let Some(output) = &self.output_file {
             debug!("Cleaning out output {} for job {}", output.display(), self.job_id);
             if output.is_dir() {

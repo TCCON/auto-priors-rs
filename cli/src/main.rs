@@ -98,6 +98,11 @@ async fn main() -> anyhow::Result<()> {
             jobs::delete_job(&mut conn, subargs).await?;
         },
 
+        Commands::Jobs(JobCli { commands: JobActions::CleanErrored(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            jobs::clean_errored_jobs_cli(&mut conn, subargs).await?;
+        }
+
         Commands::Jobs(JobCli { commands: JobActions::Print(subargs) }) => {
             let mut conn = db.get_connection().await?;
             jobs::print_jobs_table_cli(&mut conn, subargs).await?;

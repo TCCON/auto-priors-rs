@@ -25,6 +25,9 @@ pub enum JobActions {
     /// Delete a job, clearing any output
     Delete(DeleteJobCli),
 
+    /// Delete output from jobs that errored
+    CleanErrored(CleanErroredCli),
+
     /// Print jobs in the database
     Print(PrintJobsCli)
 }
@@ -200,6 +203,63 @@ pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli, config: &Config
         Some(args.save_tarball))
     .await?;
     println!("Added new job, ID = {id}");
+    Ok(())
+}
+
+/// Delete any existing output for jobs that errored. The job remains in the
+/// database
+#[derive(Debug, Args)]
+pub struct CleanErroredCli {
+    /// The earliest submission date to delete, only jobs with a submission
+    /// time of or after midnight of this date will have their output deleted
+    #[clap(short = 's', long)]
+    not_before: Option<NaiveDate>,
+
+    /// The last (exclusive) date to delete, only jobs with a submission time
+    /// before midnight on this date will have their output deleted.
+    #[clap(short = 'e', long)]
+    not_after: Option<NaiveDate>,
+
+    /// Do not actually delete output, only print which jobs' output will be
+    /// deleted
+    #[clap(short = 'd', long)]
+    dry_run: bool,
+}
+
+pub async fn clean_errored_jobs_cli(conn: &mut MySqlConn, args: CleanErroredCli) -> anyhow::Result<()> {
+    clean_errored_jobs(conn, args.not_before, args.not_after, args.dry_run).await
+}
+
+pub async fn clean_errored_jobs(
+    conn: &mut MySqlConn,
+    not_before: Option<NaiveDate>,
+    not_after: Option<NaiveDate>,
+    dry_run: bool
+) -> anyhow::Result<()> 
+{
+    let not_before = not_before.map(|d| d.and_hms_opt(0, 0, 0).unwrap());
+    let not_after = not_after.map(|d| d.and_hms_opt(0, 0, 0).unwrap());
+    let errored_jobs = Job::get_jobs_in_state(conn, orm::jobs::JobState::Errored).await
+        .context("Error occured getting the list of errors jobs")?;
+
+    for job in errored_jobs {
+        if let Some(start) = not_before {
+            if job.submit_time < start { continue; }
+        }
+
+        if let Some(end) = not_after {
+            if job.submit_time >= end { continue; }
+        }
+
+        if dry_run {
+            println!("Would clean up output for job #{}", job.job_id);
+        } else {
+            job.delete_output_and_run_dir()
+                .with_context(|| format!("Error occured cleaning up output for job #{}", job.job_id))?;
+            println!("Output for job #{} cleaned up", job.job_id);
+        }
+    }
+
     Ok(())
 }
 
