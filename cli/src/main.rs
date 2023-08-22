@@ -17,6 +17,7 @@ use tokio;
 use tccon_priors_cli::utils;
 
 #[derive(Debug, Parser)]
+#[clap(version)]
 struct Cli {
     #[clap(subcommand)]
     command: Commands,

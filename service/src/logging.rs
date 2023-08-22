@@ -4,7 +4,7 @@ use log4rs::{append::{console::{ConsoleAppender, Target}, rolling_file::{Rolling
 
 /// The TCCON automatic priors service that handles all automation
 #[derive(Debug, Parser)]
-#[clap(setting = clap::AppSettings::DeriveDisplayOrder)]
+#[clap(setting = clap::AppSettings::DeriveDisplayOrder, version)]
 pub(crate) struct ServiceLoggingCli {
     /// Disable logging to stderr
     #[clap(long)]
@@ -19,10 +19,19 @@ pub(crate) struct ServiceLoggingCli {
     #[clap(long)]
     log_file: Option<String>,
 
-    /// The lowest severity message to write to the file. Same options and
-    /// default as --stderr-level
+    /// The lowest severity message to write to the file. Same options as --stderr-level
     #[clap(long, default_value_t = LevelFilter::Info)]
     file_level: LevelFilter,
+
+    /// The size in MB that triggers a log file to roll over to the next index
+    #[clap(long, default_value_t = 10)]
+    log_file_max_size: u64,
+
+    /// The number of backup log files to keep. With the default of 10, this would keep
+    /// extra files *.0 through *.9, in addition to the current log file, but would 
+    /// delete the *.9 file the next time a new file is started.
+    #[clap(long, default_value_t = 10)]
+    log_file_num_rolls: u32,
 }
 
 impl ServiceLoggingCli {
@@ -32,7 +41,9 @@ impl ServiceLoggingCli {
             !args.no_log_stderr,
             args.stderr_level,
             args.log_file.as_deref(),
-            args.file_level
+            args.file_level,
+            args.log_file_max_size,
+            args.log_file_num_rolls
         );
     }
 }
@@ -42,6 +53,8 @@ pub(crate) fn setup_logging(
     console_log_level: LevelFilter,
     log_file: Option<&str>,
     file_log_level: LevelFilter,
+    log_file_size_mb: u64,
+    num_log_file_rolls: u32,
 ) {
     let config = log4rs::Config::builder();
     let root = Root::builder();
@@ -65,9 +78,9 @@ pub(crate) fn setup_logging(
     };
 
     let (config, root) = if let Some(path) = log_file {
-        let trigger = SizeTrigger::new(10_000_000); // ~10 MB
+        let trigger = SizeTrigger::new(log_file_size_mb * 1_000_000); // ~10 MB
         let roller = FixedWindowRoller::builder()
-            .build(&format!("{path}.{{}}"), 10)
+            .build(&format!("{path}.{{}}"), num_log_file_rolls)
             .expect("Could not set up the rolling log file");
 
         let policy = CompoundPolicy::new(

@@ -2205,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "tccon-priors-cli"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2229,7 +2229,7 @@ dependencies = [
 
 [[package]]
 name = "tccon-priors-service"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",

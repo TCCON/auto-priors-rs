@@ -31,9 +31,9 @@ async fn main() -> anyhow::Result<()> {
     //     .init();
 
     logging::ServiceLoggingCli::configure_logging();
-
-    println!("Service starting");
-    info!("Starting tccon-priors-service");
+    let service_version = clap::crate_version!();
+    println!("Service v{service_version} starting");
+    info!("Starting tccon-priors-service v{service_version}");
     let db_url = orm::get_database_url(None)?;
     let db = orm::get_database_pool(Some(db_url.clone())).await.unwrap();
 

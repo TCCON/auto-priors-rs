@@ -1,6 +1,6 @@
 [package]
 name = "tccon-priors-service"
-version = "0.1.0"
+version = "2.0.0"  # jumped to v2.0.0 because v1 is the Python automation
 edition = "2021"
 
 [dependencies]
