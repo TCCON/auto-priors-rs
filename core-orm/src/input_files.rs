@@ -25,6 +25,11 @@ impl FailedParsingError {
         let problems = self.reasons.join(&full_join);
         return format!("{prefix}{problems}")
     }
+
+    fn new_for_database_error(input_file: PathBuf, email: String) -> Self {
+        let reasons = vec!["There was an error while adding this job to the database. You may try submitting this job again; if it continues to fail, please report this problem".to_string()];
+        Self { reasons: reasons, input_file, email: Some(email) }
+    }
 }
 
 impl From<std::io::Error> for FailedParsingError {
@@ -187,7 +192,7 @@ impl InputJobBuilder {
 
         let input_job = InputJob {
             site_id: site_ids,
-            start_date: self.start_date.unwrap_or_else(|| {errors.push("smissing field tart_date".to_owned()); NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()}),
+            start_date: self.start_date.unwrap_or_else(|| {errors.push("missing field start_date".to_owned()); NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()}),
             end_date: self.end_date.unwrap_or_else(|| {errors.push("missing field end_date".to_owned()); NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()}),
             lat: lats,
             lon: lons,
@@ -373,25 +378,31 @@ pub async fn add_jobs_from_input_files(
             continue;
         }
 
-        let move_dir = match InputJob::from_file(&input_file) {
+        match InputJob::from_file(&input_file) {
             Ok(job) => {
                 jobs.push(job);
                 successful_input_files.push(input_file);
-                &config.execution.success_input_file_dir
+                
             },
             Err(e) => {
-                handle_failed_parsing(e, config);
-                &config.execution.failure_input_file_dir
+                email_user_for_failed_parsing(e, config);
+
+                // Move failed files now; for successful file, we need the job number so that has to happen later
+                let now = chrono::Local::now();
+                let dest_file = config.execution.failure_input_file_dir.join(
+                    format!("failed_input_file_{}.txt", now.format("%Y-%m-%d %H:%M:%S.%f"))
+                );
+                if let Err(e) = mover.move_file(&input_file, &dest_file) {
+                    unmoved_input_file_errors.push(e);
+                }
             }
         };
 
-        if let Err(e) = mover.move_file(&input_file, &move_dir) {
-            unmoved_input_file_errors.push(e);
-        }
+        
     }
 
     for (job, infile) in jobs.into_iter().zip(successful_input_files) {
-        let new_id = crate::jobs::Job::add_job_from_args(conn,
+        let res = crate::jobs::Job::add_job_from_args(conn,
             job.site_id.clone(),
             job.start_date,
             job.end_date,
@@ -406,11 +417,31 @@ pub async fn add_jobs_from_input_files(
             None,
             None,
             Some(crate::jobs::TarChoice::Yes)
-        ).await?;
+        ).await;
 
-        info!("Added job {new_id} from file {}", infile.display());
-        if job.confirmation {
-            confirm_successful_parsing(&job, config);
+        match res {
+            Ok(new_id) => {
+                // Successfully added the job to the database, so move the file and email the user a confirmation
+                // Moving the file might still error, so handle that internally
+                info!("Added job {new_id} from file {}", infile.display());
+
+                let dest_file = config.execution.success_input_file_dir.join(
+                    format!("job_{new_id:09}_input_file.txt")
+                );
+
+                if let Err(e) = mover.move_file(&infile, &dest_file) {
+                    unmoved_input_file_errors.push(e);
+                }
+
+                if job.confirmation {
+                    confirm_successful_parsing(&job, config);
+                }
+            },
+            Err(e) => {
+                warn!("Error adding job from input file {} to database: {e:?}", infile.display());
+                let parsing_err = FailedParsingError::new_for_database_error(infile.to_path_buf(), job.email);
+                email_user_for_failed_parsing(parsing_err, config);
+            }
         }
     }
 
@@ -439,7 +470,7 @@ fn confirm_successful_parsing(job: &InputJob, config: &Config) {
     });
 }
 
-fn handle_failed_parsing(error: FailedParsingError, config: &Config) {
+fn email_user_for_failed_parsing(error: FailedParsingError, config: &Config) {
     // Log the error
     let file = error.input_file.display();
     let warn_msg = if let Some(email) = &error.email {
@@ -489,7 +520,7 @@ impl InputFileMoveHandler {
     /// - `Err(e)` if this is the first time moving this file has failed recently
     /// 
     /// This is intended to help avoid spamming the admin emails if a file cannot be deleted.
-    fn move_file(&mut self, from_file: &Path, to_dir: &Path) -> anyhow::Result<bool> {
+    fn move_file(&mut self, from_file: &Path, to_file: &Path) -> anyhow::Result<bool> {
         let now = Local::now();
         // Clear the cache of failed files every 3 days. That keeps it from getting too large (hopefully)
         // but gives time to respond to emails about failed file removals.
@@ -498,7 +529,7 @@ impl InputFileMoveHandler {
             self.last_clear_time = now;
         }
 
-        let res = Self::move_file_inner(from_file, to_dir);
+        let res = Self::move_file_inner(from_file, to_file);
         if res.is_err() && self.errored_files.contains(from_file) {
             // We've seen this file recently, so don't treat the move error as an actual error
             Ok(false)
@@ -513,14 +544,7 @@ impl InputFileMoveHandler {
         }
     }
 
-    fn move_file_inner<'p>(from_file: &'p Path, to_dir: &Path) -> InputFileMoveError<'p> {
-        let to_file = if let Some(name) = from_file.file_name() {
-            to_dir.join(name)
-        } else {
-            // anyhow::bail!("Cannot get name of input file, was given a bad path: {}", from_file.display());
-            return InputFileMoveError::BadPath(from_file);
-        };
-
+    fn move_file_inner<'p>(from_file: &'p Path, to_file: &Path) -> InputFileMoveError<'p> {
         let res_copy = std::fs::copy(from_file, to_file);
         let res_rm = std::fs::remove_file(from_file);
 
@@ -542,7 +566,6 @@ impl InputFileMoveHandler {
 #[derive(Debug, Clone)]
 enum InputFileMoveError<'p> {
     Ok(&'p Path),
-    BadPath(&'p Path),
     CopyFail(&'p Path, String),
     RemoveFail(&'p Path, String),
     CopyAndRemoveFail(&'p Path, String, String)
@@ -561,7 +584,6 @@ impl<'p> Display for InputFileMoveError<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InputFileMoveError::Ok(p) => write!(f, "{} moved successfully", p.display()),
-            InputFileMoveError::BadPath(p) => write!(f, "Cannot get name of input file, was given a bad path: {}", p.display()),
             InputFileMoveError::CopyFail(p, e) => write!(f, "Could not copy original input file {}, file was deleted. Error was: {e}", p.display()),
             InputFileMoveError::RemoveFail(p, e) => write!(f, "URGENT: Could not remove original input file {}. Error was: {e}", p.display()),
             InputFileMoveError::CopyAndRemoveFail(p, e_cp, e_rm) => write!(f, "URGENT: could not copy or remove original input file {}. Errors were\nCopying: {e_cp}\nRemoving: {e_rm}", p.display()),

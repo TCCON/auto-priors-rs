@@ -1819,7 +1819,6 @@ fn get_ftp_path(output: &Path, config: &Config) -> anyhow::Result<url::Url> {
         output.to_string_lossy().to_string()
     };
     
-    println!("get_ftp_path: server.join");
     server.join(&output)
         .with_context(|| format!("Could not join FTP url and output relative path {output}"))
 }
