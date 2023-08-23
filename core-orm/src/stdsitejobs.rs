@@ -316,7 +316,7 @@ impl StdSiteJob {
         // can then calculate the EqL interpolators once for all the sites, rather than repeating that
         // work for every site.
         let query = sqlx::query!(
-            r#"SELECT date,GROUP_CONCAT(DISTINCT site_id SEPARATOR ",") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR ",") AS ids FROM v_stdsitejobs WHERE state = ? GROUP BY date;"#,
+            r#"SELECT date,GROUP_CONCAT(DISTINCT site_id SEPARATOR ",") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR ",") AS ids FROM v_StdSiteJobs WHERE state = ? GROUP BY date;"#,
             StdSiteJobState::JobNeeded
         ).fetch_all(&mut *conn)
         .await?;
@@ -388,7 +388,7 @@ impl StdSiteJob {
         // structures, and we need to handle each one.
         let std_job_rows: Vec<StdSiteJob> = sqlx::query_as!(
             QStdSiteJob,
-            "SELECT * FROM v_stdsitejobs WHERE state = ? AND job IS NOT NULL;",
+            "SELECT * FROM v_StdSiteJobs WHERE state = ? AND job IS NOT NULL;",
             StdSiteJobState::InProgress
         ).fetch_all(&mut *conn)
         .await?
