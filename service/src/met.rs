@@ -45,9 +45,9 @@ impl<H: ErrorHandler + 'static> MetManager<H> {
         loop {
             debug!("MetManager waiting for next message");
             let msg = self.msg_recv.recv().await;
-            if self.am_i_disabled().await {
-                warn!("Met download disabled in config");
-            } else if let Some(m) = msg {
+            // Must always handle messages, otherwise the shutdown messages aren't processed.
+            // Check if this component is disabled in the working functions.
+            if let Some(m) = msg {
                 match m {
                     MetMessage::DownloadMet => self.scheduler_entry_point().await,
                     MetMessage::StopGracefully => {
@@ -71,6 +71,11 @@ impl<H: ErrorHandler + 'static> MetManager<H> {
     }
 
     async fn scheduler_entry_point(&mut self) {
+        if self.am_i_disabled().await {
+            warn!("Met download disabled in config");
+            return;
+        }
+
         if let Some(handle) = &self.inner_runner {
             if handle.is_finished() {
                 self.inner_runner = None;

@@ -268,6 +268,8 @@ fn setup_signals() -> std::io::Result<Signals> {
 
     let mut sigs = vec![
         signal::SIGHUP, // we'll use this to reload the config, signal_hook docs imply that is common for daemons
+        signal::SIGUSR1, // Right now, SIGINT, SIGTERM, and probably SIGQUIT are all causing immediate shutdown, so we'll use USR1 and USR2 for graceful and rapid shutdown
+        signal::SIGUSR2,
     ];
     // this should include SIGTERM, SIGQUIT, and SIGINT. INT will be our graceful shutdown, the other two our rapid
     // shutdown.
@@ -301,13 +303,14 @@ async fn process_signals(
                 *global_config = new_config;
                 
             }, // reload config
-            signal::SIGINT => {
+            signal::SIGINT | signal::SIGUSR1 => {
+                // TODO: SIGINT causing immediate termination, so have to use USR1
                 info!("Beginning graceful shutdown");
                 shutdown_components(ExitCommand::Graceful, tx_scheduler, tx_met, tx_jobs, tx_std_sites).await;
                 info!("Graceful shutdown complete");
                 break;
             },
-            signal::SIGTERM | signal::SIGQUIT => {
+            signal::SIGTERM | signal::SIGQUIT | signal::SIGUSR2 => {
                 info!("Beginning rapid shutdown");
                 shutdown_components(ExitCommand::Rapid, tx_scheduler, tx_met, tx_jobs, tx_std_sites).await;
                 info!("Rapid shutdown complete");

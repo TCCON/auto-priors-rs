@@ -164,9 +164,9 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
         loop {
             debug!("Job manager waiting for next message");
             let msg = self.msg_recv.recv().await;
-            if self.am_i_disabled().await {
-                warn!("Job management disabled in configuration");
-            } else if let Some(m) = msg {
+            // Must always handle messages, otherwise the shutdown messages aren't processed.
+            // Check if this component is disabled in the working functions.
+            if let Some(m) = msg {
                 debug!("Job manager received message: {m:?}");
                 let res = match m {
                     JobMessage::StartJobs => self.start_jobs_entry_point().await.context("Error occurred while starting jobs"),
@@ -208,6 +208,11 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     /// Note that while errors may occur in this function, they are passed to the instance's
     /// error handler to report (usually to a log file and/or email). 
     async fn start_jobs_entry_point(&mut self) -> anyhow::Result<()> {
+        if self.am_i_disabled().await {
+            warn!("Job management disabled in configuration");
+            return Ok(());
+        }
+
         self.update_queue_max_jobs().await;
 
         self.scan_for_job_submissions().await?;
@@ -226,6 +231,11 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     /// This should be called about once per day to ensure that the LUTs are up to date,
     /// as they will periodically need to extrapolate further into the future.
     async fn schedule_lut_regen(&mut self) -> anyhow::Result<()> {
+        if self.am_i_disabled().await {
+            warn!("Job management disabled in configuration");
+            return Ok(())
+        }
+
         // For each ginput defined in the config, add a blocking job to the special queue
         // to regenerate its LUTs
         let lut_queue = self.job_queues.entry(LUT_QUEUE_NAME.to_string())
@@ -251,6 +261,11 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     }
 
     async fn clean_up_expired_jobs(&self) -> anyhow::Result<()> {
+        if self.am_i_disabled().await {
+            warn!("Job management disabled in configuration");
+            return Ok(())
+        }
+
         let mut conn = self.pool.get_connection().await
             .context("Could not get database connection to clean up expired jobs")?;
         Job::clean_up_expired_jobs(&mut conn).await

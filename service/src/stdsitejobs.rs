@@ -44,9 +44,9 @@ impl<H: ErrorHandler> StdSiteManager<H> {
         loop {
             debug!("StdSiteManager waiting for next message");
             let msg = self.msg_recv.recv().await;
-            if self.am_i_disabled().await {
-                warn!("Standard site priors generation disabled in config");
-            } else if let Some(m) = msg {
+            // Must always handle messages, otherwise the shutdown messages aren't processed.
+            // Check if this component is disabled in the working functions.
+            if let Some(m) = msg {
                 debug!("StdSiteManager received message: {m:?}");
                 let res = match m {
                     StdSiteMessage::AddJobs => self.add_needed_std_site_jobs().await,
@@ -73,6 +73,10 @@ impl<H: ErrorHandler> StdSiteManager<H> {
     }
 
     async fn add_needed_std_site_jobs(&mut self) -> anyhow::Result<()> {
+        if self.am_i_disabled().await {
+            warn!("Standard site priors disabled in config");
+            return Ok(());
+        }
         let mut conn = self.pool.get_connection().await
             .context("Error occurred trying to get the database connection to update the standard sites jobs")?;
 
@@ -91,6 +95,11 @@ impl<H: ErrorHandler> StdSiteManager<H> {
     }
 
     async fn tar_std_sites_output(&mut self) -> anyhow::Result<()> {
+        if self.am_i_disabled().await {
+            warn!("Standard site priors disabled in config");
+            return Ok(());
+        }
+        
         let mut conn = self.pool.get_connection().await
             .context("Error occurred trying to get the database connection to make standard sites tarballs")?;
 
