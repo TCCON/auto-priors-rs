@@ -957,6 +957,16 @@ pub struct ServiceTimingOptions {
     /// How frequently (in minutes) to check for standard site days ready to be
     /// compressed into tarballs
     pub std_site_tar_minutes: u32,
+
+    /// Set to true to disable the daily/weekly reports.
+    pub disable_reports: bool,
+
+    /// Local time of day to deliver the daily reports. Default is "8:00 am".
+    pub daily_report_time: String,
+
+    /// Local time of day to deliver the weekly reports. Default is "8:00 am".
+    /// Weekly reports are always delivered on a Monday.
+    pub weekly_report_time: String,
 }
 
 impl Default for ServiceTimingOptions {
@@ -974,6 +984,9 @@ impl Default for ServiceTimingOptions {
             std_site_gen_hours: 24, 
             std_site_gen_offset_minutes: Some(180),
             std_site_tar_minutes: 30,
+            disable_reports: false,
+            daily_report_time: "8:00 am".to_string(),
+            weekly_report_time: "8:00 am".to_string(),
         }
     }
 }
@@ -990,6 +1003,9 @@ pub struct EmailConfig {
     /// that needs addressed by the administrators.
     admin_emails: Mailboxes,
 
+    /// A list of emails to send weekly reports to
+    report_emails: Mailboxes,
+
     /// Which email backend to use to send the emails.
     backend: EmailBackend
 }
@@ -1004,6 +1020,7 @@ impl Default for EmailConfig {
         Self { 
             from_address: from_addr, 
             admin_emails: Default::default(), 
+            report_emails: Default::default(),
             backend: Default::default() 
         }
     }
@@ -1035,6 +1052,19 @@ impl EmailConfig {
             .map(|s| s.as_str())
             .collect();
         self.send_mail(to.as_slice(), None, None, subject, message)
+    }
+
+    pub fn report_emails_string_list(&self, fall_back_on_admin: bool) -> Vec<String> {
+        let emails = self.report_emails
+            .iter()
+            .map(|email| email.to_string())
+            .collect_vec();
+
+        if emails.is_empty() && fall_back_on_admin {
+            self.admin_emails_string_list()
+        } else {
+            emails
+        }
     }
 
     pub fn admin_emails_string_list(&self) -> Vec<String> {
