@@ -2219,7 +2219,6 @@ dependencies = [
  "md-5",
  "serial_test",
  "sqlx",
- "tabled",
  "tccon_priors_orm",
  "tempdir",
  "tokio",

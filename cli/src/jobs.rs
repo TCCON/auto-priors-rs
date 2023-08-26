@@ -4,7 +4,6 @@ use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use clap::{self, Args, Subcommand};
 use orm::{jobs::{Job, ModFmt, VmrFmt, MapFmt, TarChoice}, MySqlConn, config::Config};
-use tabled::Table;
 
 
 /// Manage ginput jobs
@@ -353,11 +352,7 @@ pub async fn print_jobs_table(
             println!("No jobs matching given criteria.");
         }
     } else {
-        let table_config = tabled::settings::Settings::default()
-            .with(tabled::settings::Style::markdown());
-        let table = Table::new(jobs)
-            .with(table_config)
-           .to_string();
+        let table = orm::utils::to_std_table(jobs);
         println!("{table}");
     }
 

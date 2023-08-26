@@ -5,7 +5,6 @@ use clap::{self,Args, Subcommand};
 use log::warn;
 use orm::{self, siteinfo::{SiteType, StdSite, SiteInfo, StdOutputStructure}, MySqlConn};
 use sqlx::Connection;
-use tabled::Table;
 
 /// Manage definition of standard sites and their locations
 #[derive(Debug, Args)]
@@ -272,11 +271,7 @@ pub async fn print_sites_cli(conn: &mut MySqlConn, args: PrintSitesCli) -> anyho
 
 pub async fn print_sites(conn: &mut MySqlConn, site_type: Option<SiteType>) -> anyhow::Result<()> {
     let sites = StdSite::get_by_type(conn, site_type).await?;
-    let table_config = tabled::settings::Settings::default()
-        .with(tabled::settings::Style::markdown());
-    let table = Table::new(sites)
-        .with(table_config)
-        .to_string();
+    let table = orm::utils::to_std_table(sites);
     println!("{table}");
     Ok(())
 }
@@ -297,11 +292,7 @@ pub async fn print_locations_for_site(
     site_id: &str
 ) -> anyhow::Result<()> {
     let infos = SiteInfo::get_site_locations(conn, site_id).await?;
-    let table_config = tabled::settings::Settings::default()
-        .with(tabled::settings::Style::markdown());
-    let table = Table::new(infos)
-        .with(table_config)
-        .to_string();
+    let table = orm::utils::to_std_table(infos);
     println!("{table}");
 
     Ok(())
