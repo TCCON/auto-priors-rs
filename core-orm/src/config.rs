@@ -577,9 +577,6 @@ pub struct ExecutionConfig {
     /// Run directory for standard site jobs.
     pub std_sites_output_base: PathBuf,
 
-    /// Frequency in seconds for the job service to check for pending jobs
-    pub start_jobs_freq: f32,
-
     /// Run a simulation, do not execute ginput, but generate mock output files for testing
     #[serde(default)]
     pub simulate: bool,
@@ -619,7 +616,6 @@ impl Default for ExecutionConfig {
             output_path: Default::default(), 
             std_sites_tar_output: Default::default(), 
             std_sites_output_base: Default::default(),
-            start_jobs_freq: 60.0,
             ginput: Default::default(),
             simulate: false,
             simulation_delay: default_sim_delay(),
