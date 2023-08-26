@@ -1,9 +1,10 @@
 use std::{path::PathBuf, process::{Command, Stdio}, io::Write};
 
+use chrono::NaiveDate;
 use lettre::{SmtpTransport, Transport, Message, message::Mailbox, Address};
 use serde::{Deserialize, Serialize};
 
-use crate::error::EmailError;
+use crate::{error::EmailError, MySqlConn, config::Config};
 
 /// A trait that any email backend must implement
 pub trait SendMail {
@@ -193,4 +194,51 @@ pub fn parse_email_address(email: &str) -> Result<Mailbox, EmailError> {
         .map_err(|_| EmailError::UnparsableEmail(email.to_string()))?;
     
     Ok(Mailbox::new(None, email))
+}
+
+
+pub async fn email_current_jobs(conn: &mut MySqlConn, config: &Config, to: &[&str]) -> anyhow::Result<()> {
+    let summary = crate::jobs::Job::summarize_active_jobs_by_submitter(conn).await?;
+    let total = summary.total_num_jobs();
+    let subject = "AutoModRust current job summary";
+    let now = chrono::Local::now();
+    let table = summary.to_table();
+    let body = format!("As of {now}, there are {total} priors jobs running or pending:\n\n{table}");
+
+    config.email.send_mail(to, None, None, subject, &body)?;
+    Ok(())
+}
+
+pub async fn email_completed_jobs(conn: &mut MySqlConn, config: &Config, to: &[&str], start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<()> {
+    let (successes, failures) = crate::jobs::Job::summarize_jobs_completed_between(conn, start_date, end_date).await?;
+    let (body_intro, subject) = if let Some(end) = end_date {
+        let intro = format!("Priors jobs summary for {start_date} to {end}:");
+        let subj = format!("AutoModRust completed job summary {start_date} to {end}");
+        (intro, subj)
+    } else {
+        let intro = format!("Priors job summary from {start_date} through now:");
+        let subj = format!("AutoModRust completed job summary {start_date} to now");
+        (intro, subj)
+    };
+
+    let success_body = if successes.is_empty() {
+        "No jobs completed during this time period".to_string()
+    } else {
+        let table = successes.to_table();
+        let n = successes.total_num_jobs();
+        format!("{n} jobs were completed during this time period:\n\n{table}")
+    };
+
+    let failure_body = if failures.is_empty() {
+        "No jobs failed during this time period".to_string()
+    } else {
+        let table = failures.to_table();
+        let n = failures.total_num_jobs();
+        format!("{n} jobs failed during this time period:\n\n{table}")
+    };
+
+    let full_body = format!("{body_intro}\n\n{success_body}\n\n{failure_body}");
+
+    config.email.send_mail(to, None, None, &subject, &full_body)?;
+    Ok(())
 }

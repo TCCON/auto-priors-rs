@@ -1037,11 +1037,15 @@ impl EmailConfig {
         self.send_mail(to.as_slice(), None, None, subject, message)
     }
 
-    pub fn admin_emails_string_list(&self) -> String {
+    pub fn admin_emails_string_list(&self) -> Vec<String> {
         self.admin_emails
             .iter()
             .map(|email| email.to_string())
-            .join(", ")
+            .collect_vec()
+    }
+
+    pub fn admin_emails_string_list_for_display(&self) -> String {
+        self.admin_emails_string_list().join(", ")
     }
 }
 

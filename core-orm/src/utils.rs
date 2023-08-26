@@ -299,6 +299,25 @@ pub fn format_lon_str(lon: f32, prec: u8) -> String {
     }
 }
 
+pub fn table_to_std_string(mut tab: tabled::Table) -> String {
+    let table_config = tabled::settings::Settings::default()
+        .with(tabled::settings::Style::markdown());
+    tab.with(table_config);
+    tab.to_string()
+}
+
+pub fn to_std_table<I, T>(iter: I) -> String 
+where
+    I: IntoIterator<Item = T>,
+    T: tabled::Tabled
+{
+    let table_config = tabled::settings::Settings::default()
+        .with(tabled::settings::Style::markdown());
+    tabled::Table::new(iter)
+        .with(table_config)
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDate;

@@ -127,6 +127,16 @@ async fn main() -> anyhow::Result<()> {
             email::email_past_job_submitters_cli(&mut conn, &config, subargs).await?;
         },
 
+        Commands::Email( EmailCli { commands: EmailActions::CurrentJobs(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            email::email_current_jobs_cli(&mut conn, &config, subargs).await?;
+        },
+
+        Commands::Email( EmailCli { commands: EmailActions::PastJobs(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            email::email_completed_jobs_cli(&mut conn, &config, subargs).await?;
+        },
+
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::AddSite(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::add_new_std_site_cli(&mut conn, subargs).await?;

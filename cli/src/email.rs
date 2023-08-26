@@ -1,6 +1,7 @@
 use std::{path::PathBuf, io::Read};
 
 use anyhow::Context;
+use chrono::NaiveDate;
 use clap::{Args, Subcommand};
 use orm::{MySqlConn, config::Config, jobs::Job};
 
@@ -15,7 +16,11 @@ pub struct EmailCli {
 #[derive(Debug, Subcommand)]
 pub enum EmailActions {
     /// Send an email to anyone who has previously submitted a job
-    Submitters(EmailSubmittersCli)
+    Submitters(EmailSubmittersCli),
+    /// Send an email summarizing current jobs
+    CurrentJobs(CurrentJobsReportCli),
+    /// Send an email about previously finished jobs
+    PastJobs(CompletedJobsReportCli),
 }
 
 
@@ -69,3 +74,52 @@ pub async fn email_past_job_submitters(conn: &mut MySqlConn, config: &Config, to
     )?;
     Ok(())
 }
+
+/// Send an email reporting on pending and running jobs
+#[derive(Debug, Args)]
+pub struct CurrentJobsReportCli {
+    /// To whom to send the email report. May give multiple emails as separate arguments,
+    /// if none are given, the admins will be emailed.
+    to: Vec<String>
+}
+
+pub async fn email_current_jobs_cli(conn: &mut MySqlConn, config: &Config, args: CurrentJobsReportCli) -> anyhow::Result<()> {
+    let to = if args.to.is_empty() {
+        config.email.admin_emails_string_list()
+    } else {
+        args.to
+    };
+
+    let to: Vec<_> = to.iter().map(|s| s.as_str()).collect();
+    orm::email::email_current_jobs(conn, config, &to).await
+}
+
+/// Send an email reporting on jobs completed or failed in a given date range
+#[derive(Debug, Args)]
+pub struct CompletedJobsReportCli {
+    /// Only include jobs up to (not including) midnight on this date. If not given,
+    /// midnight tomorrow will be used (thus reporting on all jobs from START_DATE until
+    /// now).
+    #[clap(short = 'e', long)]
+    end_date: Option<NaiveDate>,
+
+    /// The first date to assemble completed jobs for.
+    start_date: NaiveDate,
+
+    /// To whom to send the email report. May give multiple emails as separate arguments,
+    /// if none are given, the admins will be emailed.
+    to: Vec<String>
+
+    
+}
+
+pub async fn email_completed_jobs_cli(conn: &mut MySqlConn, config: &Config, args: CompletedJobsReportCli) -> anyhow::Result<()> {
+    let to = if args.to.is_empty() {
+        config.email.admin_emails_string_list()
+    } else {
+        args.to
+    };
+
+    let to: Vec<_> = to.iter().map(|s| s.as_str()).collect();
+    orm::email::email_completed_jobs(conn, config, &to, args.start_date, args.end_date).await
+}   

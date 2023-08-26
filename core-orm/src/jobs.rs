@@ -719,6 +719,53 @@ impl Job {
         Ok(jobs?)
     }
 
+    pub async fn summarize_active_jobs_by_submitter(conn: &mut MySqlConn) -> anyhow::Result<JobSummary> {
+        let active_jobs = sqlx::query!(
+            "SELECT email,COUNT(*) as num FROM Jobs WHERE state = ? OR state = ? GROUP BY email",
+            JobState::Pending,
+            JobState::Running,
+        ).fetch_all(conn)
+        .await?
+        .into_iter()
+        .map(|rec| {
+            let submitter = rec.email.unwrap_or_else(|| "Command line".to_string());
+            (submitter, rec.num as u64)
+        }).collect_vec();
+        Ok(JobSummary(active_jobs))
+    }
+
+    pub async fn summarize_jobs_completed_between(conn: &mut MySqlConn, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<(JobSummary, JobSummary)> {
+        let end_date = end_date.unwrap_or_else(|| chrono::Local::now().date_naive() + chrono::Duration::days(1));
+        let successes = sqlx::query!(
+            "SELECT email,COUNT(*) AS num FROM Jobs WHERE (state = ? OR state = ?) AND complete_time >= ? AND complete_time < ? GROUP BY email",
+            JobState::Complete,
+            JobState::Cleaned,
+            start_date.and_hms_opt(0, 0, 0).unwrap(),
+            end_date.and_hms_opt(0, 0, 0).unwrap()
+        ).fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|rec| {
+            let submitter = rec.email.unwrap_or_else(|| "Command line".to_string());
+            (submitter, rec.num as u64)
+        }).collect_vec();
+
+        let failures = sqlx::query!(
+            "SELECT email,COUNT(*) AS num FROM Jobs WHERE state = ? AND complete_time >= ? AND complete_time <= ? GROUP BY email",
+            JobState::Errored,
+            start_date,
+            end_date
+        ).fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|rec| {
+            let submitter = rec.email.unwrap_or_else(|| "Command line".to_string());
+            (submitter, rec.num as u64)
+        }).collect_vec();
+
+        Ok((JobSummary(successes), JobSummary(failures)))
+    }
+
     /// Get the next job in `queue` which should be run
     /// 
     /// This will return the job with its queue value equal to `queue` that has
@@ -1341,6 +1388,26 @@ impl Job {
 
 }
 
+
+pub struct JobSummary(Vec<(String, u64)>);
+
+impl JobSummary {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn to_table(&self) -> String {
+        let mut builder = tabled::Table::builder(self.0.iter());
+        builder.set_header(["Submitted by", "# jobs"]);
+        let tab = builder.build();
+        utils::table_to_std_string(tab)
+    }
+
+    pub fn total_num_jobs(&self) -> u64 {
+        self.0.iter().map(|x| x.1).sum()
+    }
+}
+
 #[async_trait]
 pub trait FairShare {
     async fn next_job_in_queue(&self, conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>>;
@@ -1797,7 +1864,7 @@ fn send_job_error_email<E: Debug>(job: &Job, err: &E, email_config: &EmailConfig
     };
 
     let subject = format!("{job} failed");
-    let body = format!("{} failed. The error was:\n\n{err:?}\n\nPlease review the input file for errors or contact the admins ({})", job.job_id, email_config.admin_emails_string_list());
+    let body = format!("{} failed. The error was:\n\n{err:?}\n\nPlease review the input file for errors or contact the admins ({})", job.job_id, email_config.admin_emails_string_list_for_display());
     email_config.send_mail(&[email], None, None, &subject, &body)
         .with_context(|| format!("Failed to send error email for job {}", job.job_id))
 }
