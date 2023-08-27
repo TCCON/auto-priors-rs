@@ -56,13 +56,6 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     debug!("Log level set to DEBUG");
-    let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
-    if let Some(cf) = &config_file {
-        debug!("Loading configuration from {}", cf.to_string_lossy());
-    } else {
-        debug!("Will use default config");
-    }
-    let config = orm::config::load_config_file_or_default(config_file)?;
     let db_url = orm::get_database_url(None)?;
     let db = orm::get_database_pool(Some(db_url.clone())).await.unwrap();
 
@@ -74,27 +67,32 @@ async fn main() -> anyhow::Result<()> {
     match args.command {
         Commands::Met(MetCli{ command: MetActions::Check(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            met_download::check_files_for_dates_cli(&mut conn, subargs, &config).await?;    
+            let loaded_config = load_config()?;
+            met_download::check_files_for_dates_cli(&mut conn, subargs, &loaded_config).await?;    
         },
 
         Commands::Met(MetCli{ command: MetActions::DownloadDates(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            met_download::download_files_for_dates_cli(&mut conn, subargs, &config, wget_dl).await?;
+            let loaded_config = load_config()?;
+            met_download::download_files_for_dates_cli(&mut conn, subargs, &loaded_config, wget_dl).await?;
         },
 
         Commands::Met(MetCli{ command: MetActions::DownloadMissing(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            met_download::download_missing_files_cli(&mut conn, subargs, &config, wget_dl).await?;
+            let loaded_config = load_config()?;
+            met_download::download_missing_files_cli(&mut conn, subargs, &loaded_config, wget_dl).await?;
         },
 
         Commands::Met(MetCli{ command: MetActions::Rescan(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            met_download::rescan_met_files_cli(&mut conn, subargs, &config).await?;
+            let loaded_config = load_config()?;
+            met_download::rescan_met_files_cli(&mut conn, subargs, &loaded_config).await?;
         },
 
         Commands::Jobs(JobCli { commands: JobActions::Add(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            jobs::add_job(&mut conn, subargs, &config).await?;
+            let loaded_config = load_config()?;
+            jobs::add_job(&mut conn, subargs, &loaded_config).await?;
         },
 
         Commands::Jobs(JobCli { commands: JobActions::Delete(subargs) }) => {
@@ -119,22 +117,26 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::InputFiles(InputFilesCli { commands: InputFilesActions::Parse(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            input_files::add_jobs_from_input_files_cli(&mut conn, subargs, &config).await?; 
+            let loaded_config = load_config()?;
+            input_files::add_jobs_from_input_files_cli(&mut conn, subargs, &loaded_config).await?; 
         },
 
         Commands::Email( EmailCli { commands: EmailActions::Submitters(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            email::email_past_job_submitters_cli(&mut conn, &config, subargs).await?;
+            let loaded_config = load_config()?;
+            email::email_past_job_submitters_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
         Commands::Email( EmailCli { commands: EmailActions::CurrentJobs(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            email::email_current_jobs_cli(&mut conn, &config, subargs).await?;
+            let loaded_config = load_config()?;
+            email::email_current_jobs_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
         Commands::Email( EmailCli { commands: EmailActions::PastJobs(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            email::email_completed_jobs_cli(&mut conn, &config, subargs).await?;
+            let loaded_config = load_config()?;
+            email::email_completed_jobs_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::AddSite(subargs) }) => {
@@ -164,17 +166,20 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::UpdateTable(subargs) } ) => {
             let mut conn = db.get_connection().await?;
-            stdsites::update_std_site_job_table_cli(&mut conn, &config, subargs).await?;
+            let loaded_config = load_config()?;
+            stdsites::update_std_site_job_table_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
         Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::AddJobs } ) => {
             let mut conn = db.get_connection().await?;
-            stdsites::add_jobs_for_pending_rows(&mut conn, &config).await?;
+            let loaded_config = load_config()?;
+            stdsites::add_jobs_for_pending_rows(&mut conn, &loaded_config).await?;
         },
 
         Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::TarFiles } ) => {
             let mut conn = db.get_connection().await?;
-            stdsites::make_std_site_tarballs(&mut conn, &config).await?;
+            let loaded_config = load_config()?;
+            stdsites::make_std_site_tarballs(&mut conn, &loaded_config).await?;
         },
 
         Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::FlagForRegen(subargs) }) => {
@@ -187,12 +192,13 @@ async fn main() -> anyhow::Result<()> {
             siteinfo::site_info_json(&mut conn, &subargs).await?;
         },
 
-        Commands::Config(ConfigCli { command: ConfigActions::GenConfig(subargs)}) => {
+        Commands::Config(ConfigCli { command: ConfigActions::Generate(subargs)}) => {
             config::generate_config_file(subargs)?;
         },
 
-        Commands::Config(ConfigCli { command: ConfigActions::DebugConfig }) => {
-            config::debug_config(config);
+        Commands::Config(ConfigCli { command: ConfigActions::Debug }) => {
+            let loaded_config = load_config()?;
+            config::debug_config(loaded_config);
         },
 
         Commands::Completions(CompletionsCli { commands: CompletionsActions::Generate(subargs) }) => {
@@ -201,6 +207,16 @@ async fn main() -> anyhow::Result<()> {
     };
 
     Ok(())
+}
+
+fn load_config() -> anyhow::Result<orm::config::Config> {
+    let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
+    if let Some(cf) = &config_file {
+        debug!("Loading configuration from {}", cf.to_string_lossy());
+    } else {
+        debug!("Will use default config");
+    }
+    orm::config::load_config_file_or_default(config_file)
 }
 
 #[derive(Debug, Args)]

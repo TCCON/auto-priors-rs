@@ -11,16 +11,18 @@ pub struct ConfigCli {
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigActions {
-    GenConfig(GenConfigCli),
+    #[clap(alias = "gen")]
+    Generate(GenConfigCli),
+
     /// Read the configuration file pointed to by the PRIOR_CONFIG_FILE environment variable
     /// and print the internal representation to the screen. (Useful for checking that a config
     /// file is being parsed as you expect.) If the PRIOR_CONFIG_FILE variable is not set,
     /// then the default configuration is displayed.
-    DebugConfig
+    Debug
 }
 
 #[derive(Debug, Args)]
-/// Generate a default configuration file from the command line
+/// Generate a default configuration file from the command line (alias: gen)
 pub struct GenConfigCli {
     /// Path to write the default TOML file as.
     path: PathBuf
