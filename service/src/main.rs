@@ -1,9 +1,11 @@
 use std::{sync::{Arc, atomic::AtomicBool}, time::Duration};
 
+use clap::Parser;
 use clokwerk::{TimeUnits, Job};
 use error::LoggingErrorHandler;
 use jobs::JobMessage;
 use log::{info, warn, error, debug};
+use logging::ServiceLoggingCli;
 use orm::config::ErrorHandlerChoice;
 use signal_hook::{consts::signal, iterator::Signals};
 use tokio::sync::{RwLock, mpsc::{self, error::TrySendError, error::TryRecvError, Sender}, watch};
@@ -19,6 +21,16 @@ mod reports;
 
 const MSG_BUFFER_SIZE: usize = 256;
 
+#[derive(Debug, Parser)]
+struct Cli {
+    #[clap(flatten)]
+    logging_args: ServiceLoggingCli,
+
+    /// Send a test message (with and without context) to the error handler
+    /// and return immediately.
+    #[clap(long)]
+    test_error_handler: bool,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,8 +43,9 @@ async fn main() -> anyhow::Result<()> {
     // env_logger::Builder::from_default_env()
     //     .filter_module("sqlx", log::LevelFilter::Warn)
     //     .init();
+    let clargs = Cli::parse();
 
-    logging::ServiceLoggingCli::configure_logging();
+    logging::ServiceLoggingCli::configure_logging(clargs.logging_args);
     let service_version = clap::crate_version!();
     println!("Service v{service_version} starting");
     info!("Starting tccon-priors-service v{service_version}");
@@ -43,13 +56,20 @@ async fn main() -> anyhow::Result<()> {
     let config = orm::config::load_config_file_or_default(config_file)?;
     let (tx_config, rx_config) = watch::channel(config.clone());
     let timing_config = (&config.timing).clone();
-    let errh_choice = config.execution.error_hander;
+    let errh_choice = config.execution.error_handler;
     let config = Arc::new(RwLock::new(config));
 
     let err_handler = match errh_choice {
         ErrorHandlerChoice::Logging => ErrorHandler::Logging(error::LoggingErrorHandler{}),
         ErrorHandlerChoice::EmailAdmins => ErrorHandler::EmailAdmins(error::EmailAdminsErrorHandler::new(Arc::clone(&config), rx_config).await)
     };
+
+    if clargs.test_error_handler {
+        let test_err = anyhow::anyhow!("This is a test error");
+        err_handler.report_error(test_err.as_ref());
+        err_handler.report_error_with_context(test_err.as_ref(), "This is some test error context");
+        return Ok(());
+    }
 
     let mut sync_scheduler = clokwerk::Scheduler::new();
     let signals = setup_signals().expect("Could not set up signal handling");
@@ -119,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     if let Some(at) = timing_config.lut_regen_at {
-        lut_job.at(&at);
+        lut_job.at_time(at);
     }
     
     // END JOB MANAGER SETUP //
@@ -229,7 +249,7 @@ async fn main() -> anyhow::Result<()> {
     let tx_reports_daily = tx_reports.clone();
     sync_scheduler
         .every(1.days())
-        .at(&timing_config.daily_report_time)
+        .at_time(timing_config.daily_report_time)
         .run(move || {
             debug!("Scheduler: sending DailyReport message to ReportsManager");
             match tx_reports_daily.try_send(reports::ReportMessage::DailyReport) {
@@ -242,7 +262,7 @@ async fn main() -> anyhow::Result<()> {
     let tx_reports_weekly = tx_reports.clone();
     sync_scheduler
         .every(clokwerk::Interval::Monday)
-        .at(&timing_config.weekly_report_time)
+        .at_time(timing_config.weekly_report_time)
         .run(move || {
             debug!("Scheduler: sending WeeklyReport message to ReportsManager");
             match tx_reports_weekly.try_send(reports::ReportMessage::WeeklyReport) {

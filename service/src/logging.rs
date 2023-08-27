@@ -1,9 +1,9 @@
-use clap::Parser;
+use clap::Args;
 use log::LevelFilter;
 use log4rs::{append::{console::{ConsoleAppender, Target}, rolling_file::{RollingFileAppender, policy::compound::{trigger::size::SizeTrigger, roll::fixed_window::FixedWindowRoller, CompoundPolicy}}}, encode::pattern::PatternEncoder, config::{Appender, Root}, filter::threshold::ThresholdFilter};
 
 /// The TCCON automatic priors service that handles all automation
-#[derive(Debug, Parser)]
+#[derive(Debug, Args)]
 #[clap(setting = clap::AppSettings::DeriveDisplayOrder, version)]
 pub(crate) struct ServiceLoggingCli {
     /// Disable logging to stderr
@@ -35,8 +35,7 @@ pub(crate) struct ServiceLoggingCli {
 }
 
 impl ServiceLoggingCli {
-    pub(crate) fn configure_logging() {
-        let args = Self::parse();
+    pub(crate) fn configure_logging(args: ServiceLoggingCli) {
         setup_logging(
             !args.no_log_stderr,
             args.stderr_level,

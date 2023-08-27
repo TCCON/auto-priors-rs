@@ -10,7 +10,7 @@
 //! 
 use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, collections::HashMap, fmt::Display, str::FromStr};
 use anyhow::{self, Context};
-use chrono::{NaiveDate, NaiveDateTime, Duration};
+use chrono::{NaiveDate, NaiveDateTime, Duration, NaiveTime};
 use hostname;
 use itertools::Itertools;
 use lettre::message::{Mailbox, Mailboxes};
@@ -545,7 +545,7 @@ impl Config {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ExecutionConfig {
     /// Which error handler to use. Note that this cannot be changed by a config reload.
-    pub error_hander: ErrorHandlerChoice,
+    pub error_handler: ErrorHandlerChoice,
 
     /// Maximum number of threads to let numpy use
     pub max_numpy_threads: u32,
@@ -608,7 +608,7 @@ impl Default for ExecutionConfig {
         let host = host.to_string_lossy();
 
         Self { 
-            error_hander: Default::default(),
+            error_handler: Default::default(),
             queues: Default::default(), 
             max_numpy_threads: 2, 
             hours_to_keep: 168,
@@ -930,9 +930,9 @@ pub struct ServiceTimingOptions {
     /// look up tables for ginput. 
     pub lut_regen_days: u32,
 
-    /// What time of the day, in HH:MM format, to run the LUT regen. If
+    /// What time of the day, in HH:MM:SS format, to run the LUT regen. If
     /// omitted, then that will run at midnight.
-    pub lut_regen_at: Option<String>,
+    pub lut_regen_at: Option<NaiveTime>,
 
     /// How many hours between tries to clean up jobs whose output is ready
     /// to be deleted.
@@ -965,12 +965,15 @@ pub struct ServiceTimingOptions {
     /// Set to true to disable the daily/weekly reports.
     pub disable_reports: bool,
 
-    /// Local time of day to deliver the daily reports. Default is "8:00 am".
-    pub daily_report_time: String,
+    /// Local time of day to deliver the daily reports, in HH:MM:SS format.
+    /// Default is 8:00 am.
+    #[serde(default)]
+    pub daily_report_time: NaiveTime,
 
-    /// Local time of day to deliver the weekly reports. Default is "8:00 am".
-    /// Weekly reports are always delivered on a Monday.
-    pub weekly_report_time: String,
+    /// Local time of day to deliver the weekly reports, in HH:MM:SS format.
+    /// Default is 8:00 am. Weekly reports are always delivered on a Monday.
+    #[serde(default)]
+    pub weekly_report_time: NaiveTime,
 }
 
 impl Default for ServiceTimingOptions {
@@ -981,7 +984,7 @@ impl Default for ServiceTimingOptions {
             disable_job: false,
             job_start_seconds: 60, 
             lut_regen_days: 24, 
-            lut_regen_at: Some("00:00".to_string()),
+            lut_regen_at: NaiveTime::from_hms_opt(0, 0, 0),
             delete_expired_jobs_minutes: 12,
             delete_expired_jobs_offset_minutes: 0,
             disable_std_site_gen: false,
@@ -989,8 +992,8 @@ impl Default for ServiceTimingOptions {
             std_site_gen_offset_minutes: Some(180),
             std_site_tar_minutes: 30,
             disable_reports: false,
-            daily_report_time: "8:00 am".to_string(),
-            weekly_report_time: "8:00 am".to_string(),
+            daily_report_time: NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
+            weekly_report_time: NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
         }
     }
 }
@@ -1007,7 +1010,9 @@ pub struct EmailConfig {
     /// that needs addressed by the administrators.
     admin_emails: Mailboxes,
 
-    /// A list of emails to send weekly reports to
+    /// A list of emails to send weekly reports to. If not given, then
+    /// the admin emails are used.
+    #[serde(default)]
     report_emails: Mailboxes,
 
     /// Which email backend to use to send the emails.
@@ -1122,8 +1127,8 @@ impl Default for ErrorHandlerChoice {
 impl Display for ErrorHandlerChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ErrorHandlerChoice::Logging => write!(f, "logging"),
-            ErrorHandlerChoice::EmailAdmins => write!(f, "email-admins"),
+            ErrorHandlerChoice::Logging => write!(f, "Logging"),
+            ErrorHandlerChoice::EmailAdmins => write!(f, "EmailAdmins"),
         }
     }
 }
@@ -1134,7 +1139,7 @@ impl FromStr for ErrorHandlerChoice {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
             "logging" => Ok(Self::Logging),
-            "email-admins" => Ok(Self::EmailAdmins),
+            "emailadmins" => Ok(Self::EmailAdmins),
             _ => anyhow::bail!("Unknown error handler choice: {s}")
         }
     }
