@@ -4,7 +4,7 @@ use chrono::{NaiveDate, DateTime, Local};
 use itertools::Itertools;
 use log::{debug, info, warn};
 
-use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::Config};
+use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::{Config, BlacklistIdentifier, BlacklistEntry}};
 
 struct FailedParsingError {
     reasons: Vec<String>,
@@ -402,45 +402,60 @@ pub async fn add_jobs_from_input_files(
     }
 
     for (job, infile) in jobs.into_iter().zip(successful_input_files) {
-        let res = crate::jobs::Job::add_job_from_args(conn,
-            job.site_id.clone(),
-            job.start_date,
-            job.end_date,
-            save_dir.to_owned(),
-            Some(job.email.clone()),
-            job.lat.clone(),
-            job.lon.clone(),
-            &config.execution.submitted_job_queue,
-            Some(job.mod_fmt),
-            Some(job.vmr_fmt),
-            Some(job.map_fmt),
-            None,
-            None,
-            Some(crate::jobs::TarChoice::Yes)
-        ).await;
+        if let Some(blacklist_entry) = get_blacklist_match(&job, &config) {
+            let file_name = infile.file_name().map(|s| s.to_string_lossy()).unwrap_or("??".into());
+            handle_blacklisted_input(blacklist_entry, &job.email, &file_name, config);
+            info!("Rejected input file {} due to matching blacklist entry {}", infile.display(), blacklist_entry);
 
-        match res {
-            Ok(new_id) => {
-                // Successfully added the job to the database, so move the file and email the user a confirmation
-                // Moving the file might still error, so handle that internally
-                info!("Added job {new_id} from file {}", infile.display());
+            let dest_file = config.execution.failure_input_file_dir.join(
+                format!("blacklisted_input_file_{}.txt", chrono::Local::now())
+            );
 
-                let dest_file = config.execution.success_input_file_dir.join(
-                    format!("job_{new_id:09}_input_file.txt")
-                );
+            if let Err(e) = mover.move_file(&infile, &dest_file) {
+                unmoved_input_file_errors.push(e);
+            }
+        } else {
 
-                if let Err(e) = mover.move_file(&infile, &dest_file) {
-                    unmoved_input_file_errors.push(e);
+            let res = crate::jobs::Job::add_job_from_args(conn,
+                job.site_id.clone(),
+                job.start_date,
+                job.end_date,
+                save_dir.to_owned(),
+                Some(job.email.clone()),
+                job.lat.clone(),
+                job.lon.clone(),
+                &config.execution.submitted_job_queue,
+                Some(job.mod_fmt),
+                Some(job.vmr_fmt),
+                Some(job.map_fmt),
+                None,
+                None,
+                Some(crate::jobs::TarChoice::Yes)
+            ).await;
+
+            match res {
+                Ok(new_id) => {
+                    // Successfully added the job to the database, so move the file and email the user a confirmation
+                    // Moving the file might still error, so handle that internally
+                    info!("Added job {new_id} from file {}", infile.display());
+
+                    let dest_file = config.execution.success_input_file_dir.join(
+                        format!("job_{new_id:09}_input_file.txt")
+                    );
+
+                    if let Err(e) = mover.move_file(&infile, &dest_file) {
+                        unmoved_input_file_errors.push(e);
+                    }
+
+                    if job.confirmation {
+                        confirm_successful_parsing(&job, config);
+                    }
+                },
+                Err(e) => {
+                    warn!("Error adding job from input file {} to database: {e:?}", infile.display());
+                    let parsing_err = FailedParsingError::new_for_database_error(infile.to_path_buf(), job.email);
+                    email_user_for_failed_parsing(parsing_err, config);
                 }
-
-                if job.confirmation {
-                    confirm_successful_parsing(&job, config);
-                }
-            },
-            Err(e) => {
-                warn!("Error adding job from input file {} to database: {e:?}", infile.display());
-                let parsing_err = FailedParsingError::new_for_database_error(infile.to_path_buf(), job.email);
-                email_user_for_failed_parsing(parsing_err, config);
             }
         }
     }
@@ -494,6 +509,36 @@ fn email_user_for_failed_parsing(error: FailedParsingError, config: &Config) {
             warn!("Failed to send email to {email}, reason was: {e:?}")
         });
     }
+}
+
+fn get_blacklist_match<'b>(job: &InputJob, config: &'b Config) -> Option<&'b BlacklistEntry> {
+    for entry in config.blacklist.iter() {
+        match &entry.identifier {
+            BlacklistIdentifier::SubmitterEmail { submitter } => {
+                if submitter == &job.email {
+                    return Some(entry)
+                }
+            },
+        }
+    }
+
+    None
+}
+
+fn handle_blacklisted_input(blacklist_entry: &BlacklistEntry, submitter_email: &str, file_name: &str, config: &Config) {
+    if blacklist_entry.silent {
+        return;
+    }
+
+    let subj = "GGG priors request rejected";
+    let body = if let Some(reason) = &blacklist_entry.reason {
+        format!("Your priors request input file {file_name} has been rejected; further requests will NOT be accepted. Reason: {reason}.")
+    } else {
+        format!("Your priors request input file {file_name} has been rejected; further requests will NOT be accepted.")
+    };
+
+    config.email.send_mail(&[submitter_email], None, None, subj, &body)
+        .unwrap_or_else(|e| warn!("Failed to send blacklist email to {submitter_email}, error was: {e:?}"));
 }
 
 #[derive(Debug)]

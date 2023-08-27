@@ -127,14 +127,14 @@ impl Display for ConfigValErrorCause {
 /// - `timing`: a [`ServiceTimingOptions`] that controls how often different parts of the service run.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
+    pub blacklist: Vec<BlacklistEntry>, // errors if later in the struct (might be okay after default_options now)
     pub default_options: Vec<DefaultOptions>, // errors if after data
     pub execution: ExecutionConfig,
     pub data: DataConfig,
     #[serde(default)]
     pub email: EmailConfig,
-    pub admin: AdminConfig,
     #[serde(default)]
-    pub timing: ServiceTimingOptions
+    pub timing: ServiceTimingOptions,
 }
 
 impl Config {
@@ -544,9 +544,6 @@ impl Config {
 /// Configuration section dealing with how jobs are run
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ExecutionConfig {
-    /// Which error handler to use. Note that this cannot be changed by a config reload.
-    pub error_handler: ErrorHandlerChoice,
-
     /// Maximum number of threads to let numpy use
     pub max_numpy_threads: u32,
 
@@ -592,6 +589,9 @@ pub struct ExecutionConfig {
 
     /// The queue that standard site jobs go into
     pub std_site_job_queue: String,
+
+    /// Which error handler to use. Note that this cannot be changed by a config reload.
+    pub error_handler: ErrorHandlerChoice,
 
     /// Determines maximum number of jobs allowed to run simultaneously for different work sets
     #[serde(default)]
@@ -776,32 +776,6 @@ impl DownloadConfig {
             files.push(save_dir.join(file_name));
         }
         Ok(files)
-    }
-}
-
-
-/// Configuration section dealing with error reporting and job limits
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AdminConfig {
-    /// Number of jobs any one user may have pending at a given moment before 
-    /// a note is sent to the admins informing them of excessive usage.
-    pub soft_job_limit: u32,
-
-    /// Maximum number of locations in a single job request
-    pub hard_job_limit: u32,
-
-    /// A message to send to users when their input file is successfully parsed.
-    /// If this option is absent or is an empty string, no message will be sent.
-    pub acknowledgement_message: Option<String>
-}
-
-impl Default for AdminConfig {
-    fn default() -> Self {
-        Self { 
-            soft_job_limit: 100,
-            hard_job_limit: 100,
-            acknowledgement_message: Default::default() 
-        }
     }
 }
 
@@ -1145,6 +1119,37 @@ impl FromStr for ErrorHandlerChoice {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlacklistEntry {
+    pub identifier: BlacklistIdentifier,
+    pub silent: bool,
+    pub reason: Option<String>,
+}
+
+impl Display for BlacklistEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(reason) = &self.reason {
+            write!(f, "{} (reason = '{reason}')", self.identifier)
+        } else {
+            write!(f, "{}", self.identifier)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum BlacklistIdentifier {
+    SubmitterEmail{submitter: String}
+}
+
+impl Display for BlacklistIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SubmitterEmail { submitter } => write!(f, "submitter email = {submitter}")
+        }
+    }
+}
+
 
 /// Generate a default configuration .toml file at `path`
 /// 
@@ -1177,8 +1182,6 @@ where T: AsRef<Path>
             ginput_met_key: "fpit-eta".to_string(),
         }
     ]);
-
-    default_cfg.admin.acknowledgement_message = Some(String::new());
 
     default_cfg.default_options = vec![
         DefaultOptions { 

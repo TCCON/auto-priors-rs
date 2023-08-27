@@ -1,0 +1,9 @@
+site_id=sp
+start_date=20080704
+end_date=20080705
+lat=0
+lon=0
+email=spammer@spammy.com
+mod_fmt=text
+vmr_fmt=text
+map_fmt=none
