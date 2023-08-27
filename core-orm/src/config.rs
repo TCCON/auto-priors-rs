@@ -8,7 +8,7 @@
 //! 
 //! A default (mostly blank) configuration file can be created by calling [`generate_config_file`].
 //! 
-use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, collections::HashMap, fmt::Display};
+use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, collections::HashMap, fmt::Display, str::FromStr};
 use anyhow::{self, Context};
 use chrono::{NaiveDate, NaiveDateTime, Duration};
 use hostname;
@@ -544,6 +544,9 @@ impl Config {
 /// Configuration section dealing with how jobs are run
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ExecutionConfig {
+    /// Which error handler to use. Note that this cannot be changed by a config reload.
+    pub error_hander: ErrorHandlerChoice,
+
     /// Maximum number of threads to let numpy use
     pub max_numpy_threads: u32,
 
@@ -605,6 +608,7 @@ impl Default for ExecutionConfig {
         let host = host.to_string_lossy();
 
         Self { 
+            error_hander: Default::default(),
             queues: Default::default(), 
             max_numpy_threads: 2, 
             hours_to_keep: 168,
@@ -1102,7 +1106,39 @@ impl Default for EmailBackend {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ErrorHandlerChoice {
+    Logging,
+    EmailAdmins
+}
 
+impl Default for ErrorHandlerChoice {
+    fn default() -> Self {
+        Self::EmailAdmins
+    }
+}
+
+impl Display for ErrorHandlerChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorHandlerChoice::Logging => write!(f, "logging"),
+            ErrorHandlerChoice::EmailAdmins => write!(f, "email-admins"),
+        }
+    }
+}
+
+impl FromStr for ErrorHandlerChoice {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "logging" => Ok(Self::Logging),
+            "email-admins" => Ok(Self::EmailAdmins),
+            _ => anyhow::bail!("Unknown error handler choice: {s}")
+        }
+    }
+}
 
 
 /// Generate a default configuration .toml file at `path`

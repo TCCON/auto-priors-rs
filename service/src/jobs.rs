@@ -105,16 +105,16 @@ pub(crate) enum JobMessage {
 /// 
 /// This approach can be extended to other tasks that are mutually exclusive with each other.
 #[derive(Debug)]
-pub(crate) struct JobManager<T: Queueable, H: ErrorHandler> {
+pub(crate) struct JobManager<T: Queueable> {
     pub(crate) pool: PoolWrapper,
     pub(crate) shared_config: Arc<RwLock<Config>>,
     pub(crate) job_queues: HashMap<String, Queue<T>>,
     pub(crate) input_file_mover: orm::input_files::InputFileMoveHandler,
-    pub(crate) error_handler: H,
+    pub(crate) error_handler: ErrorHandler,
     pub(crate) msg_recv: tokio::sync::mpsc::Receiver<JobMessage>
 }
 
-impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
+impl<T: Queueable> JobManager<T> {
     /// Create a new instance of a `JobManager`
     /// 
     /// This method creates a database pool just to get onoe connection from it.
@@ -127,7 +127,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     #[allow(dead_code)] // used in tests
     pub(crate) async fn new(
         shared_config: Arc<RwLock<Config>>, 
-        error_handler: H,
+        error_handler: ErrorHandler,
         msg_recv: tokio::sync::mpsc::Receiver<JobMessage>,
     ) -> anyhow::Result<Self> {
         let db_url = orm::get_database_url(None)?;
@@ -145,7 +145,7 @@ impl<T: Queueable, H: ErrorHandler> JobManager<T, H> {
     pub(crate) async fn new_from_pool(
         pool: PoolWrapper, 
         shared_config: Arc<RwLock<Config>>, 
-        error_handler: H,
+        error_handler: ErrorHandler,
         msg_recv: tokio::sync::mpsc::Receiver<JobMessage>
     ) -> anyhow::Result<Self> {
         let mut me = Self { 
@@ -630,7 +630,7 @@ impl<T: Queueable> Queue<T> {
     }
 
     /// Start running any items in the queue not already in progrees.
-    pub async fn start<H: ErrorHandler>(&mut self, pool: &PoolWrapper, config: &Config, error_handler: &H) {
+    pub async fn start(&mut self, pool: &PoolWrapper, config: &Config, error_handler: &ErrorHandler) {
         for item in self.items.iter_mut() {
             if !item.has_started() {
                 debug!("Starting queued item: {}", item.describe());
@@ -659,7 +659,7 @@ impl<T: Queueable> Queue<T> {
     /// Typically, you would call this method before `add`
     /// or `num_can_add` to remove any completed jobs to
     /// make room for new ones.
-    pub async fn clean_up_finished<H: ErrorHandler>(&mut self, conn: &mut MySqlPC, error_handler: &H, config: &Config) {
+    pub async fn clean_up_finished(&mut self, conn: &mut MySqlPC, error_handler: &ErrorHandler, config: &Config) {
         let old_items = std::mem::take(&mut self.items);
         for mut item in old_items {
             let still_running = match item.is_done(conn, config).await {
@@ -704,7 +704,7 @@ impl<T: Queueable> Queue<T> {
     }
 
     /// Stop and clean up any jobs running in this queue.
-    pub async fn cancel_running_jobs<H: ErrorHandler>(&mut self, conn: &mut MySqlPC, error_handler: &H) {
+    pub async fn cancel_running_jobs(&mut self, conn: &mut MySqlPC, error_handler: &ErrorHandler) {
         for item in self.items.iter_mut() {
             item.cancel(conn).await
                 .map(|_| ()) // need this to avoid a type error on the unwrap; don't care if there was a task to cancel
@@ -977,7 +977,7 @@ mod tests {
         }
     }
 
-    async fn make_dummy_job_manager() -> JobManager<DummyJobRunner, LoggingErrorHandler> {
+    async fn make_dummy_job_manager() -> JobManager<DummyJobRunner> {
         let mut config = orm::config::Config::default();
         config.execution.queues.insert(
             TEST_QUEUE_NAME.to_string(), 
@@ -988,7 +988,7 @@ mod tests {
 
         JobManager::new(
             Arc::new(RwLock::new(config)), 
-            LoggingErrorHandler{},
+            ErrorHandler::Logging(LoggingErrorHandler{}),
             rx
         ).await.expect("Could not make dummy JobManager")
     }

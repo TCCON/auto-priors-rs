@@ -18,18 +18,18 @@ pub(crate) enum StdSiteMessage {
 }
 
 #[derive(Debug)]
-pub(crate) struct StdSiteManager<H: ErrorHandler> {
+pub(crate) struct StdSiteManager {
     pub(crate) pool: orm::PoolWrapper,
     pub(crate) shared_config: Arc<RwLock<Config>>,
-    pub(crate) error_handler: H,
+    pub(crate) error_handler: ErrorHandler,
     pub(crate) msg_recv: tokio::sync::mpsc::Receiver<StdSiteMessage>
 }
 
-impl<H: ErrorHandler> StdSiteManager<H> {
+impl StdSiteManager {
     pub(crate) async fn new_with_pool(
         pool: orm::PoolWrapper, 
         shared_config: Arc<RwLock<Config>>, 
-        error_handler: H,
+        error_handler: ErrorHandler,
         msg_recv: tokio::sync::mpsc::Receiver<StdSiteMessage>
     ) -> Self {
         Self { 

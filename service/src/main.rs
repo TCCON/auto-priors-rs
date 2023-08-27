@@ -4,8 +4,9 @@ use clokwerk::{TimeUnits, Job};
 use error::LoggingErrorHandler;
 use jobs::JobMessage;
 use log::{info, warn, error, debug};
+use orm::config::ErrorHandlerChoice;
 use signal_hook::{consts::signal, iterator::Signals};
-use tokio::sync::{RwLock, mpsc::{self, error::TrySendError, error::TryRecvError, Sender}};
+use tokio::sync::{RwLock, mpsc::{self, error::TrySendError, error::TryRecvError, Sender}, watch};
 
 use crate::error::ErrorHandler;
 
@@ -40,10 +41,15 @@ async fn main() -> anyhow::Result<()> {
 
     let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
     let config = orm::config::load_config_file_or_default(config_file)?;
+    let (tx_config, rx_config) = watch::channel(config.clone());
     let timing_config = (&config.timing).clone();
+    let errh_choice = config.execution.error_hander;
     let config = Arc::new(RwLock::new(config));
 
-    let err_handler = error::LoggingErrorHandler{};
+    let err_handler = match errh_choice {
+        ErrorHandlerChoice::Logging => ErrorHandler::Logging(error::LoggingErrorHandler{}),
+        ErrorHandlerChoice::EmailAdmins => ErrorHandler::EmailAdmins(error::EmailAdminsErrorHandler::new(Arc::clone(&config), rx_config).await)
+    };
 
     let mut sync_scheduler = clokwerk::Scheduler::new();
     let signals = setup_signals().expect("Could not set up signal handling");
@@ -56,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
         let shared_config = Arc::clone(&config);
         let err_handler = err_handler.clone();
         tokio::spawn(async move {
-            let mut job_manager: jobs::JobManager<jobs::ServiceJobRunner, error::LoggingErrorHandler> = jobs::JobManager::new_from_pool(
+            let mut job_manager: jobs::JobManager<jobs::ServiceJobRunner> = jobs::JobManager::new_from_pool(
                 db, 
                 shared_config, 
                 err_handler.clone(), 
@@ -128,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
             let mut met_manager = met::MetManager::new_with_pool(
                 db.clone(), 
                 shared_config, 
-                LoggingErrorHandler {  },
+                ErrorHandler::Logging(LoggingErrorHandler {}),
                 rx_met
             ).await;
 
@@ -278,7 +284,7 @@ async fn main() -> anyhow::Result<()> {
     let signal_handle = {
         let config = Arc::clone(&config);
         tokio::spawn(async move {
-            process_signals(signals, config, tx_scheduler, tx_met, tx_jobs, tx_std_sites, tx_reports).await
+            process_signals(signals, config, tx_config, tx_scheduler, tx_met, tx_jobs, tx_std_sites, tx_reports).await
                 .unwrap_or_else(|e| error!("Error occurred while processing signals: {e}"));
         })
     };
@@ -330,6 +336,7 @@ fn setup_signals() -> std::io::Result<Signals> {
 async fn process_signals(
     mut signals: Signals, 
     config: Arc<RwLock<orm::config::Config>>, 
+    tx_config: watch::Sender<orm::config::Config>,
     tx_scheduler: Sender<bool>,
     tx_met: Sender<met::MetMessage>,
     tx_jobs: Sender<jobs::JobMessage>,
@@ -349,6 +356,9 @@ async fn process_signals(
                         continue;
                     }
                 };
+                tx_config.send(new_config.clone()).unwrap_or_else(|e| {
+                    warn!("Got a SendError when update the config via the watcher channel (are all receivers closed?), error was: {e:?}");
+                });
                 let mut global_config = config.write().await;
                 *global_config = new_config;
                 

@@ -17,19 +17,19 @@ pub(crate) enum MetMessage {
 }
 
 #[derive(Debug)]
-pub(crate) struct MetManager<H: ErrorHandler> {
+pub(crate) struct MetManager {
     pub(crate) pool: orm::PoolWrapper,
     pub(crate) shared_config: Arc<RwLock<Config>>,
-    pub(crate) error_handler: H,
+    pub(crate) error_handler: ErrorHandler,
     pub(crate) msg_recv: tokio::sync::mpsc::Receiver<MetMessage>,
     inner_runner: Option<JoinHandle<()>>
 }
 
-impl<H: ErrorHandler + 'static> MetManager<H> {
+impl MetManager {
     pub(crate) async fn new_with_pool(
         pool: orm::PoolWrapper, 
         shared_config: Arc<RwLock<Config>>, 
-        error_handler: H,
+        error_handler: ErrorHandler,
         msg_recv: tokio::sync::mpsc::Receiver<MetMessage>,
     ) -> Self {
         Self { 

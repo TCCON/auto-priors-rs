@@ -15,18 +15,18 @@ pub(crate) enum ReportMessage {
     StopRapidly
 }
 
-pub(crate) struct ReportManager<H: ErrorHandler> {
+pub(crate) struct ReportManager {
     pub(crate) pool: orm::PoolWrapper,
     pub(crate) shared_config: Arc<RwLock<Config>>,
-    pub(crate) error_handler: H,
+    pub(crate) error_handler: ErrorHandler,
     pub(crate) msg_recv: tokio::sync::mpsc::Receiver<ReportMessage>,
 }
 
-impl<H: ErrorHandler> ReportManager<H> {
+impl ReportManager {
     pub(crate) async fn new_with_pool(
         pool: orm::PoolWrapper, 
         shared_config: Arc<RwLock<Config>>, 
-        error_handler: H,
+        error_handler: ErrorHandler,
         msg_recv: tokio::sync::mpsc::Receiver<ReportMessage>,
     ) -> Self {
         Self { 
