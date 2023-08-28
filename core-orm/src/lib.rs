@@ -84,12 +84,11 @@ impl PoolWrapper {
 /// All access to the database for the priors should use this function to ensure 
 /// certain per-session settings are enabled.
 pub async fn get_database_pool(url_in: Option<String>) -> anyhow::Result<PoolWrapper> {
-    let url = get_database_url(url_in)?;
-    let pool = sqlx::MySqlPool::connect(&url).await?;
+    let url = get_database_url(url_in)
+        .context("Error occurred getting database URL within get_database_pool")?;
+    let pool = sqlx::MySqlPool::connect(&url).await
+        .with_context(|| format!("Error occurred connecting to MySqlPool at url = {url}"))?;
+    log::info!("Database pool established with URL = {url}");
     let wrapper = PoolWrapper(pool);
     return Ok(wrapper)
-}
-
-pub fn hello(name: &str) -> String {
-    return format!("Hello, {name}!")
 }

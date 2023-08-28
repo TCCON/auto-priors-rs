@@ -1,10 +1,11 @@
 use std::{sync::{Arc, atomic::AtomicBool}, time::Duration};
 
+use anyhow::Context;
 use clap::Parser;
 use clokwerk::{TimeUnits, Job};
 use error::LoggingErrorHandler;
 use jobs::JobMessage;
-use log::{info, warn, error, debug};
+use log::{info, warn, error, debug, trace};
 use logging::ServiceLoggingCli;
 use orm::config::ErrorHandlerChoice;
 use signal_hook::{consts::signal, iterator::Signals};
@@ -34,6 +35,15 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if let Err(e) = driver().await {
+        error!("UNRECOVERABLE ERROR: {e:?}");
+        Err(e)
+    } else {
+        Ok(())
+    }
+}
+
+async fn driver() -> anyhow::Result<()> {
     // Uncomment this, and restore the console-subscriber dependency in the service Cargo.toml
     // and the tokio tracing feature in the workspace Cargo.toml to use the tokio-console app
     // to measure tokio behavior. See https://github.com/tokio-rs/console for RUSTFLAGS needed
@@ -50,10 +60,13 @@ async fn main() -> anyhow::Result<()> {
     println!("Service v{service_version} starting");
     info!("Starting tccon-priors-service v{service_version}");
     let db_url = orm::get_database_url(None)?;
-    let db = orm::get_database_pool(Some(db_url.clone())).await.unwrap();
+    let db = orm::get_database_pool(Some(db_url.clone())).await
+        .context("Error occcurred while establishing database pool")?;
+    info!("Established database pool");
 
     let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
     let config = orm::config::load_config_file_or_default(config_file)?;
+    info!("Loaded config file");
     let (tx_config, rx_config) = watch::channel(config.clone());
     let timing_config = (&config.timing).clone();
     let errh_choice = config.execution.error_handler;
@@ -293,9 +306,9 @@ async fn main() -> anyhow::Result<()> {
                 },
                 Err(TryRecvError::Empty) => ()
             }
-            debug!("Running pending jobs in scheduler");
+            trace!("Running pending jobs in scheduler");
             sync_scheduler.run_pending();
-            debug!("Finished running pending jobs in scheduler");
+            trace!("Finished running pending jobs in scheduler");
             tokio::time::sleep(Duration::from_millis(1000)).await;
         }
     });

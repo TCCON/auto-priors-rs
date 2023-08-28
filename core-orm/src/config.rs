@@ -127,6 +127,7 @@ impl Display for ConfigValErrorCause {
 /// - `timing`: a [`ServiceTimingOptions`] that controls how often different parts of the service run.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
+    #[serde(default)]
     pub blacklist: Vec<BlacklistEntry>, // errors if later in the struct (might be okay after default_options now)
     pub default_options: Vec<DefaultOptions>, // errors if after data
     pub execution: ExecutionConfig,
