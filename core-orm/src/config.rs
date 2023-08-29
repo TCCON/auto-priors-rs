@@ -271,6 +271,28 @@ impl Config {
         Ok((geos_path, chem_path, ginput_met_key))
     }
 
+    pub fn get_ginput_output_subdirs_for_met(&self, met_key: &str) -> anyhow::Result<String> {
+        let dl_cfgs = self.get_met_configs(met_key)
+            .context("Could not find meteorology while getting output subdirs")?;
+        let mut subdir = None;
+
+        for dl_cfg in dl_cfgs {
+            if subdir.is_none() {
+                subdir = Some(dl_cfg.ginput_output_subdir.clone());
+            } else if subdir.as_deref() != Some(&dl_cfg.ginput_output_subdir) {
+                anyhow::bail!("Inconsistent ginput output subdirs defined for met key {met_key}, got both {} and {}", subdir.unwrap(), dl_cfg.ginput_output_subdir)
+            }
+        }
+
+        if let Some(subdir) = subdir {
+            Ok(subdir)
+        } else {
+            // this really shouldn't happen
+            anyhow::bail!("No download configurations defined for {met_key}")
+        }
+
+    }
+
     /// Get the earliest start date for all the file types of a given met configuration
     /// 
     /// When a met type has multiple files (e.g. 3D assimilation, 2D assimilation, and 3D chemistry for GEOS),
@@ -526,6 +548,10 @@ impl Config {
             if let Err(e) = self.get_ginput_met_args(met_key) {
                 errors.push(ConfigValErrorCause::BadMetConfig { key: met_key.to_string(), reason: e.to_string() });
             }
+
+            if let Err(e) = self.get_ginput_output_subdirs_for_met(met_key) {
+                errors.push(ConfigValErrorCause::BadMetConfig { key: met_key.to_string(), reason: e.to_string() });
+            }
         }
 
         errors
@@ -711,6 +737,10 @@ pub struct DownloadConfig {
     /// The string that ginput's `mod` subcommand's `mode` argument takes to tell it to produce files
     /// from this meteorology.
     pub ginput_met_key: String,
+
+    /// The top-level subdirectory that `ginput` places output for this met type, e.g. "fpit" for GEOS FP-IT.
+    /// If the `ginput_met_key` value is "XXX-eta", then this is usually "XXX".
+    pub ginput_output_subdir: String,
 }
 
 impl Display for DownloadConfig {
@@ -1181,6 +1211,7 @@ where T: AsRef<Path>
             earliest_date: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
             download_dir: PathBuf::new(),
             ginput_met_key: "fpit-eta".to_string(),
+            ginput_output_subdir: "fpit".to_string(),
         }
     ]);
 

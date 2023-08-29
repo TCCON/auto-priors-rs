@@ -1,7 +1,7 @@
 //! The main ORM interface to the jobs queue.
 //! 
 //! 
-use std::{path::{PathBuf, Path}, str::FromStr, fmt::{Display, Debug}, process::Stdio};
+use std::{path::{PathBuf, Path}, str::FromStr, fmt::{Display, Debug}, process::Stdio, collections::HashSet};
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -631,19 +631,49 @@ impl Job {
         base_run_dir
     }
 
-    pub fn mod_run_output_dir(&self, site_id: &str) -> PathBuf {
+    pub fn mod_run_output_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
         let run_dir = self.run_dir(false);
-        run_dir.join("fpit").join(site_id).join("vertical")
+        let subdirs = self.get_possible_output_subdirs(config)
+            .with_context(|| format!("Error occurred while trying to infer .mod output dir for job #{}", self.job_id))?;
+        let output_dirs = subdirs.into_iter()
+            .map(|d| run_dir.join(d).join(site_id).join("vertical"))
+            .collect_vec();
+        Ok(output_dirs)
     }
 
-    pub fn vmr_run_output_dir(&self, site_id: &str) -> PathBuf {
+    pub fn vmr_run_output_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
         let run_dir = self.run_dir(false);
-        run_dir.join("fpit").join(site_id).join("vmrs-vertical")
+        let subdirs = self.get_possible_output_subdirs(config)
+            .with_context(|| format!("Error occurred while trying to infer .vmr output dir for job #{}", self.job_id))?;
+        let output_dirs = subdirs.into_iter()
+            .map(|d| run_dir.join(d).join(site_id).join("vmrs-vertical"))
+            .collect_vec();
+        Ok(output_dirs)
     }
 
-    pub fn map_run_output_dir(&self, site_id: &str) -> PathBuf {
+    pub fn map_run_output_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
         let run_dir = self.run_dir(false);
-        run_dir.join("fpit").join(site_id).join("maps-vertical")
+        let subdirs = self.get_possible_output_subdirs(config)
+            .with_context(|| format!("Error occurred while trying to infer .map/.map.nc output dir for job #{}", self.job_id))?;
+        let output_dirs = subdirs.into_iter()
+            .map(|d| run_dir.join(d).join(site_id).join("maps-vertical"))
+            .collect_vec();
+        Ok(output_dirs)
+    }
+
+    fn get_possible_output_subdirs(&self, config: &Config) -> anyhow::Result<Vec<String>> {
+        if let Some(met_key) = &self.met_key {
+            let subdir = config.get_ginput_output_subdirs_for_met(met_key)?;
+            Ok(vec![subdir])
+        } else {
+            let mut all_subdirs = HashSet::new();
+            for date in utils::DateIterator::new_one_range(self.start_date, self.end_date) {
+                let met_key = &config.get_defaults_for_date(date)?.met;
+                let subdir = config.get_ginput_output_subdirs_for_met(met_key)?;
+                all_subdirs.insert(subdir);
+            }
+            Ok(Vec::from_iter(all_subdirs.into_iter()))
+        }
     }
 
     pub async fn get_jobs_list(conn: &mut MySqlConn, pending_and_running_only: bool) -> JobResult<Vec<Job>> {

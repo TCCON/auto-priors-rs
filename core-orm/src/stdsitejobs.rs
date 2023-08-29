@@ -423,7 +423,7 @@ impl StdSiteJob {
             }
 
             info!("Making standard site tarball ({} format) for {} on {}", row.output_structure, row.site_id, row.date);
-            let output_tarball = row.output_structure.make_std_site_tarball(&config.execution.std_sites_tar_output, &row.site_id, &job)?;
+            let output_tarball = row.output_structure.make_std_site_tarball(&config.execution.std_sites_tar_output, &row.site_id, &job, config)?;
             row.set_complete(conn, output_tarball).await?;
         }
 

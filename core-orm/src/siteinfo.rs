@@ -106,7 +106,7 @@ impl Display for StdOutputStructure {
 }
 
 impl StdOutputStructure {
-    pub fn make_std_site_tarball(&self, root_save_dir: &Path, site_id: &str, job: &Job) -> anyhow::Result<PathBuf> {
+    pub fn make_std_site_tarball(&self, root_save_dir: &Path, site_id: &str, job: &Job, config: &crate::config::Config) -> anyhow::Result<PathBuf> {
         if !root_save_dir.is_dir() {
             anyhow::bail!("root_save_dir must be a preexisting directory");
         }
@@ -119,7 +119,7 @@ impl StdOutputStructure {
 
         let tarball = site_save_dir.join(format!("{site_id}_ggg_inputs_{}.tgz", job.start_date.format("%Y%m%d")));
 
-        let files_for_tarball = self.get_files_for_tarball(job, Some(site_id))?;
+        let files_for_tarball = self.get_files_for_tarball(job, Some(site_id), config)?;
 
         // Clever combination of tar archive builder and gzip compressor taken from
         // https://stackoverflow.com/a/46521163
@@ -142,7 +142,7 @@ impl StdOutputStructure {
         Ok(tarball)
     }
 
-    pub fn get_files_for_tarball(&self, job: &Job, site_id: Option<&str>) -> anyhow::Result<Vec<(PathBuf, PathBuf)>> {
+    pub fn get_files_for_tarball(&self, job: &Job, site_id: Option<&str>, config: &crate::config::Config) -> anyhow::Result<Vec<(PathBuf, PathBuf)>> {
         let site_ids = if let Some(sid) = site_id {
             vec![sid]
         } else {
@@ -154,6 +154,7 @@ impl StdOutputStructure {
                     Self::add_files_flat,
                     job,
                     &site_ids,
+                    config,
                     true, true, false, false
                 )
             },
@@ -162,6 +163,7 @@ impl StdOutputStructure {
                     Self::add_files_flat,
                     job,
                     &site_ids,
+                    config,
                     true, true, true, false
                 )
             },
@@ -170,6 +172,7 @@ impl StdOutputStructure {
                     Self::add_files_flat,
                     job,
                     &site_ids,
+                    config,
                     true, true, false, true
                 )
             },
@@ -178,6 +181,7 @@ impl StdOutputStructure {
                     Self::add_files_in_tree,
                     job,
                     &site_ids,
+                    config,
                     true, true, false, false
                 )
             },
@@ -186,6 +190,7 @@ impl StdOutputStructure {
                     Self::add_files_in_tree,
                     job,
                     &site_ids,
+                    config,
                     true, true, true, false
                 )
             },
@@ -194,63 +199,72 @@ impl StdOutputStructure {
                     Self::add_files_in_tree,
                     job,
                     &site_ids,
+                    config,
                     true, true, false, true
                 )
             },
         }
     }
 
-    fn get_files<F>(getter_fxn: F, job: &Job, site_ids: &[&str], mod_files: bool, vmr_files: bool, map_files: bool, map_nc_files: bool) -> anyhow::Result<Vec<(PathBuf, PathBuf)>>
+    fn get_files<F>(getter_fxn: F, job: &Job, site_ids: &[&str], config: &crate::config::Config, mod_files: bool, vmr_files: bool, map_files: bool, map_nc_files: bool) -> anyhow::Result<Vec<(PathBuf, PathBuf)>>
     where F: Fn(&mut Vec<(PathBuf, PathBuf)>, glob::Paths) -> anyhow::Result<()> 
     {
         let mut files = vec![];
         for &sid in site_ids {
             if mod_files {
-                let mod_dir = job.mod_run_output_dir(sid);
-                if !mod_dir.exists() {
-                    anyhow::bail!(".mod output directory does not exist for site {sid} in job #{}", job.job_id);
-                }
-                let mod_glob = glob::glob(&mod_dir.join("*.mod").to_string_lossy())
-                    .context("Error occurred while trying to make the glob pattern for .mod files")?;
+                let mod_dirs = job.mod_run_output_dir(sid, config)?;
+                for mod_dir in mod_dirs {
+                    if !mod_dir.exists() {
+                        anyhow::bail!(".mod output directory does not exist for site {sid} in job #{}", job.job_id);
+                    }
+                    let mod_glob = glob::glob(&mod_dir.join("*.mod").to_string_lossy())
+                        .context("Error occurred while trying to make the glob pattern for .mod files")?;
 
-                getter_fxn(&mut files, mod_glob)
-                    .context("Error occurred while trying to add .mod files from glob pattern")?;
+                    getter_fxn(&mut files, mod_glob)
+                        .context("Error occurred while trying to add .mod files from glob pattern")?;
+                }
             }
 
             if vmr_files {
-                let vmr_dir = job.vmr_run_output_dir(sid);
-                if !vmr_dir.exists() {
-                    anyhow::bail!(".vmr output directory does not exist for site {sid} in job #{}", job.job_id);
-                }
-                let vmr_glob = glob::glob(&vmr_dir.join("*.vmr").to_string_lossy())
-                    .context("Error occurred while trying to make the glob pattern for .vmr files")?;
+                let vmr_dirs = job.vmr_run_output_dir(sid, config)?;
+                for vmr_dir in vmr_dirs {
+                    if !vmr_dir.exists() {
+                        anyhow::bail!(".vmr output directory does not exist for site {sid} in job #{}", job.job_id);
+                    }
+                    let vmr_glob = glob::glob(&vmr_dir.join("*.vmr").to_string_lossy())
+                        .context("Error occurred while trying to make the glob pattern for .vmr files")?;
 
-                getter_fxn(&mut files, vmr_glob)
-                    .context("Error occurred while trying to add .vmr files from glob pattern")?;
+                    getter_fxn(&mut files, vmr_glob)
+                        .context("Error occurred while trying to add .vmr files from glob pattern")?;
+                }
             }
 
             if map_files {
-                let map_dir = job.map_run_output_dir(sid);
-                if !map_dir.exists() {
-                    anyhow::bail!(".map output directory does not exist for site {sid} in job #{}", job.job_id);
-                }
-                let map_glob = glob::glob(&map_dir.join("*.map").to_string_lossy())
-                    .context("Error occurred while trying to make the glob pattern for .map files")?;
+                let map_dirs = job.map_run_output_dir(sid, config)?;
+                for map_dir in map_dirs {
+                    if !map_dir.exists() {
+                        anyhow::bail!(".map output directory does not exist for site {sid} in job #{}", job.job_id);
+                    }
+                    let map_glob = glob::glob(&map_dir.join("*.map").to_string_lossy())
+                        .context("Error occurred while trying to make the glob pattern for .map files")?;
 
-                getter_fxn(&mut files, map_glob)
-                    .context("Error occurred while trying to add .map files from glob pattern")?;
+                    getter_fxn(&mut files, map_glob)
+                        .context("Error occurred while trying to add .map files from glob pattern")?;
+                }
             }
 
             if map_nc_files {
-                let map_dir = job.map_run_output_dir(sid);
-                if !map_dir.exists() {
-                    anyhow::bail!(".map output directory does not exist for site {sid} in job #{}", job.job_id);
-                }
-                let map_glob = glob::glob(&map_dir.join("*.map.nc").to_string_lossy())
-                    .context("Error occurred while trying to make the glob pattern for .mod files")?;
+                let map_dirs = job.map_run_output_dir(sid, config)?;
+                for map_dir in map_dirs {
+                    if !map_dir.exists() {
+                        anyhow::bail!(".map output directory does not exist for site {sid} in job #{}", job.job_id);
+                    }
+                    let map_glob = glob::glob(&map_dir.join("*.map.nc").to_string_lossy())
+                        .context("Error occurred while trying to make the glob pattern for .mod files")?;
 
-                getter_fxn(&mut files, map_glob)
-                    .context("Error occurred while trying to add .map.nc files from glob pattern")?;
+                    getter_fxn(&mut files, map_glob)
+                        .context("Error occurred while trying to add .map.nc files from glob pattern")?;
+                }
             }
         }
         Ok(files)
