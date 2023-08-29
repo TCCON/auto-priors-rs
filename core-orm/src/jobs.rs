@@ -1520,18 +1520,18 @@ impl Display for ShellGinputRunner {
 #[async_trait]
 impl InnerGinputRunner for ShellGinputRunner {
     async fn run_gen_priors_for_date(&self, ginput_args: GinputAutomationArgs, simulation_delay: Option<u32>) -> JobResult<()> {
-        let args_file = ginput_args.save_path.join("ginput_run_args.json");
+        let args_file = ginput_args.save_path.join(format!("ginput_run_args_{}.json", ginput_args.start_date));
         let args_file_h = std::fs::File::create(&args_file)
             .map_err(|e| JobError::RunDirectoryError(e))?;
         serde_json::to_writer_pretty(args_file_h, &ginput_args)?;
     
         let log_file = std::fs::File::create(
-            ginput_args.save_path.join(format!("ginput_job_{}.out", ginput_args.job_id))
+            ginput_args.save_path.join(format!("ginput_job_{}_{}.out", ginput_args.job_id, ginput_args.start_date))
         ).map_err(|e| JobError::RunDirectoryError(e))?;
         let log_stdout = Stdio::from(log_file);
     
         let log_file = std::fs::File::create(
-            ginput_args.save_path.join(format!("ginput_job_{}.err", ginput_args.job_id))
+            ginput_args.save_path.join(format!("ginput_job_{}_{}.err", ginput_args.job_id, ginput_args.start_date))
         ).map_err(|e| JobError::RunDirectoryError(e))?;
         let log_stderr = Stdio::from(log_file);
 
