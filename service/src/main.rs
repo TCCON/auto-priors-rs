@@ -3,7 +3,6 @@ use std::{sync::{Arc, atomic::AtomicBool}, time::Duration};
 use anyhow::Context;
 use clap::Parser;
 use clokwerk::{TimeUnits, Job};
-use error::LoggingErrorHandler;
 use jobs::JobMessage;
 use log::{info, warn, error, debug, trace};
 use logging::ServiceLoggingCli;
@@ -163,11 +162,12 @@ async fn driver() -> anyhow::Result<()> {
     let met_manager_handle = {
         let db = db.clone();
         let shared_config = Arc::clone(&config);
+        let err_handler = err_handler.clone();
         tokio::spawn(async move {
             let mut met_manager = met::MetManager::new_with_pool(
                 db.clone(), 
                 shared_config, 
-                ErrorHandler::Logging(LoggingErrorHandler {}),
+                err_handler,
                 rx_met
             ).await;
 

@@ -141,7 +141,9 @@ async fn get_date_iter_for_defaults(
         end
     }else {
         // Assume we use today
-        chrono::offset::Utc::now().naive_utc().date()
+        let end = chrono::offset::Utc::now().naive_utc().date();
+        debug!("No end date specified, using {end}");
+        end
     };
 
     Ok(orm::utils::DateIterator::new(vec![(start_date, end_date)]))
@@ -525,6 +527,7 @@ pub async fn download_missing_files(
 
     // Now the main function: loop through each date and met type, download that met type if needed
     for curr_date in date_iter {
+        debug!("Checking met files for {curr_date}");
         let defaults = config.get_defaults_for_date(curr_date)?;
         let dl_cfgs = config.get_met_configs(&defaults.met)?;
         for dl_cfg in dl_cfgs {
