@@ -32,6 +32,9 @@ pub enum MetActions {
     /// Report on the currently downloaded default met files
     Report(ReportMetCli),
 
+    /// Print a summary table of available met data for a given date range
+    Table(MetTableCli),
+
     /// Rescan model download directories and add new files to the database
     Rescan(RescanMetCli)
 }
@@ -349,7 +352,7 @@ pub async fn check_files_for_dates_cli(conn: &mut orm::MySqlConn, clargs: CheckD
             // Since we're iterating over the keys of the map, we should always be inside here
             let s = if let Some(state) = v {
                 match state {
-                    MetDayState::Incomplete | MetDayState::Missing => any_missing = true,
+                    MetDayState::Incomplete(_,_) | MetDayState::Missing => any_missing = true,
                     MetDayState::Complete => {}
                 }
 
@@ -417,7 +420,7 @@ pub async fn report_default_met_status(conn: &mut orm::MySqlConn, config: &orm::
         let state = *files_found.get(&date).unwrap();
         match state {
             Some(MetDayState::Complete) => ncomplete += 1,
-            Some(MetDayState::Incomplete) => {
+            Some(MetDayState::Incomplete(_,_)) => {
                 nincomplete += 1;
                 if detailed { println!("{date} = INCOMPLETE"); }
             },
@@ -438,6 +441,72 @@ pub async fn report_default_met_status(conn: &mut orm::MySqlConn, config: &orm::
     println!("{nmissing}/{ntotal} days default met MISSING");
     println!("{nerrored}/{ntotal} days default met ERRORED GETTING STATE");
 
+    Ok(())
+}
+
+
+/// Print a summary table of available met data for a time range
+#[derive(Debug, Args)]
+pub struct MetTableCli {
+    /// The first date to show in the table. If not given, defaults to 7 days ago.
+    #[clap(short = 's', long)]
+    start_date: Option<NaiveDate>,
+
+    /// The date after the last one to show in the table. If not given, defaults to today.
+    #[clap(short = 'e', long)]
+    end_date: Option<NaiveDate>,
+}
+
+
+pub async fn print_met_availability_table_cli(conn: &mut orm::MySqlConn, config: &orm::config::Config, args: MetTableCli) -> anyhow::Result<()> {
+    let start_date = if let Some(sd) = args.start_date {
+        sd
+    } else {
+        chrono::Utc::now().date_naive() - chrono::Duration::days(7)
+    };
+
+    print_met_availability_table(conn, config, start_date, args.end_date).await
+}
+
+
+pub async fn print_met_availability_table(conn: &mut orm::MySqlConn, config: &orm::config::Config, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<()> {
+    let end_date = end_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
+
+    // First get all the unique met file types and the values for each row
+    let mut met_types = vec![];
+    let mut rows = vec![];
+    let mut dates = vec![];
+    for date in orm::utils::DateIterator::new_one_range(start_date, end_date) {
+        let defaults = config.get_defaults_for_date(date)?;
+        let dl_cfgs = config.get_met_configs(&defaults.met)?;
+        let mut row = HashMap::new();
+        for dl_cfg in dl_cfgs {
+            let cfg_string = dl_cfg.to_short_string();
+            if !met_types.contains(&cfg_string) {
+                met_types.push(cfg_string.clone());
+            }
+            let state = orm::met::MetFile::is_date_complete_for_config(conn, date, dl_cfg).await?;
+            row.insert(cfg_string, state);
+        }
+        rows.push(row);
+        dates.push(date);
+    }
+
+    // Now we can build the table    
+    let row_iter = rows.iter().zip(dates.iter())
+    .map(|(r, d)| {
+        let mut states = met_types.iter().map(|k| {
+            r.get(k).map(|v| v.to_string()).unwrap_or_else(|| "N/A".to_string())
+        }).collect::<Vec<_>>();
+        states.insert(0, d.to_string());
+        states
+    });
+    let mut builder = tabled::builder::Builder::from_iter(row_iter);
+    let date_header = vec!["Date".to_string()];
+    builder.set_header(date_header.into_iter().chain(met_types.into_iter()));
+    
+    let table = builder.build();
+    println!("{}", orm::utils::table_to_std_string(table));
     Ok(())
 }
 
@@ -613,7 +682,7 @@ pub async fn download_missing_files(
                 MetDayState::Complete => {
                     info!("{curr_date} already downloaded for {dl_cfg}, not redownloading")
                 },
-                MetDayState::Incomplete | MetDayState::Missing => {
+                MetDayState::Incomplete(_,_) | MetDayState::Missing => {
                     info!("{curr_date} must be downloaded for {dl_cfg}");
                     download_one_file_set_one_date(conn, curr_date, dl_cfg, downloader.clone(), dry_run).await?;
                 }

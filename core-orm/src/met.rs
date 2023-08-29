@@ -10,7 +10,7 @@ use crate::{MySqlConn, config};
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MetDayState {
     Complete,
-    Incomplete,
+    Incomplete(i64, i64),
     Missing
 }
 
@@ -18,8 +18,18 @@ impl AsRef<str> for MetDayState {
     fn as_ref(&self) -> &str {
         match self {
             Self::Complete => "complete",
-            Self::Incomplete => "incomplete",
+            Self::Incomplete(_, _) => "incomplete",
             Self::Missing => "missing"
+        }
+    }
+}
+
+impl Display for MetDayState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetDayState::Complete => write!(f, "complete"),
+            MetDayState::Incomplete(found, expected) => write!(f, "incomplete ({found}/{expected}"),
+            MetDayState::Missing => write!(f, "missing"),
         }
     }
 }
@@ -28,7 +38,7 @@ impl MetDayState {
     pub fn is_complete(&self) -> bool {
         match self {
             Self::Complete => true,
-            Self::Incomplete | Self::Missing => false
+            Self::Incomplete(_, _) | Self::Missing => false
         }
     }
 }
@@ -420,7 +430,7 @@ impl MetFile {
         if n_found == 0 {
             Ok(MetDayState::Missing)
         }else if n_found < n_expected {
-            Ok(MetDayState::Incomplete)
+            Ok(MetDayState::Incomplete(n_found, n_expected))
         }else{
             Ok(MetDayState::Complete)
         }
@@ -438,10 +448,12 @@ impl MetFile {
     /// `MetDayState::Incomplete` otherwise (even if only one of several file sets is incomplete).
     pub async fn is_date_complete_for_config_set(conn: &mut MySqlConn, date: NaiveDate, cfgs: &[config::DownloadConfig]) -> anyhow::Result<MetDayState> {
         let mut states = vec![];
+        let mut num_expected = vec![];
         for cfg in cfgs {
             let this_state = Self::is_date_complete_for_config(conn, date, cfg).await?;
             debug!("Met {cfg} {date} -> {this_state:?}");
             states.push(this_state);
+            num_expected.push(Self::num_expected_daily_files(cfg)?);
         }
 
         if states.iter().all(|&s| s == MetDayState::Complete) {
@@ -449,7 +461,18 @@ impl MetFile {
         } else if states.iter().all(|&s| s == MetDayState::Missing) {
             Ok(MetDayState::Missing)
         } else {
-            Ok(MetDayState::Incomplete)
+            let (total_found, total_expected) = states.iter().zip(num_expected.into_iter())
+                .fold((0i64, 0i64), |mut acc, el| {
+                    match el.0 {
+                        MetDayState::Complete => acc.0 += el.1, // complete day, add the number expected to the number found
+                        MetDayState::Incomplete(found, _) => acc.0 += found,
+                        MetDayState::Missing => (), // missing day, add nothing to found
+                    }
+                    // Assume that the second integer in Incomplete will match the number expected (it should)
+                    acc.1 += el.1;
+                    acc
+                });
+            Ok(MetDayState::Incomplete(total_found, total_expected))
         }
     }
 

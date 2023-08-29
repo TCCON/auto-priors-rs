@@ -13,6 +13,7 @@ env_logger.workspace = true
 chrono.workspace = true
 log.workspace = true
 sqlx.workspace = true
+tabled.workspace = true
 tokio.workspace = true
 
 orm = {path = "../core-orm", package = "tccon_priors_orm"}

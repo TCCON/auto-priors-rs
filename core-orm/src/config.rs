@@ -795,6 +795,10 @@ impl Display for DownloadConfig {
 }
 
 impl DownloadConfig {
+    pub fn to_short_string(&self) -> String {
+        format!("{}, {}, {}", self.product, self.data_type, self.levels)
+    }
+    
     /// Get the pattern for file names of this type of file, with no leading path.
     /// 
     /// If the configuration has a value for the `basename_pattern` specified, that is

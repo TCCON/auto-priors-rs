@@ -95,6 +95,12 @@ async fn main() -> anyhow::Result<()> {
             met_download::report_default_met_status_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
+        Commands::Met(MetCli{ command: MetActions::Table(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            let loaded_config = load_config()?;
+            met_download::print_met_availability_table_cli(&mut conn, &loaded_config, subargs).await?;
+        },
+
         Commands::Jobs(JobCli { commands: JobActions::Add(subargs) }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
