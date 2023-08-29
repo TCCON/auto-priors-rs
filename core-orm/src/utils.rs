@@ -21,10 +21,10 @@ pub fn date_range(start_date: NaiveDate, end_date: NaiveDate) -> Vec<NaiveDate> 
 /// use chrono::NaiveDate;
 /// use tccon_priors_orm::utils::date_ranges_overlap;
 /// 
-/// let d1 = NaiveDate::from_ymd(2010, 1, 1);
-/// let d2 = NaiveDate::from_ymd(2010, 2, 1);
+/// let d1 = NaiveDate::from_ymd_opt(2010, 1, 1);
+/// let d2 = NaiveDate::from_ymd_opt(2010, 2, 1);
 /// 
-/// assert_eq!(date_ranges_overlap(d1, Some(d2), d2, None), false);
+/// assert_eq!(date_ranges_overlap(d1, d2, d2, None), false);
 /// ```
 /// 
 /// # Parameters
@@ -158,7 +158,7 @@ impl DateRangeOverlap {
                     DateRangeOverlap::AEndsInB
                 } else if s1 > s2 && s1 < e2 && e1 > e2 {
                     DateRangeOverlap::AStartsInB
-                } else if s1 > e2 || s2 > e1 {
+                } else if s1 >= e2 || s2 >= e1 {
                     DateRangeOverlap::None
                 } else {
                     DateRangeOverlap::AInsideB

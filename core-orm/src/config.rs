@@ -881,23 +881,12 @@ pub struct DefaultOptions {
 impl DefaultOptions {
     // Test whether this `DefaultOptions` instance overlaps another in time
     fn overlaps(&self, other: &Self) -> bool {
-        // Can't use the utils::date_range_overlap function because that doesn't handle optional dates
-        // TODO: make this a util function?
-        match (self.start_date, self.end_date, other.start_date, other.end_date) {
-            (None, None, _, _) => true,
-            (_, _, None, None) => true,
-            (None, Some(_), None, Some(_)) => true,
-            (None, Some(a2), Some(b1), None) => a2 > b1,
-            (None, Some(a2), Some(b1), Some(_)) => a2 > b1,
-            (Some(a1), None, None, Some(b2)) => a1 < b2,
-            (Some(_), None, Some(_), None) => true,
-            (Some(a1), None, Some(_), Some(b2)) => a1 < b2,
-            (Some(a1), Some(_), None, Some(b2)) => a1 > b2,
-            (Some(_), Some(a2), Some(b1), None) => a2 < b1,
-            (Some(a1), Some(a2), Some(b1), Some(b2)) => {
-                if a2 < b1 || b2 < a1 { false } else { true }
-            },
-        }
+        let class = crate::utils::DateRangeOverlap::classify(
+            self.start_date,
+            self.end_date, 
+            other.start_date, 
+            other.end_date);
+        class.has_overlap()
     }
 }
 

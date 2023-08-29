@@ -686,7 +686,13 @@ pub async fn rescan_met_files(
         let download_cfgs = if let Some(key) = met_key {
             config.get_met_configs(key)?
         } else {
-            let defaults = config.get_defaults_for_date(curr_date)?;
+            let defaults = match config.get_defaults_for_date(curr_date) {
+                Ok(dl_cflgs) => dl_cflgs,
+                Err(e) => {
+                    warn!("{e}");
+                    continue;
+                }
+            };
             config.get_met_configs(&defaults.met)?
         };
 

@@ -440,6 +440,7 @@ impl MetFile {
         let mut states = vec![];
         for cfg in cfgs {
             let this_state = Self::is_date_complete_for_config(conn, date, cfg).await?;
+            debug!("Met {cfg} {date} -> {this_state:?}");
             states.push(this_state);
         }
 
