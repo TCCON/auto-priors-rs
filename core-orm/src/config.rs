@@ -148,6 +148,51 @@ impl Config {
         .ok_or_else(|| anyhow::Error::msg(format!("No meteorology with key '{met_key}' found.")))
     }
 
+    /// Return the span of dates covered by the default meteorologies
+    /// 
+    /// Returns the earliest start date and latest end date of all meteorologies
+    /// used in the default option sets. If at least one default met defines no 
+    /// start date, then the returned start date will be `None`, and likewise for
+    /// the end date. Note that this function does not check for overlap among the
+    /// default ranges (i.e. it assumes a validated configuration), nor does it check
+    /// for gaps in the defaults.
+    pub fn get_default_met_date_range(&self) -> (Option<NaiveDate>, Option<NaiveDate>) {
+        let mut start_date = None;
+        let mut no_start = false;
+        let mut end_date = None;
+        let mut no_end = false;
+
+        for default_set in self.default_options.iter() {
+            if no_start {
+                // no op
+            } else if let (None, Some(sd)) = (start_date, default_set.start_date) {
+                start_date = Some(sd);
+            } else if let (Some(curr_sd), Some(sd)) = (start_date, default_set.start_date) {
+                if sd < curr_sd {
+                    start_date = Some(sd);
+                }
+            } else if default_set.start_date.is_none() {
+                start_date = None;
+                no_start = true;
+            }
+
+            if no_end {
+                // no op
+            } else if let (None, Some(ed)) = (end_date, default_set.end_date) {
+                end_date = Some(ed);
+            } else if let (Some(curr_ed), Some(ed)) = (end_date, default_set.end_date) {
+                if ed > curr_ed {
+                    end_date = Some(ed);
+                }
+            } else if default_set.end_date.is_none() {
+                end_date = None;
+                no_end = true;
+            }
+        }
+
+        (start_date, end_date)
+    }
+
     /// Get the GEOS and chemistry directories required to pass to version 1 ginput instances
     /// 
     /// Version 1.x ginput instances expect GEOS data to be organized in a specific way: all files

@@ -29,6 +29,9 @@ pub enum MetActions {
     /// Download missing model files
     DownloadMissing(DownloadMissingCli),
 
+    /// Report on the currently downloaded default met files
+    Report(ReportMetCli),
+
     /// Rescan model download directories and add new files to the database
     Rescan(RescanMetCli)
 }
@@ -361,6 +364,81 @@ pub async fn check_files_for_dates_cli(conn: &mut orm::MySqlConn, clargs: CheckD
     }
 
     Ok(CheckFileStatus::new(any_missing, error_occurred))
+}
+
+/// Print out a report of the downloaded default met files
+#[derive(Debug, Args)]
+pub struct ReportMetCli {
+    /// List each date missing, incomplete, or that errored in addition to the summary
+    #[clap(short = 'd', long)]
+    detailed: bool
+}
+
+pub async fn report_default_met_status_cli(conn: &mut orm::MySqlConn, config: &orm::config::Config, args: ReportMetCli) -> anyhow::Result<()> {
+    report_default_met_status(conn, config, args.detailed).await
+}
+
+pub async fn report_default_met_status(conn: &mut orm::MySqlConn, config: &orm::config::Config, detailed: bool) -> anyhow::Result<()> {
+    let (start_date, end_date) = config.get_default_met_date_range();
+    let start_date = if let Some(sd) = start_date {
+        sd
+    } else {
+        if let Some(sd) = orm::met::MetFile::get_first_complete_day_for_default_mets(conn, config).await? {
+            println!("No start date defined for default mets in config; will report on met data starting from first complete date.");
+            sd
+        } else {
+            println!("No met default met data recorded in the database yet.");
+            return Ok(());
+        }
+    };
+
+    // Summarize the expected met types for each date range
+    println!("Default mets:");
+    for default_set in config.default_options.iter() {
+        let start = default_set.start_date.map(|d| d.to_string()).unwrap_or_else(|| "(no start date)".to_string());
+        let end = default_set.end_date.map(|d| d.to_string()).unwrap_or_else(|| "(no end date)".to_string());
+        let met_key = &default_set.met;
+        println!(" - {start} to {end}: {met_key}");
+    }
+
+
+    let files_found = check_default_files_for_dates(conn, config, start_date, end_date).await?;
+    // ensure the dates are ordered
+    let mut dates: Vec<_> = files_found.keys().copied().collect();
+    dates.sort_unstable();
+    let mut nmissing = 0;
+    let mut nincomplete = 0;
+    let mut ncomplete = 0;
+    let mut nerrored = 0;
+    let ntotal = files_found.len();
+
+    for date in dates {
+        // we know this is a key in the map, so safe to unwrap
+        let state = *files_found.get(&date).unwrap();
+        match state {
+            Some(MetDayState::Complete) => ncomplete += 1,
+            Some(MetDayState::Incomplete) => {
+                nincomplete += 1;
+                if detailed { println!("{date} = INCOMPLETE"); }
+            },
+            Some(MetDayState::Missing) => {
+                nmissing += 1;
+                if detailed { println!("{date} = MISSING"); }
+            },
+            None => {
+                nerrored += 1;
+                if detailed { println!("{date} = ERROR GETTING STATE"); }
+            }
+        }
+    }
+
+    if detailed { println!(""); }
+    println!("{ncomplete}/{ntotal} days default met COMPLETE");
+    println!("{nincomplete}/{ntotal} days default met INCOMPLETE");
+    println!("{nmissing}/{ntotal} days default met MISSING");
+    println!("{nerrored}/{ntotal} days default met ERRORED GETTING STATE");
+
+    Ok(())
 }
 
 /// Get a map of which dates in a range have all their met data
