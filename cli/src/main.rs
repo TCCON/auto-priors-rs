@@ -193,6 +193,11 @@ async fn main() -> anyhow::Result<()> {
             stdsites::flag_for_regen_cli(&mut conn, subargs).await?;
         },
 
+        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::Print(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            stdsites::print_std_jobs_summary_cli(&mut conn, subargs).await?;
+        },
+
         Commands::SiteInfo( StdSiteCli { command: StdSiteActions::Json(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::site_info_json(&mut conn, &subargs).await?;

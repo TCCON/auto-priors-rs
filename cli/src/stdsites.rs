@@ -1,6 +1,6 @@
 use chrono::{NaiveDate, Duration};
 use clap::{self, Subcommand, Args};
-use orm::{stdsitejobs,MySqlConn, siteinfo::StdSite};
+use orm::{stdsitejobs,MySqlConn, siteinfo::StdSite, utils::DateIterator};
 
 /// Manage jobs for the standard sites
 #[derive(Debug, Args)]
@@ -11,6 +11,10 @@ pub struct StdSiteJobCli {
 
 #[derive(Debug, Subcommand)]
 pub enum StdSiteJobActions {
+    /// Print a summary of standard site jobs
+    Print(PrintStdJobsSummaryCli),
+    
+    /// Update the standard site jobs table: add rows for new site-days possible 
     UpdateTable(UpdateTableCli),
 
     /// Add jobs to generate standard sites' priors for days in need of priors
@@ -101,6 +105,43 @@ pub async fn flag_for_regen(conn: &mut MySqlConn, start_date: NaiveDate, end_dat
     for sid in site_ids {
         stdsitejobs::StdSiteJob::set_regen_flag(conn, &sid, start_date, Some(end_date)).await?;
     }
+
+    Ok(())
+}
+
+
+/// Print a table summarizing the progress of generating standard site priors
+#[derive(Debug, Args)]
+pub struct PrintStdJobsSummaryCli {
+    /// First date to print in the table. If not given, defaults to 7 days ago.
+    #[clap(short = 's', long)]
+    start_date: Option<NaiveDate>,
+    
+    /// Date after the last one to print. If not given, defaults to today.
+    #[clap(short = 'e', long)]
+    end_date: Option<NaiveDate>,
+}
+
+pub async fn print_std_jobs_summary_cli(conn: &mut MySqlConn, args: PrintStdJobsSummaryCli) -> anyhow::Result<()> {
+    let start_date = if let Some(sd) = args.start_date {
+        sd
+    } else {
+        chrono::Utc::now().date_naive() - chrono::Duration::days(7)
+    };
+
+    print_std_jobs_summary(conn, start_date, args.end_date).await
+}
+
+
+pub async fn print_std_jobs_summary(conn: &mut MySqlConn, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<()> {
+    let end_date = end_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
+    let mut summaries = vec![];
+    for date in DateIterator::new_one_range(start_date, end_date) {
+        let this_summary = stdsitejobs::StdSiteJob::summarize_date(conn, date).await?;
+        summaries.push(this_summary);
+    }
+    
+    println!("{}", orm::utils::to_std_table(summaries));
 
     Ok(())
 }

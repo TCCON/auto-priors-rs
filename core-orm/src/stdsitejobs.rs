@@ -9,15 +9,14 @@ use itertools::Itertools;
 use log::{info, warn};
 use serde::Serialize;
 use sqlx::{self, FromRow, Type, Connection};
+use tabled::Tabled;
 
 use crate::config::Config;
 use crate::jobs;
 use crate::met;
-use crate::siteinfo::SiteType;
-use crate::siteinfo::StdOutputStructure;
+use crate::siteinfo::{self, SiteType, StdOutputStructure};
 use crate::utils::DateIterator;
 use crate::MySqlConn;
-use crate::siteinfo;
 
 
 #[derive(Debug, Type, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -600,6 +599,51 @@ impl StdSiteJob {
 
         Ok(())
     }
+
+    /// Provide a summary the sites generated/pending/etc. for a given date
+    pub async fn summarize_date(conn: &mut MySqlConn, date: NaiveDate) -> anyhow::Result<StdJobDateSummary> {
+        let stdsites = siteinfo::SiteInfo::get_site_info_for_date(conn, date, false).await?;
+        let all_site_ids = stdsites.iter()
+            .map(|s| s.site_id.as_deref().unwrap_or("??"))
+            .collect_vec();
+
+        let rows = sqlx::query_as!(
+            QStdSiteJob,
+            "SELECT * FROM v_StdSiteJobs WHERE date = ?",
+            date
+        ).fetch_all(conn)
+        .await
+        .context("Error occurred while trying to query the standard site jobs for date {date}")?
+        .into_iter()
+        .map(|q| StdSiteJob::from(q))
+        .collect_vec();
+
+        // First categorize all the sites that show up in the job rows
+        let mut summary = StdJobDateSummary::new(date);
+        let mut accounted_sites = HashSet::new();
+        for row in rows.iter() {
+            match row.state {
+                StdSiteJobState::Unknown => summary.other_sites.insert(row.site_id.clone()),
+                StdSiteJobState::MissingMet => summary.other_sites.insert(row.site_id.clone()),
+                StdSiteJobState::RegenNeeded => summary.regen_sites.insert(row.site_id.clone()),
+                StdSiteJobState::Nonop => summary.nonop_sites.insert(row.site_id.clone()),
+                StdSiteJobState::JobNeeded => summary.pending_sites.insert(row.site_id.clone()),
+                StdSiteJobState::InProgress => summary.in_prog_sites.insert(row.site_id.clone()),
+                StdSiteJobState::Complete => summary.complete_sites.insert(row.site_id.clone()),
+            };
+
+            accounted_sites.insert(row.site_id.as_str());
+        }
+
+        // Then catch any sites that didn't have a row in the jobs table
+        for sid in all_site_ids {
+            if !accounted_sites.contains(sid) {
+                summary.nonop_sites.insert(sid.to_string());
+            }
+        }
+
+        Ok(summary)
+    }
 }
 
 pub struct AddStdJobSummary {
@@ -621,3 +665,60 @@ struct QStdSiteJob {
     output_structure: Option<String>,
 }
 
+pub struct StdJobDateSummary {
+    date: NaiveDate,
+    complete_sites: HashSet<String>,
+    pending_sites: HashSet<String>,
+    in_prog_sites: HashSet<String>,
+    regen_sites: HashSet<String>,
+    nonop_sites: HashSet<String>,
+    other_sites: HashSet<String>,
+}
+
+impl StdJobDateSummary {
+    fn new(date: NaiveDate) -> Self {
+        Self { 
+            date,
+            complete_sites: HashSet::new(),
+            pending_sites: HashSet::new(),
+            in_prog_sites: HashSet::new(),
+            regen_sites: HashSet::new(),
+            nonop_sites: HashSet::new(),
+            other_sites: HashSet::new(),
+        }
+    }
+
+    fn field_to_string(field: &HashSet<String>) -> String {
+        field.iter()
+            .sorted()
+            .join(",")
+    }
+}
+
+impl Tabled for StdJobDateSummary {
+    const LENGTH: usize = 8;
+
+    fn fields(&self) -> Vec<std::borrow::Cow<'_, str>> {
+        vec![
+            self.date.to_string().into(),
+            Self::field_to_string(&self.complete_sites).into(),
+            Self::field_to_string(&self.pending_sites).into(),
+            Self::field_to_string(&self.in_prog_sites).into(),
+            Self::field_to_string(&self.regen_sites).into(),
+            Self::field_to_string(&self.nonop_sites).into(),
+            Self::field_to_string(&self.other_sites).into(),
+        ]
+    }
+
+    fn headers() -> Vec<std::borrow::Cow<'static, str>> {
+        vec![
+            "Date".into(),
+            "Complete".into(),
+            "Pending".into(),
+            "In progress".into(),
+            "Regen".into(),
+            "Nonop/unlisted".into(),
+            "Other".into(),
+        ]
+    }
+}
