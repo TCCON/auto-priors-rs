@@ -342,19 +342,30 @@ pub async fn print_sites(conn: &mut MySqlConn, site_type: Option<SiteType>) -> a
 /// Print currently defined location info for a given site
 #[derive(Debug, Args)]
 pub struct PrintLocsCli {
-    /// The two-letter ID for the site to print information about
-    site_id: String
+    /// The two-letter ID for the site to print information about. If omitted, 
+    /// all sites' information is printed.
+    site_id: Option<String>
 }
 
 pub async fn print_locations_for_site_cli(conn: &mut MySqlConn, args: PrintLocsCli) -> anyhow::Result<()> {
-    print_locations_for_site(conn, &args.site_id).await
+    print_locations_for_site(conn, args.site_id.as_deref()).await
 }
 
 pub async fn print_locations_for_site(
     conn: &mut MySqlConn,
-    site_id: &str
+    site_id: Option<&str>
 ) -> anyhow::Result<()> {
-    let infos = SiteInfo::get_site_locations(conn, site_id).await?;
+    let infos = if let Some(sid) = site_id {
+        SiteInfo::get_site_locations(conn, sid).await?
+    } else {
+        let mut all_info = SiteInfo::get_all_site_info(conn).await?;
+        all_info.sort_unstable_by_key(|info| {
+            let sid = info.site_id.as_deref().unwrap_or("??").to_string();
+            let start_date = info.start_date;
+            (sid, start_date)
+        });
+        all_info
+    };
     let table = orm::utils::to_std_table(infos);
     println!("{table}");
 
