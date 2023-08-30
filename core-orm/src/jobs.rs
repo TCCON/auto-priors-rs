@@ -631,32 +631,52 @@ impl Job {
         base_run_dir
     }
 
-    pub fn mod_run_output_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
-        let run_dir = self.run_dir(false);
-        let subdirs = self.get_possible_output_subdirs(config)
-            .with_context(|| format!("Error occurred while trying to infer .mod output dir for job #{}", self.job_id))?;
-        let output_dirs = subdirs.into_iter()
-            .map(|d| run_dir.join(d).join(site_id).join("vertical"))
-            .collect_vec();
-        Ok(output_dirs)
+    pub fn mod_run_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
+        self.run_or_output_subdir(site_id, config, true, "vertical")
+            .with_context(|| format!("Error occurred while trying to infer .mod run storage sub-directory for job #{}", self.job_id))
     }
 
-    pub fn vmr_run_output_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
-        let run_dir = self.run_dir(false);
-        let subdirs = self.get_possible_output_subdirs(config)
-            .with_context(|| format!("Error occurred while trying to infer .vmr output dir for job #{}", self.job_id))?;
-        let output_dirs = subdirs.into_iter()
-            .map(|d| run_dir.join(d).join(site_id).join("vmrs-vertical"))
-            .collect_vec();
-        Ok(output_dirs)
+    pub fn mod_output_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
+        self.run_or_output_subdir(site_id, config, false, "vertical")
+        .with_context(|| format!("Error occurred while trying to infer .mod output sub-directory for job #{}", self.job_id))
     }
 
-    pub fn map_run_output_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
-        let run_dir = self.run_dir(false);
-        let subdirs = self.get_possible_output_subdirs(config)
-            .with_context(|| format!("Error occurred while trying to infer .map/.map.nc output dir for job #{}", self.job_id))?;
+    pub fn vmr_run_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
+        self.run_or_output_subdir(site_id, config, true, "vmrs-vertical")
+        .with_context(|| format!("Error occurred while trying to infer .vmr run storage sub-directory for job #{}", self.job_id))
+    }
+
+    pub fn vmr_output_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
+        self.run_or_output_subdir(site_id, config, false, "vmrs-vertical")
+        .with_context(|| format!("Error occurred while trying to infer .vmr output sub-directory for job #{}", self.job_id))
+    }
+
+    pub fn map_run_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
+        self.run_or_output_subdir(site_id, config, true, "maps-vertical")
+        .with_context(|| format!("Error occurred while trying to infer .map/.map.nc run storage sub-directory for job #{}", self.job_id))
+    }
+
+    pub fn map_output_dir(&self, site_id: &str, config: &Config) -> anyhow::Result<Vec<PathBuf>> {
+        self.run_or_output_subdir(site_id, config, false, "maps-vertical")
+        .with_context(|| format!("Error occurred while trying to infer .map/.map.nc output sub-directory for job #{}", self.job_id))   
+    }
+
+    fn run_or_output_subdir(&self, site_id: &str, config: &Config, run_dir: bool, bottom_subdir: &str) -> anyhow::Result<Vec<PathBuf>> {
+        let base_dir = if run_dir {
+            self.run_dir(false)
+        } else if let Some(p) = &self.output_file {
+            if p.is_file() {
+                anyhow::bail!("Output is a tar file for job {}, cannot get a subdirectory of it", self.job_id);
+            } else {
+                p.to_path_buf()
+            }
+        } else {
+            anyhow::bail!("Output file/directory not yet set for job {}", self.job_id);
+        };
+
+        let subdirs = self.get_possible_output_subdirs(config)?;
         let output_dirs = subdirs.into_iter()
-            .map(|d| run_dir.join(d).join(site_id).join("maps-vertical"))
+            .map(|d| base_dir.join(d).join(site_id).join(bottom_subdir))
             .collect_vec();
         Ok(output_dirs)
     }

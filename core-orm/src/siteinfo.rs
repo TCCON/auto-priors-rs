@@ -212,10 +212,10 @@ impl StdOutputStructure {
         let mut files = vec![];
         for &sid in site_ids {
             if mod_files {
-                let mod_dirs = job.mod_run_output_dir(sid, config)?;
+                let mod_dirs = job.mod_output_dir(sid, config)?;
                 for mod_dir in mod_dirs {
                     if !mod_dir.exists() {
-                        anyhow::bail!(".mod output directory does not exist for site {sid} in job #{}", job.job_id);
+                        anyhow::bail!(".mod output directory ({}) does not exist for site {sid} in job #{}", mod_dir.display(), job.job_id);
                     }
                     let mod_glob = glob::glob(&mod_dir.join("*.mod").to_string_lossy())
                         .context("Error occurred while trying to make the glob pattern for .mod files")?;
@@ -226,10 +226,10 @@ impl StdOutputStructure {
             }
 
             if vmr_files {
-                let vmr_dirs = job.vmr_run_output_dir(sid, config)?;
+                let vmr_dirs = job.vmr_output_dir(sid, config)?;
                 for vmr_dir in vmr_dirs {
                     if !vmr_dir.exists() {
-                        anyhow::bail!(".vmr output directory does not exist for site {sid} in job #{}", job.job_id);
+                        anyhow::bail!(".vmr output directory ({}) does not exist for site {sid} in job #{}", vmr_dir.display(), job.job_id);
                     }
                     let vmr_glob = glob::glob(&vmr_dir.join("*.vmr").to_string_lossy())
                         .context("Error occurred while trying to make the glob pattern for .vmr files")?;
@@ -240,10 +240,10 @@ impl StdOutputStructure {
             }
 
             if map_files {
-                let map_dirs = job.map_run_output_dir(sid, config)?;
+                let map_dirs = job.map_output_dir(sid, config)?;
                 for map_dir in map_dirs {
                     if !map_dir.exists() {
-                        anyhow::bail!(".map output directory does not exist for site {sid} in job #{}", job.job_id);
+                        anyhow::bail!(".map output directory ({}) does not exist for site {sid} in job #{}", map_dir.display(), job.job_id);
                     }
                     let map_glob = glob::glob(&map_dir.join("*.map").to_string_lossy())
                         .context("Error occurred while trying to make the glob pattern for .map files")?;
@@ -254,10 +254,10 @@ impl StdOutputStructure {
             }
 
             if map_nc_files {
-                let map_dirs = job.map_run_output_dir(sid, config)?;
+                let map_dirs = job.map_output_dir(sid, config)?;
                 for map_dir in map_dirs {
                     if !map_dir.exists() {
-                        anyhow::bail!(".map output directory does not exist for site {sid} in job #{}", job.job_id);
+                        anyhow::bail!(".map output directory ({}) does not exist for site {sid} in job #{}", map_dir.display(), job.job_id);
                     }
                     let map_glob = glob::glob(&map_dir.join("*.map.nc").to_string_lossy())
                         .context("Error occurred while trying to make the glob pattern for .mod files")?;
@@ -273,18 +273,16 @@ impl StdOutputStructure {
     fn add_files_in_tree(files: &mut Vec<(PathBuf, PathBuf)>, glob_entries: glob::Paths) -> anyhow::Result<()> {
         for entry in glob_entries {
             let src_path = entry?.canonicalize()?;
-            let components = src_path.components()
-                .rev()
-                .take(5)
-                .collect_vec();
-
+            let components = src_path.components().collect_vec();
             // We're assuming a directory structure like `jobN/fpit/site_id/vertical/*.mod`, hence taking the last five
             // components will get us what we want
-            if components.len() != 5 {
-                anyhow::bail!("Fewer than expected number of path components (expected 5, got {})", components.len());
+            let n = components.len();
+            if n < 5 {
+                anyhow::bail!("Fewer than expected number of path components (expected at least 5, got {})", n);
             }
 
-            let dest_path = components.into_iter()
+
+            let dest_path = components[n-5..].into_iter()
                 .fold(PathBuf::new(), |full_path, comp| full_path.join(comp));
 
             files.push((src_path, dest_path));
