@@ -30,8 +30,6 @@ pub enum StdSiteJobState {
     NonopNeeded = -3,
     /// Indicates that the priors for this day need regenerated (old files will be removed if needed)
     RegenNeeded = -2,
-    /// Indicates the site was not operational on this date and priors will never be generated for it
-    Nonop = -1,
     /// Indicates that a job to generate priors is needed for this site
     JobNeeded = 0,
     /// Indicates that a job has been submitted for this site
@@ -52,8 +50,8 @@ impl From<i8> for StdSiteJobState {
     fn from(val: i8) -> Self {
         match val {
             -10 => Self::MissingMet,
+            -3 => Self::NonopNeeded,
             -2 => Self::RegenNeeded,
-            -1 => Self::Nonop,
             0 => Self::JobNeeded,
             1 => Self::InProgress,
             2 => Self::Complete,
@@ -161,7 +159,7 @@ impl StdSiteJob {
         // First we get dates for which there is already an entry (in any state) for this site in the table
         let extant_site_dates: HashSet<_> = sqlx::query!(
             "SELECT date FROM v_StdSiteJobs WHERE site_id = ?",
-            site_id
+            site_id,
         ).fetch_all(&mut *conn)
         .await?
         .into_iter()
@@ -596,22 +594,26 @@ impl StdSiteJob {
     /// reset is successful, both the database and this instance will have the state set to "JobNeeded" and the output
     /// `tarfile` set to `None`.
     async fn clear_output_for_regen(&mut self, conn: &mut MySqlConn, needs_new_job: bool) -> anyhow::Result<()> {
-        let mut trans = conn.begin().await?;        
-        let new_state = if needs_new_job {
-            StdSiteJobState::JobNeeded
-        } else {
-            StdSiteJobState::Nonop
-        };
+        let mut trans = conn.begin().await?;
 
-        sqlx::query!(
-            "UPDATE StdSiteJobs SET state = ?, job = ?, tarfile = ? WHERE id = ?",
-            new_state,
-            None::<i32>,
-            None::<String>,
-            self.id
-        ).execute(&mut *trans)
-        .await
-        .with_context(|| format!(""))?;
+        if needs_new_job {
+            sqlx::query!(
+                "UPDATE StdSiteJobs SET state = ?, job = ?, tarfile = ? WHERE id = ?",
+                StdSiteJobState::JobNeeded,
+                None::<i32>,
+                None::<String>,
+                self.id
+            ).execute(&mut *trans)
+            .await
+            .with_context(|| format!("Error occurred trying to set state for row {} in StdSiteJobs table to {:?}", self.id, StdSiteJobState::JobNeeded))?;
+        } else {
+            sqlx::query!(
+                "DELETE FROM StdSiteJobs WHERE id = ?",
+                self.id
+            ).execute(&mut *trans)
+            .await
+            .with_context(|| format!("Error occurred trying to remove row {} from StdSiteJobs table", self.id))?;
+        }
 
         if let Some(output) = &self.tarfile {
             std::fs::remove_file(output)
@@ -653,7 +655,6 @@ impl StdSiteJob {
             match row.state {
                 StdSiteJobState::Unknown | StdSiteJobState::MissingMet => summary.other_sites.insert(row.site_id.clone()),
                 StdSiteJobState::RegenNeeded | StdSiteJobState::NonopNeeded => summary.regen_sites.insert(row.site_id.clone()),
-                StdSiteJobState::Nonop => summary.nonop_sites.insert(row.site_id.clone()),
                 StdSiteJobState::JobNeeded => summary.pending_sites.insert(row.site_id.clone()),
                 StdSiteJobState::InProgress => summary.in_prog_sites.insert(row.site_id.clone()),
                 StdSiteJobState::Complete => summary.complete_sites.insert(row.site_id.clone()),
@@ -662,7 +663,7 @@ impl StdSiteJob {
             accounted_sites.insert(row.site_id.as_str());
         }
 
-        // Then catch any sites that didn't have a row in the jobs table
+        // Then catch any sites that didn't have a row in the jobs table - these are non-operational
         for sid in all_site_ids {
             if !accounted_sites.contains(sid) {
                 summary.nonop_sites.insert(sid.to_string());
@@ -743,7 +744,7 @@ impl Tabled for StdJobDateSummary {
             "Complete".into(),
             "Pending".into(),
             "In progress".into(),
-            "Regen".into(),
+            "Regen/clear".into(),
             "Nonop/unlisted".into(),
             "Other".into(),
         ]
