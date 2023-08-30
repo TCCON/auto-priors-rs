@@ -1,15 +1,5 @@
 use chrono::{NaiveDate, Duration};
-
-pub fn date_range(start_date: NaiveDate, end_date: NaiveDate) -> Vec<NaiveDate> {
-    let mut dates = vec![];
-    let mut curr_date = start_date;
-    while curr_date < end_date {
-        dates.push(curr_date);
-        curr_date += Duration::days(1);
-    }
-
-    return dates;
-}
+use itertools::Itertools;
 
 /// Return `true` if two (possibly open ended) date ranges overlap
 /// 
@@ -170,7 +160,11 @@ impl DateRangeOverlap {
 
 
 
-
+/// An iterator over one or more date ranges.
+/// 
+/// Note that this should always be constructed through one of the `new*`
+/// methods, rather than directly. Doing so ensures that invalid ranges are 
+/// always filtered out.
 pub struct DateIterator {
     date_ranges: Vec<(NaiveDate, NaiveDate)>,
     curr_date: Option<NaiveDate>,
@@ -207,6 +201,7 @@ impl DateIterator {
     /// assert_eq!(iter_dates, expected_dates);
     /// ```
     pub fn new(date_ranges: Vec<(NaiveDate, NaiveDate)>) -> Self {
+        let date_ranges = Self::filter_empty_ranges(date_ranges);
         Self { date_ranges, curr_date: None, range_idx: 0, not_before: None, not_after: None, first: true }
     }
 
@@ -221,8 +216,18 @@ impl DateIterator {
     /// - `not_before`: if this is `Some(date)` then the iterator will start on `date`
     /// - `not_after`: if this is `Some(date)` then the iterator will stop on the *day before* `date`
     pub fn new_with_bounds(date_ranges: Vec<(NaiveDate, NaiveDate)>, not_before: Option<NaiveDate>, not_after: Option<NaiveDate>) -> Self {
+        let date_ranges = Self::filter_empty_ranges(date_ranges);
         Self { date_ranges, curr_date: None, range_idx: 0, not_before, not_after, first: true }
 
+    }
+
+    fn filter_empty_ranges(date_ranges: Vec<(NaiveDate, NaiveDate)>) -> Vec<(NaiveDate, NaiveDate)> {
+        // This is necessary because having a range where the end date is <= the start date incorrectly
+        // causes the main loop to iterator the first date, regardless. The logic to advance dates is
+        // complex enough it's easier just to filter out invalid ranges.
+        date_ranges.into_iter()
+            .filter(|(a,b)| b > a)
+            .collect_vec()
     }
 }
 
@@ -431,6 +436,30 @@ mod tests {
     fn test_date_iterator_empty() {
         let mut it = DateIterator::new(vec![]);
         assert_eq!(it.next(), None);
+    }
+
+    #[test]
+    fn test_date_iterator_start_equal_end() {
+        let mut it = DateIterator::new(vec![(NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 1).unwrap())]);
+        assert_eq!(it.next(), None);
+    }
+
+    #[test]
+    fn test_date_iterator_one_day() {
+        let it = DateIterator::new_one_range(NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 2).unwrap());
+        let dates: Vec<NaiveDate> = it.collect();
+        assert_eq!(dates, [NaiveDate::from_ymd_opt(2018, 1, 1).unwrap()]);
+    }
+
+    #[test]
+    fn test_date_iterate_second_range_start_equal_end() {
+        let it = DateIterator::new(vec![
+            (NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()),
+            (NaiveDate::from_ymd_opt(2018, 6, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 6, 1).unwrap()),
+            (NaiveDate::from_ymd_opt(2018, 12, 31).unwrap(), NaiveDate::from_ymd_opt(2019, 1, 1).unwrap())
+        ]);
+        let dates: Vec<NaiveDate> = it.collect();
+        assert_eq!(dates, [NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(), NaiveDate::from_ymd_opt(2018, 1, 2).unwrap(), NaiveDate::from_ymd_opt(2018, 12, 31).unwrap()]);
     }
 
     #[test]
