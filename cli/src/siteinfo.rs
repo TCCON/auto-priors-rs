@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use anyhow;
+use anyhow::{self, Context};
 use chrono::NaiveDate;
 use clap::{self,Args, Subcommand};
 use log::warn;
@@ -19,6 +19,8 @@ pub enum StdSiteActions {
     Edit(EditSiteCli),
     Print(PrintSitesCli),
     AddInfo(AddSiteInfoCli),
+    SetNonop(SetNonopCli),
+    DeleteInfo(DeleteInfoCli),
     PrintInfo(PrintLocsCli),
     Json(InfoJsonCli),
 }
@@ -251,8 +253,69 @@ pub async fn add_std_site_info_range(
         location, 
         longitude, 
         latitude, 
-        comment
+        comment,
+        false
     ).await
+}
+
+/// Clear existing location information for a site
+/// 
+/// Note that this will delete output files for the cleared
+/// dates the next time regen flags are processed.
+#[derive(Debug, Args)]
+pub struct SetNonopCli {
+    /// The two letter ID of the site
+    site_id: String,
+
+    /// The first date, in YYYY-MM-DD format, to clear info for.
+    start_date: NaiveDate,
+
+    /// The final date (exclusive) in YYYY-MM-DD format, to clear info for.
+    /// If not given, this location is assumed to have no end date.
+    end_date: Option<NaiveDate>,
+}
+
+pub async fn clear_site_info_range_cli(conn: &mut MySqlConn, args: SetNonopCli) -> anyhow::Result<()> {
+    clear_site_info_range(conn, &args.site_id, args.start_date, args.end_date).await
+}
+
+pub async fn clear_site_info_range(
+    conn: &mut MySqlConn,
+    site_id: &str,
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>
+) -> anyhow::Result<()> {
+    SiteInfo::set_site_info_for_dates(
+        conn,
+        site_id,
+        start_date,
+        end_date,
+        None,
+        None,
+        None,
+        None,
+        true
+    ).await
+}
+
+/// Delete a site info entry by its ID
+/// 
+/// WARNING: this is meant *only* for cleaning up row entries that should not exist.
+/// If you want to indicate that a site should not have priors generated for a given
+/// time, use set-nonop instead. This subcommand does not update the site jobs table.
+#[derive(Debug, Args)]
+pub struct DeleteInfoCli {
+    /// The ID for the info entry to delete. This can be obtained from the print-info
+    /// subcommand
+    row_id: i32,
+}
+
+pub async fn delete_info_row_cli(conn: &mut MySqlConn, args: DeleteInfoCli) -> anyhow::Result<()> {
+    let info = SiteInfo::get_location_by_id(conn, args.row_id).await
+        .with_context(|| format!("Error occurred retrieving info row with id = {}", args.row_id))?;
+    info.delete(conn).await
+        .with_context(|| format!("Error occurred while trying to delete info row with id = {}", args.row_id))?;
+    Ok(())
 }
 
 

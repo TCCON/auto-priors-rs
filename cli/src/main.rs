@@ -171,6 +171,16 @@ async fn main() -> anyhow::Result<()> {
             siteinfo::add_std_site_info_range_cli(&mut conn, subargs).await?;
         },
 
+        Commands::SiteInfo(StdSiteCli { command: StdSiteActions::SetNonop(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            siteinfo::clear_site_info_range_cli(&mut conn, subargs).await?;
+        },
+
+        Commands::SiteInfo(StdSiteCli { command: StdSiteActions::DeleteInfo(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            siteinfo::delete_info_row_cli(&mut conn, subargs).await?;
+        },
+
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::PrintInfo(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::print_locations_for_site_cli(&mut conn, subargs).await?;

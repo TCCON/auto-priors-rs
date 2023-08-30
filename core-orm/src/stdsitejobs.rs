@@ -26,6 +26,8 @@ pub enum StdSiteJobState {
     Unknown = -99, 
     /// Indicates this site/date combination is not present in the table, but the GEOS FP-IT data needed to generate it has been downloaded.
     MissingMet = -10,
+    /// Indicates that output for this day is no longer needed because the site was actually not operational
+    NonopNeeded = -3,
     /// Indicates that the priors for this day need regenerated (old files will be removed if needed)
     RegenNeeded = -2,
     /// Indicates the site was not operational on this date and priors will never be generated for it
@@ -258,9 +260,24 @@ impl StdSiteJob {
         .map(|q| StdSiteJob::try_from(q))
         .try_collect()?;
 
+        let clearjobs: Vec<_> = sqlx::query_as!(
+            QStdSiteJob,
+            "SELECT * FROM v_StdSiteJobs WHERE state = ?",
+            StdSiteJobState::NonopNeeded
+        ).fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|q| StdSiteJob::try_from(q))
+        .try_collect()?;
+
         let mut njobs = 0;
         for mut job in stdjobs {
-            job.clear_output_for_regen(conn).await?;
+            job.clear_output_for_regen(conn, true).await?;
+            njobs += 1;
+        }
+
+        for mut job in clearjobs {
+            job.clear_output_for_regen(conn, false).await?;
             njobs += 1;
         }
 
@@ -500,11 +517,17 @@ impl StdSiteJob {
     /// If `end_date` is `None`, then all rows from `start_date` on are flagged. Otherwise, rows up to but not
     /// including `end_date` are flagged. Returns the number of rows affected if successful. Returns an `Err`
     /// if the database query fails.
-    pub async fn set_regen_flag(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<u64> {
+    pub async fn set_regen_flag(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>, clear_output: bool) -> anyhow::Result<u64> {
+        let new_state = if clear_output {
+            StdSiteJobState::NonopNeeded
+        } else {
+            StdSiteJobState::RegenNeeded
+        };
+
         let q = if let Some(end) = end_date {
             sqlx::query!(
                 "UPDATE v_StdSiteJobs SET state = ? WHERE site_id = ? AND date >= ? AND date < ?",
-                StdSiteJobState::RegenNeeded,
+                new_state,
                 site_id,
                 start_date,
                 end
@@ -513,7 +536,7 @@ impl StdSiteJob {
         } else {
             sqlx::query!(
                 "UPDATE v_StdSiteJobs SET state = ? WHERE site_id = ? AND date >= ?",
-                StdSiteJobState::RegenNeeded,
+                new_state,
                 site_id,
                 start_date
             ).execute(conn)
@@ -572,12 +595,17 @@ impl StdSiteJob {
     /// If an error occurs while deleting the output file, the database and this instance will not be updated. If the
     /// reset is successful, both the database and this instance will have the state set to "JobNeeded" and the output
     /// `tarfile` set to `None`.
-    async fn clear_output_for_regen(&mut self, conn: &mut MySqlConn) -> anyhow::Result<()> {
+    async fn clear_output_for_regen(&mut self, conn: &mut MySqlConn, needs_new_job: bool) -> anyhow::Result<()> {
         let mut trans = conn.begin().await?;        
+        let new_state = if needs_new_job {
+            StdSiteJobState::JobNeeded
+        } else {
+            StdSiteJobState::Nonop
+        };
 
         sqlx::query!(
             "UPDATE StdSiteJobs SET state = ?, job = ?, tarfile = ? WHERE id = ?",
-            StdSiteJobState::JobNeeded,
+            new_state,
             None::<i32>,
             None::<String>,
             self.id
@@ -623,9 +651,8 @@ impl StdSiteJob {
         let mut accounted_sites = HashSet::new();
         for row in rows.iter() {
             match row.state {
-                StdSiteJobState::Unknown => summary.other_sites.insert(row.site_id.clone()),
-                StdSiteJobState::MissingMet => summary.other_sites.insert(row.site_id.clone()),
-                StdSiteJobState::RegenNeeded => summary.regen_sites.insert(row.site_id.clone()),
+                StdSiteJobState::Unknown | StdSiteJobState::MissingMet => summary.other_sites.insert(row.site_id.clone()),
+                StdSiteJobState::RegenNeeded | StdSiteJobState::NonopNeeded => summary.regen_sites.insert(row.site_id.clone()),
                 StdSiteJobState::Nonop => summary.nonop_sites.insert(row.site_id.clone()),
                 StdSiteJobState::JobNeeded => summary.pending_sites.insert(row.site_id.clone()),
                 StdSiteJobState::InProgress => summary.in_prog_sites.insert(row.site_id.clone()),

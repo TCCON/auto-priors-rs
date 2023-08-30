@@ -535,6 +535,7 @@ impl Tabled for SiteInfo {
             .unwrap_or("");
 
         vec![
+            Cow::from(self.id.to_string()),
             Cow::from(start_date),
             Cow::from(end_date),
             Cow::from(self.location.clone()),
@@ -546,6 +547,7 @@ impl Tabled for SiteInfo {
 
     fn headers() -> Vec<std::borrow::Cow<'static, str>> {
         vec![
+            Cow::from("id"),
             Cow::from("start_date"),
             Cow::from("end_date"),
             Cow::from("location"),
@@ -671,6 +673,16 @@ impl SiteInfo {
         }else{
             return Ok(serde_json::to_string(&json_map)?);
         }
+    }
+
+    /// Get a single instance by its database row ID
+    pub async fn get_location_by_id(conn: &mut MySqlConn, row_id: i32) -> anyhow::Result<Self> {
+        Ok(sqlx::query_as!(
+            SiteInfo,
+            "SELECT * FROM v_StdSiteInfo WHERE id = ?",
+            row_id
+        ).fetch_one(conn)
+        .await?)
     }
 
     /// Get the current site information for a given site, i.e. the information with the most recent start date
@@ -938,7 +950,8 @@ impl SiteInfo {
         location: Option<String>, 
         longitude: Option<f32>, 
         latitude: Option<f32>, 
-        comment: Option<&str>
+        comment: Option<&str>,
+        set_inop: bool,
     ) -> anyhow::Result<()> {
         let overlapped_locs = Self::get_site_locations_for_date_range(conn, site_id, start_date, end_date).await?;
 
@@ -971,17 +984,21 @@ impl SiteInfo {
         let mut trans = conn.begin().await?;
 
         // Go ahead and create our new info range first; if something later fails, the transaction will roll it back.
-        Self::create_from_site_id(
-            &mut trans,
-            site_id,
-            &location,
-            latitude,
-            longitude,
-            start_date,
-            end_date,
-            comment
-        ).await
-        .with_context(|| "Error creating new site info range")?;
+        // If we're setting this time period to inoperable, we don't need to create this. We'll just shrink the
+        // overlapping periods as if we were adding a null period.
+        if !set_inop {
+            Self::create_from_site_id(
+                &mut trans,
+                site_id,
+                &location,
+                latitude,
+                longitude,
+                start_date,
+                end_date,
+                comment
+            ).await
+            .with_context(|| "Error creating new site info range")?;
+        }
 
         // Now modify any overlapped ranges
         for mut oloc in overlapped_locs {
@@ -996,7 +1013,14 @@ impl SiteInfo {
                         // copy of the original info range being split
                         oloc.duplicate_with_new_dates(&mut trans, end, oloc.end_date).await?;
                     }
-                    oloc.set_end_date(&mut trans, Some(start_date)).await?;
+
+                    if start_date > oloc.start_date {
+                        oloc.set_end_date(&mut trans, Some(start_date)).await?;
+                    } else {
+                        // Edge case: if the new info range starts at the same date as the old one, we don't need an instance of
+                        // the old info range covering a period before the new range
+                        oloc.delete(&mut trans).await?;
+                    }
                 },
 
                 // Need to change the start date for the previous info range
@@ -1024,8 +1048,8 @@ impl SiteInfo {
         }
 
         // Finally, mark any past or pending job as needed regenerated
-        if regen_needed{
-            StdSiteJob::set_regen_flag(&mut trans, site_id, start_date, end_date).await?;
+        if regen_needed || set_inop {
+            StdSiteJob::set_regen_flag(&mut trans, site_id, start_date, end_date, set_inop).await?;
         }
 
         trans.commit().await?;
