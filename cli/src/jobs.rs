@@ -58,6 +58,11 @@ pub struct AddJobCli {
     /// Pack the output files from this job into a single tarball.
     to_tarball: bool,
 
+    /// Pack the output files into an EGI-naming convention tarball.
+    /// Mututally exclusive with --to-tarball
+    #[clap(long)]
+    egi_tarball: bool,
+
     /// Which queue to add the job to, if not given, then will use the submitted
     /// job queue defined in the config.
     #[clap(long)]
@@ -155,14 +160,17 @@ impl AddJobArgs {
             Some(now + chrono::Duration::hours(config.execution.hours_to_keep as i64))
         };
 
-        let save_tarball = if clargs.to_tarball {
+        let save_tarball = if clargs.to_tarball && clargs.egi_tarball {
+            anyhow::bail!("Cannot have both --to-tarball and --egi-tarball");
+        } else if clargs.to_tarball {
             TarChoice::Yes
-        }else{
+        }else if clargs.egi_tarball {
+            TarChoice::Egi
+        } else {
             TarChoice::No
         };
 
         let save_dir = config.execution.output_path.clone();
-        dbg!(&save_dir);
         
         Ok(Self { 
             site_id: site_ids,

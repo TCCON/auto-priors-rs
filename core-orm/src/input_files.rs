@@ -4,7 +4,7 @@ use chrono::{NaiveDate, DateTime, Local};
 use itertools::Itertools;
 use log::{debug, info, warn};
 
-use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::{Config, BlacklistIdentifier, BlacklistEntry}};
+use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::{Config, BlacklistIdentifier, BlacklistEntry}, utils};
 
 struct FailedParsingError {
     reasons: Vec<String>,
@@ -42,6 +42,44 @@ impl From<std::io::Error> for FailedParsingError {
     }
 }
 
+enum MissingMetError {
+    CouldNotCheck(anyhow::Error),
+    MissingDates(Vec<NaiveDate>)
+}
+
+impl MissingMetError {
+    fn to_problem(self) -> String {
+        match self {
+            MissingMetError::CouldNotCheck(_) => {
+                // don't use Display impl here; don't want to expose inner errors to an email
+                "There was an error while verifying that the met data required for your request. Please try resubmitting. If the error persists, contact the adminstrators of the GGG priors automation.".to_string()
+            },
+            MissingMetError::MissingDates(_) => {
+                format!("Your request could not be fulfilled: {self}. If you believe this should not be the case, contact the GGG priors automation administrators.")
+            },
+        }
+    }
+}
+
+impl From<anyhow::Error> for MissingMetError {
+    fn from(value: anyhow::Error) -> Self {
+        Self::CouldNotCheck(value)
+    }
+}
+
+impl Display for MissingMetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MissingMetError::CouldNotCheck(e) => write!(f, "error occurred while checking met availability for job request: {e}"),
+            MissingMetError::MissingDates(dates) => {
+                let n = dates.len();
+                let date_str = dates.iter().map(|d| d.to_string()).join(", ");
+                write!(f, "met data was unavailable for {n} of the dates requested: {date_str}")
+            },
+        }
+    }
+}
+
 #[derive(Debug)]
 struct InputJob {
     site_id: Vec<String>,
@@ -57,7 +95,7 @@ struct InputJob {
 }
 
 impl InputJob {
-    fn from_file(input_file: &Path) -> Result<Self, FailedParsingError> {
+    async fn from_file(input_file: &Path, conn: &mut crate::MySqlConn, config: &Config) -> Result<Self, FailedParsingError> {
         let f = std::fs::File::open(input_file)?;
 
         let mut builder = InputJobBuilder::new();
@@ -76,6 +114,14 @@ impl InputJob {
                     let i = line_idx + 1;
                     problems.push(format!("Line {i}: {cause}"))
                 }
+            }
+        }
+
+        // Confirm that the required met files are available, unless missing start/end dates
+        // was one of the problems encountered in the input file
+        if let (Some(start), Some(end)) = (builder.start_date, builder.end_date) {
+            if let Err(e) = check_met_available(conn, config, start, end).await {
+                problems.push(e.to_problem());
             }
         }
 
@@ -378,7 +424,7 @@ pub async fn add_jobs_from_input_files(
             continue;
         }
 
-        match InputJob::from_file(&input_file) {
+        match InputJob::from_file(&input_file, conn, config).await {
             Ok(job) => {
                 jobs.push(job);
                 successful_input_files.push(input_file);
@@ -401,6 +447,8 @@ pub async fn add_jobs_from_input_files(
         
     }
 
+    // Now that we've parsed the input files (successfully or not) we can add them to the database. Unless
+    // we've blacklisted the person who made the request for abusing the system
     for (job, infile) in jobs.into_iter().zip(successful_input_files) {
         if let Some(blacklist_entry) = get_blacklist_match(&job, &config) {
             let file_name = infile.file_name().map(|s| s.to_string_lossy()).unwrap_or("??".into());
@@ -539,6 +587,23 @@ fn handle_blacklisted_input(blacklist_entry: &BlacklistEntry, submitter_email: &
 
     config.email.send_mail(&[submitter_email], None, None, subj, &body)
         .unwrap_or_else(|e| warn!("Failed to send blacklist email to {submitter_email}, error was: {e:?}"));
+}
+
+async fn check_met_available(conn: &mut crate::MySqlConn, config: &Config, start_date: NaiveDate, end_date: NaiveDate) -> Result<(), MissingMetError> {
+    let mut missing_dates = vec![];
+
+    for date in utils::DateIterator::new_one_range(start_date, end_date) {
+        let state = crate::met::MetFile::is_date_complete_for_default_mets(conn, config, date).await?;
+        if !state.is_complete() {
+            missing_dates.push(date);
+        }
+    }
+
+    if !missing_dates.is_empty() {
+        Err(MissingMetError::MissingDates(missing_dates))
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
