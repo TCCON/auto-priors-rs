@@ -399,6 +399,8 @@ mod tests {
         // (edge cases with equal start or end dates)
         assert_eq!(DateRangeOverlap::classify(None, date(2010, 6, 1), date(2010, 1, 1), date(2010, 6, 1)), DateRangeOverlap::AContainsB);
         assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), None, date(2010, 1, 1), date(2010, 6, 1)), DateRangeOverlap::AContainsB);
+        assert_eq!(DateRangeOverlap::classify(date(2004, 7, 1), date(2005, 1, 1), date(2004, 7, 1), date(2004, 8, 1)), DateRangeOverlap::AContainsB);
+        assert_eq!(DateRangeOverlap::classify(date(2004, 7, 1), date(2005, 1, 1), date(2004, 12, 1), date(2005, 1, 1)), DateRangeOverlap::AContainsB);
 
         // A inside B
         assert_eq!(DateRangeOverlap::classify(date(2010, 6, 1), date(2010, 6, 30), date(2010, 1, 1), date(2010, 12, 31)), DateRangeOverlap::AInsideB);
@@ -411,8 +413,9 @@ mod tests {
         assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), date(2010, 6, 1), date(2010, 1, 1), None), DateRangeOverlap::AInsideB);
         assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), date(2010, 6, 1), None, date(2010, 6, 1)), DateRangeOverlap::AInsideB);
 
-        // This is a case that showed up when clearing site info, that I just want to check
+        // These are cases that showed up when clearing site info, that I just want to check
         assert_eq!(DateRangeOverlap::classify(date(2017, 1, 1), date(2017, 12, 1), date(2017, 1, 1), None), DateRangeOverlap::AInsideB);
+        assert_eq!(DateRangeOverlap::classify(date(2004, 12, 1), date(2005, 1, 1), date(2004, 7, 1), date(2005, 1, 1)), DateRangeOverlap::AInsideB);
 
         // A ends in B
         assert_eq!(DateRangeOverlap::classify(date(2010, 1, 1), date(2010, 9, 1), date(2010, 3, 1), date(2010, 12, 31)), DateRangeOverlap::AEndsInB);

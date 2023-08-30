@@ -536,6 +536,7 @@ impl Tabled for SiteInfo {
 
         vec![
             Cow::from(self.id.to_string()),
+            Cow::from(self.site_id.as_deref().unwrap_or("??")),
             Cow::from(start_date),
             Cow::from(end_date),
             Cow::from(self.location.clone()),
@@ -548,6 +549,7 @@ impl Tabled for SiteInfo {
     fn headers() -> Vec<std::borrow::Cow<'static, str>> {
         vec![
             Cow::from("id"),
+            Cow::from("site_id"),
             Cow::from("start_date"),
             Cow::from("end_date"),
             Cow::from("location"),
@@ -1004,14 +1006,20 @@ impl SiteInfo {
         for mut oloc in overlapped_locs {
             match utils::DateRangeOverlap::classify(Some(start_date), end_date, Some(oloc.start_date), oloc.end_date) {
                 // The old site info is entirely inside the new one, so delete the old one
+                // This will also handle cases where the old range starts or ends on the same 
+                // date as the new one, but the new one extends further than the old one on the
+                // other side
                 utils::DateRangeOverlap::AContainsB => oloc.delete(&mut trans).await?,
 
                 // Split the previous standard site information block and insert the new one in the middle
                 utils::DateRangeOverlap::AInsideB => {
                     if let Some(end) = end_date {
                         // It's possible that the new range has no end date, in which case we don't need to create a second
-                        // copy of the original info range being split
-                        oloc.duplicate_with_new_dates(&mut trans, end, oloc.end_date).await?;
+                        // copy of the original info range being split. Also if the new range ends exactly on the same
+                        // date as the old one, we don't need this second copy either.
+                        if Some(end) != oloc.end_date {
+                            oloc.duplicate_with_new_dates(&mut trans, end, oloc.end_date).await?;
+                        }
                     }
 
                     if start_date > oloc.start_date {
