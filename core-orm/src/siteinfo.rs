@@ -25,6 +25,16 @@ pub enum SiteType {
     EM27 = 3
 }
 
+impl SiteType {
+    pub fn default_output_structure(&self) -> StdOutputStructure {
+        match self {
+            SiteType::Unknown => StdOutputStructure::TreeAll,
+            SiteType::TCCON => StdOutputStructure::FlatModVmr,
+            SiteType::EM27 => StdOutputStructure::TreeAll,
+        }
+    }
+}
+
 impl From<String> for SiteType {
     fn from(s: String) -> Self {
         return Self::from_str(&s).unwrap_or(Self::Unknown)
@@ -380,10 +390,11 @@ impl StdSite {
 
     pub async fn create(conn: &mut MySqlConn, site_id: &str, site_name: &str, site_type: SiteType) -> anyhow::Result<Self> {
         let q = sqlx::query!(
-            "INSERT INTO StdSiteList(site_id, name, site_type) VALUES (?, ?, ?)",
+            "INSERT INTO StdSiteList(site_id, name, site_type, output_structure) VALUES (?, ?, ?, ?)",
             site_id,
             site_name,
-            site_type
+            site_type,
+            site_type.default_output_structure()
         ).execute(&mut *conn)
         .await?;
 
