@@ -39,7 +39,7 @@ pub fn get_database_url(url_in: Option<String>) -> anyhow::Result<String> {
     // First, try the regular environmental variables
     for key in DB_ENV_VARS {
         if let Ok(val) = env::var(key) {
-            log::debug!("Using database URL {val} from the environmental variable {key}");
+            log::debug!("Using database URL {} from the environmental variable {key}", sanitize_db_url(&val));
             return Ok(val)
         }
     }
@@ -49,7 +49,7 @@ pub fn get_database_url(url_in: Option<String>) -> anyhow::Result<String> {
     for key in DB_ENV_VARS {
         if let Ok(val) = dotenv::var(key) {
             let epd = env_path.display();
-            log::debug!("Using database URL {val} from the variable {key} in {epd}");
+            log::debug!("Using database URL {} from the variable {key} in {epd}", sanitize_db_url(&val));
             return Ok(val)
         }
     }
@@ -88,7 +88,22 @@ pub async fn get_database_pool(url_in: Option<String>) -> anyhow::Result<PoolWra
         .context("Error occurred getting database URL within get_database_pool")?;
     let pool = sqlx::MySqlPool::connect(&url).await
         .with_context(|| format!("Error occurred connecting to MySqlPool at url = {url}"))?;
-    log::info!("Database pool established with URL = {url}");
+    log::debug!("Database pool established with URL = {}", sanitize_db_url(&url));
     let wrapper = PoolWrapper(pool);
     return Ok(wrapper)
+}
+
+pub fn sanitize_db_url(url: &str) -> String {
+    use url::Url;
+    let mut url = if let Ok(s) = Url::parse(url) {
+        s
+    } else {
+        return "****".to_string()
+    };
+
+    // Ignore errors, if we get an error, it just means this URL couldn't have a username or password
+    let _ = url.set_username("****");
+    let _ = url.set_password(Some("****"));
+
+    url.to_string()
 }
