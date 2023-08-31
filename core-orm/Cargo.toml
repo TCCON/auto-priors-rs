@@ -12,7 +12,7 @@ dotenv.workspace = true
 futures = "0.3"
 glob.workspace = true
 hostname = "0.3"
-itertools = "0.10.3"
+itertools.workspace = true
 lettre = {version = "0.10", features = ["serde"]}
 log.workspace = true
 # pyo3 = "0.16.5"

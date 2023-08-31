@@ -11,6 +11,7 @@ clap-verbosity-flag = "1.0"
 dotenv.workspace = true
 env_logger.workspace = true
 chrono.workspace = true
+itertools.workspace = true
 log.workspace = true
 sqlx.workspace = true
 tabled.workspace = true

@@ -2215,6 +2215,7 @@ dependencies = [
  "dotenv",
  "env_logger",
  "hex-literal",
+ "itertools",
  "log",
  "md-5",
  "serial_test",

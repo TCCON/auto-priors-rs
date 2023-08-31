@@ -779,6 +779,9 @@ pub struct DownloadConfig {
     ///   latter is recommended.
     pub download_dir: PathBuf,
 
+    /// How many days to allow before failing to download files is an error
+    pub days_latency: u32,
+
     /// The string that ginput's `mod` subcommand's `mode` argument takes to tell it to produce files
     /// from this meteorology.
     pub ginput_met_key: String,
@@ -1248,6 +1251,7 @@ where T: AsRef<Path>
             file_freq_min: 180,
             earliest_date: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
             download_dir: PathBuf::new(),
+            days_latency: 1,
             ginput_met_key: "fpit-eta".to_string(),
             ginput_output_subdir: "fpit".to_string(),
         }

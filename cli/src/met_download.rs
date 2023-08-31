@@ -4,11 +4,12 @@ use std::process::Termination;
 use anyhow::Context;
 use clap::{self, Args, Subcommand};
 use chrono::{NaiveDate, Duration};
+use itertools::Itertools;
 use log::{warn, info, debug};
 use orm::{self, met::MetDayState, utils::DateIterator};
 use sqlx::Connection;
 
-use crate::utils;
+use crate::utils::{self, DownloadError};
 
 /// Manage meteorology downloads and database
 #[derive(Debug, Args)]
@@ -671,6 +672,7 @@ pub async fn download_missing_files(
     dry_run: bool) -> Result<(), anyhow::Error> 
 {
     let date_iter = get_date_iter(conn, config, start_date, end_date, met_key, ignore_defaults).await?;
+    let mut missed_dates = vec![];
 
     // Now the main function: loop through each date and met type, download that met type if needed
     for curr_date in date_iter {
@@ -678,19 +680,39 @@ pub async fn download_missing_files(
         let defaults = config.get_defaults_for_date(curr_date)?;
         let dl_cfgs = config.get_met_configs(&defaults.met)?;
         for dl_cfg in dl_cfgs {
-            match orm::met::MetFile::is_date_complete_for_config(conn, curr_date, dl_cfg).await? {
+            let res = match orm::met::MetFile::is_date_complete_for_config(conn, curr_date, dl_cfg).await? {
                 MetDayState::Complete => {
-                    info!("{curr_date} already downloaded for {dl_cfg}, not redownloading")
+                    info!("{curr_date} already downloaded for {dl_cfg}, not redownloading");
+                    Ok(())
                 },
                 MetDayState::Incomplete(_,_) | MetDayState::Missing => {
                     info!("{curr_date} must be downloaded for {dl_cfg}");
-                    download_one_file_set_one_date(conn, curr_date, dl_cfg, downloader.clone(), dry_run).await?;
+                    download_one_file_set_one_date(conn, curr_date, dl_cfg, downloader.clone(), dry_run).await
                 }
+            };
+
+            if let Err(DownloadError::FilesNotAvailable) = res {
+                // If we didn't successfully download all the files, it's only an error if the given date is long enough ago
+                // that the files should have been available.
+                let first_optional_date = chrono::Utc::now().date_naive() - chrono::Duration::days(dl_cfg.days_latency as i64);
+                if curr_date >= first_optional_date {
+                    warn!("Could not download {dl_cfg} for {curr_date}, but this may be due to latency (not expecting files from {first_optional_date} on");
+                } else {
+                    missed_dates.push(curr_date);
+                }
+            } else if let Err(e) = res {
+                return Err(e.into());
             }
         }
     }
 
-    Ok(())
+    if missed_dates.is_empty() {
+        Ok(())
+    } else {
+        let n = missed_dates.len();
+        let missed_dates = missed_dates.into_iter().map(|d| d.to_string()).join(", ");
+        anyhow::bail!("Not all dates downloaded successfully, missed {n}: {missed_dates}")
+    }
 }
 
 /// Rescan the directories with met files and add any new files found to the database
@@ -837,10 +859,11 @@ async fn download_one_file_set_one_date(
     date: NaiveDate, 
     file_cfg: &orm::config::DownloadConfig, 
     mut downloader: impl utils::Downloader,
-    dry_run: bool) -> Result<(), anyhow::Error>
+    dry_run: bool) -> Result<(), DownloadError>
     
 {
-    let mut transaction = conn.begin().await?;
+    let mut transaction = conn.begin().await
+        .context("Error occurred while obtaining the transaction ")?;
     let save_dir = &file_cfg.download_dir;
 
     if dry_run {
@@ -859,21 +882,41 @@ async fn download_one_file_set_one_date(
     }
 
     if !dry_run {
-        downloader.download_files(&save_dir)
-            .with_context(|| format!("Download of files for {} in {} failed", date, save_dir.display()))?;
+        // It's possible that some of the files were available, so we want to see
+        // if the returned error is one for files not available. If so, we check
+        // if some of the files showed up anyway.
+        let some_missing = match downloader.download_files(&save_dir) {
+            Ok(_) => false,
+            Err(DownloadError::FilesNotAvailable) => true,
+            Err(e) => return Err(e)
+        };
 
+        let mut all_added_to_db = true;
         for (file_time, file_path) in expected_met_files {
             if file_path.exists() {
                 orm::met::MetFile::add_met_file(&mut transaction, &file_path, file_time, file_cfg).await?;
+            } else {
+                all_added_to_db = false;
             }
+        }
+
+        transaction.commit().await
+            .context("Error occurred while committing the transaction")?;
+
+        if all_added_to_db && some_missing {
+            warn!("The met downloader returned an error indicating that some files were not available, but all the expected files existed.");
+            Ok(())
+        } else if some_missing {
+            Err(DownloadError::FilesNotAvailable)
+        } else {
+            Ok(())
         }
     }else{
         for file in downloader.iter_files() {
             println!("Would download {file}");
         }
         println!("");
+        Ok(())
     }
 
-    transaction.commit().await?;
-    Ok(())
 }

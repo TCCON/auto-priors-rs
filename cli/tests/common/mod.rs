@@ -173,7 +173,7 @@ impl Downloader for TestDownloader {
         Ok(())
     }
 
-    fn download_files(&mut self, save_dir: &std::path::Path) -> anyhow::Result<()> {
+    fn download_files(&mut self, save_dir: &std::path::Path) -> Result<(), tccon_priors_cli::utils::DownloadError> {
         for url in self.files.iter() {
             let basename = url.split('/').last()
                 .ok_or_else(|| anyhow::Error::msg(format!("Could not determine basename of URL {url}")))?;
