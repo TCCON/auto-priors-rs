@@ -4,7 +4,7 @@ use std::{collections::HashMap, str::FromStr, borrow::Cow, fmt::Display, path::{
 use anyhow::{self, Context};
 use chrono::{NaiveDate, Duration};
 use itertools::Itertools;
-use log::error;
+use log::{error, warn};
 use serde::Serialize;
 use sqlx::{self, FromRow, Type, Connection};
 use tabled::Tabled;
@@ -992,6 +992,21 @@ impl SiteInfo {
             }).with_context(|| "Could not infer latitude from overlapped site information ranges")?;
 
         // We do not want to copy comments; we assume that comments are unique to each time period
+
+        // Now make sure lat/lon are valid
+        let longitude = if longitude < -180.0 || longitude > 360.0 {
+            anyhow::bail!("Longitude must be in the range [-180, +360]");
+        } else if longitude > 180.0 {
+            let new_lon = longitude - 360.0;
+            warn!("Longitude value {longitude} converted to {new_lon}");
+            new_lon
+        } else {
+            longitude
+        };
+
+        if latitude < -90.0 || latitude > 90.0 {
+            anyhow::bail!("Latitude must be in the range [-90, +90]");
+        }
 
         // Begin modifying the tables
         let mut trans = conn.begin().await?;
