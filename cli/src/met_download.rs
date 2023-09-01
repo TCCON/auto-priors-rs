@@ -6,7 +6,7 @@ use clap::{self, Args, Subcommand};
 use chrono::{NaiveDate, Duration};
 use itertools::Itertools;
 use log::{warn, info, debug};
-use orm::{self, met::MetDayState, utils::DateIterator};
+use orm::{self, met::{MetDayState, AddMetFileError}, utils::DateIterator};
 use sqlx::Connection;
 
 use crate::utils::{self, DownloadError};
@@ -893,10 +893,20 @@ async fn download_one_file_set_one_date(
 
         let mut all_added_to_db = true;
         for (file_time, file_path) in expected_met_files {
-            if file_path.exists() {
-                orm::met::MetFile::add_met_file(&mut transaction, &file_path, file_time, file_cfg).await?;
-            } else {
-                all_added_to_db = false;
+            match orm::met::MetFile::add_met_file(&mut transaction, &file_path, file_time, file_cfg).await {
+                Ok(_) => (),
+                Err(AddMetFileError::FileAlreadyInDb(p)) => info!("Met file {} already present in database", p.display()),
+                Err(AddMetFileError::FileCharacteristicMismatch(p)) => {
+                    return Err(anyhow::anyhow!("{}", AddMetFileError::FileCharacteristicMismatch(p)).into());
+                },
+                Err(AddMetFileError::FileDoesNotExist(p)) => {
+                    if !some_missing {
+                        return Err(anyhow::anyhow!("At least one of the expected met files ({}) was not present on disk, but the downloader reported success", p.display()).into());
+                    } else {
+                        all_added_to_db = false;
+                    }
+                },
+                Err(AddMetFileError::Other(e)) => return Err(DownloadError::Other(e))
             }
         }
 

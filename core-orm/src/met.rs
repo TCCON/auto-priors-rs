@@ -1,11 +1,48 @@
 use std::{path::{PathBuf, Path}, str::FromStr, fmt::Display};
 
+use anyhow::Context;
 use chrono::{NaiveDateTime, NaiveDate};
 use log::{warn, debug, trace};
 use serde::{Deserialize, Serialize};
 use sqlx::{self, Type, FromRow};
 
 use crate::{MySqlConn, config};
+
+/// Indicates a problem adding a met file to the database
+#[derive(Debug)]
+pub enum AddMetFileError {
+    /// Indicates the path to the file given (which is also contained in this variant) is not present on disk
+    FileDoesNotExist(PathBuf),
+
+    /// Indicates that the met file was already present in the database (all characteristics matched)
+    FileAlreadyInDb(PathBuf),
+
+    /// Indicates that there is already an entry for this file path in the database, but one or more of the
+    /// characteristics (datetime, levels, data type, or product) does not match.
+    FileCharacteristicMismatch(PathBuf),
+
+    /// Indicates an uncategorized error (e.g. a database query failure)
+    Other(anyhow::Error)
+}
+
+impl From<anyhow::Error> for AddMetFileError {
+    fn from(value: anyhow::Error) -> Self {
+        Self::Other(value)
+    }
+}
+
+impl Display for AddMetFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddMetFileError::FileDoesNotExist(p) => write!(f, "Cannot add file {} to met file database, file does not exist on disk", p.display()),
+            AddMetFileError::FileAlreadyInDb(p) => write!(f, "Cannot add file {} to met file database, file path already present", p.display()),
+            AddMetFileError::FileCharacteristicMismatch(p) => write!(f, "File {} is already in the met database, but with different characteristics", p.display()),
+            AddMetFileError::Other(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for AddMetFileError {}
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MetDayState {
@@ -43,7 +80,7 @@ impl MetDayState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "String", into = "String")]
 pub enum MetProduct {
     GeosFp,
@@ -549,26 +586,55 @@ impl MetFile {
     /// 
     /// # See also
     /// [`MetFile::add_met_file_infer_date`] if the file date must be retrieved from the file name.
-    pub async fn add_met_file(conn: &mut MySqlConn, file: &Path, datetime: NaiveDateTime, download_cfg: &config::DownloadConfig) -> anyhow::Result<()> {
+    pub async fn add_met_file(conn: &mut MySqlConn, file: &Path, datetime: NaiveDateTime, download_cfg: &config::DownloadConfig) -> Result<(), AddMetFileError> {
         if !file.exists() {
-            return Err(anyhow::Error::msg(format!("Not adding nonexistant met file to database: {}", file.display())));
+            return Err(AddMetFileError::FileDoesNotExist(file.to_path_buf()));
         }else if !file.is_absolute() {
             // I decided to make this a panic rather than a recoverable error because this should be something
             // in the program design, not a runtime issue.
             panic!("Given file path ({}) must be absolute", file.display());
         }
 
+        let file_str = file.to_str().ok_or_else(|| anyhow::Error::msg(format!("Unable to convert path to UTF-8 string: {}", file.display())))?;
+
+        let extant_record = sqlx::query_as!(
+            MetFile,
+            "SELECT * FROM MetFiles WHERE file_path = ?",
+            file_str
+        ).fetch_optional(&mut *conn)
+        .await
+        .with_context(|| format!("Error occurred checking if {} is already present in the MetFiles table", file.display()))?;
+
+        if let Some(record) = extant_record {
+            if datetime != record.filedate ||
+               download_cfg.product != record.product ||
+               download_cfg.levels != record.levels ||
+               download_cfg.data_type != record.data_type 
+            {
+                // For now, I'm considering this an error. If we've downloaded the same file, it should have the
+                // same characteristics.
+                return Err(AddMetFileError::FileCharacteristicMismatch(file.to_path_buf()))
+            } 
+            else 
+            {
+                return Err(AddMetFileError::FileAlreadyInDb(file.to_path_buf()))
+            }
+
+        }
+
         sqlx::query!(
             "INSERT INTO MetFiles (file_path, filedate, product, levels, data_type) VALUES (?, ?, ?, ?, ?)",
-            file.to_str().ok_or_else(|| anyhow::Error::msg(format!("Unable to convert path to UTF-8 string: {}", file.display())))?,
+            file_str,
             datetime,
             download_cfg.product.to_string(),
             download_cfg.levels.to_string(),
             download_cfg.data_type.to_string()
         ).execute(conn)
-        .await?;
+        .await
+        .with_context(|| format!("Error occurred trying to insert {} into MetFiles table", file.display()))?;
         
         Ok(())
+        
     }
 
     /// Get the date of a file from its file name. File name must contain at least up to minutes.
@@ -593,7 +659,7 @@ impl MetFile {
     /// Note that the file's basename must match the time format pattern in the download config, and
     /// must contain time components at least up to minutes. All other behavior follows
     /// [`MetFile::add_met_file`] including panics - `file` must be an absolute path.
-    pub async fn add_met_file_infer_date(conn: &mut MySqlConn, file: &Path, download_cfg: &config::DownloadConfig) -> anyhow::Result<()> {
+    pub async fn add_met_file_infer_date(conn: &mut MySqlConn, file: &Path, download_cfg: &config::DownloadConfig) -> Result<(), AddMetFileError> {
         let datetime = Self::date_from_filename(file, download_cfg)?;
         Self::add_met_file(conn, file, datetime, download_cfg).await
     }
