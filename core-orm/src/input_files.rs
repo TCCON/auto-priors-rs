@@ -498,7 +498,7 @@ pub async fn add_jobs_from_input_files(
                     }
 
                     if job.confirmation {
-                        confirm_successful_parsing(&job, config);
+                        confirm_successful_parsing(&job, config, infile);
                     }
                 },
                 Err(e) => {
@@ -521,14 +521,17 @@ pub async fn add_jobs_from_input_files(
     }
 }
 
-fn confirm_successful_parsing(job: &InputJob, config: &Config) {
+fn confirm_successful_parsing(job: &InputJob, config: &Config, input_file: &Path) {
     let email = &job.email;
+    let input_file_name = input_file.file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_else(|| "??".into());
     let body = format!("This confirms successful receipt of the following request for GGG priors:\n\n{job}\n\nTo disable these emails, set 'confirmation=false' (without the quotes) as the last line of your input file");
     config.email.send_mail(
         &[email],
         None,
         None,
-        "Confirming receipt of GGG priors request",
+        &format!("Confirming receipt of GGG priors request file {}", input_file_name),
         &body
     ).unwrap_or_else(|e| {
         warn!("Failed to send confirmation email to {email}. Reason was: {e}")
@@ -548,12 +551,16 @@ fn email_user_for_failed_parsing(error: FailedParsingError, config: &Config) {
     warn!("{warn_msg}\n{sep}\n{}\n{sep}\n", error.email_body());
 
     // Email the user, if we could parse the file enough to find the email
+    let input_file_name = error.input_file
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_else(|| "??".into());
     if let Some(email) = &error.email {
         config.email.send_mail(
             &[email.as_str()],
             None,
             None,
-            "", 
+            &format!("Failed parsing AutoModMaker request file {}", input_file_name), 
             &error.email_body()
         ).unwrap_or_else(|e| {
             warn!("Failed to send email to {email}, reason was: {e:?}")
