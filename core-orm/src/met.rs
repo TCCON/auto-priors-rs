@@ -6,7 +6,7 @@ use log::{warn, debug, trace};
 use serde::{Deserialize, Serialize};
 use sqlx::{self, Type, FromRow};
 
-use crate::{MySqlConn, config};
+use crate::{MySqlConn, config, error::DefaultOptsQueryError};
 
 /// Indicates a problem adding a met file to the database
 #[derive(Debug)]
@@ -43,6 +43,40 @@ impl Display for AddMetFileError {
 }
 
 impl std::error::Error for AddMetFileError {}
+
+
+#[derive(Debug)]
+pub enum CheckMetAvailableError {
+    NoDefaultsDefined(NaiveDate),
+    Other(anyhow::Error)
+}
+
+impl From<anyhow::Error> for CheckMetAvailableError {
+    fn from(value: anyhow::Error) -> Self {
+        Self::Other(value)
+    }
+}
+
+impl From<DefaultOptsQueryError> for CheckMetAvailableError {
+    fn from(value: DefaultOptsQueryError) -> Self {
+        if let DefaultOptsQueryError::NoMatches(date) = value {
+            Self::NoDefaultsDefined(date)
+        } else {
+            Self::Other(value.into())
+        }
+    }
+}
+
+impl Display for CheckMetAvailableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CheckMetAvailableError::NoDefaultsDefined(date) => write!(f, "No default meteorology defined for {date}"),
+            CheckMetAvailableError::Other(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for CheckMetAvailableError {}
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MetDayState {
@@ -433,10 +467,10 @@ impl MetFile {
         Ok(None)
     }
 
-    pub async fn is_date_complete_for_default_mets(conn: &mut MySqlConn, cfg: &config::Config, date: NaiveDate) -> anyhow::Result<MetDayState> {
+    pub async fn is_date_complete_for_default_mets(conn: &mut MySqlConn, cfg: &config::Config, date: NaiveDate) -> Result<MetDayState, CheckMetAvailableError> {
         let opts = cfg.get_defaults_for_date(date)?;
         let met_opts = cfg.get_met_configs(&opts.met)?;
-        Self::is_date_complete_for_config_set(conn, date, met_opts).await
+        Ok(Self::is_date_complete_for_config_set(conn, date, met_opts).await?)
     }
 
     /// Returns whether a given date is complete, incomplete, or wholly missing for a given reanalysis download configuration.

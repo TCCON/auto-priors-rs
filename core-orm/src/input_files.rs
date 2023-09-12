@@ -4,7 +4,7 @@ use chrono::{NaiveDate, DateTime, Local};
 use itertools::Itertools;
 use log::{debug, info, warn, error};
 
-use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::{Config, BlacklistIdentifier, BlacklistEntry}, utils};
+use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::{Config, BlacklistIdentifier, BlacklistEntry}, utils, met::CheckMetAvailableError};
 
 struct FailedParsingError {
     reasons: Vec<String>,
@@ -45,7 +45,8 @@ impl From<std::io::Error> for FailedParsingError {
 #[derive(Debug)]
 enum MissingMetError {
     CouldNotCheck(anyhow::Error),
-    MissingDates(Vec<NaiveDate>)
+    MissingDates(Vec<NaiveDate>),
+    UnsupportedDate(Vec<NaiveDate>)
 }
 
 impl MissingMetError {
@@ -58,6 +59,9 @@ impl MissingMetError {
             MissingMetError::MissingDates(_) => {
                 format!("Your request could not be fulfilled: {self}. If you believe this should not be the case, contact the GGG priors automation administrators.")
             },
+            MissingMetError::UnsupportedDate(_) => {
+                format!("Your request could not be fulfilled: {self}. Please review the TCCON wiki (https://tccon-wiki.caltech.edu/Main/ObtainingGinputData) for supported date ranges.")
+            }
         }
     }
 }
@@ -77,6 +81,11 @@ impl Display for MissingMetError {
                 let date_str = dates.iter().map(|d| d.to_string()).join(", ");
                 write!(f, "met data was unavailable for {n} of the dates requested: {date_str}")
             },
+            MissingMetError::UnsupportedDate(dates) => {
+                let n = dates.len();
+                let date_str = dates.iter().map(|d| d.to_string()).join(", ");
+                write!(f, "{n} of the requested dates are not supported (likely due to lack of met data): {date_str}")
+            }
         }
     }
 }
@@ -600,15 +609,28 @@ fn handle_blacklisted_input(blacklist_entry: &BlacklistEntry, submitter_email: &
 
 async fn check_met_available(conn: &mut crate::MySqlConn, config: &Config, start_date: NaiveDate, end_date: NaiveDate) -> Result<(), MissingMetError> {
     let mut missing_dates = vec![];
+    let mut unsupported_dates = vec![];
 
     for date in utils::DateIterator::new_one_range(start_date, end_date) {
-        let state = crate::met::MetFile::is_date_complete_for_default_mets(conn, config, date).await?;
-        if !state.is_complete() {
+        let (missing, unsupported) = match crate::met::MetFile::is_date_complete_for_default_mets(conn, config, date).await {
+            Ok(state) => (!state.is_complete(), false),
+            Err(CheckMetAvailableError::NoDefaultsDefined(_)) => (true, true),
+            Err(CheckMetAvailableError::Other(e)) => return Err(e.into())
+        };
+
+        if missing {
             missing_dates.push(date);
+        }
+
+        if unsupported {
+            unsupported_dates.push(date);
         }
     }
 
-    if !missing_dates.is_empty() {
+    if !unsupported_dates.is_empty() {
+        // Unsupported dates take precedence over missing, since these will never be available
+        Err(MissingMetError::UnsupportedDate(unsupported_dates))
+    } else if !missing_dates.is_empty() {
         Err(MissingMetError::MissingDates(missing_dates))
     } else {
         Ok(())
