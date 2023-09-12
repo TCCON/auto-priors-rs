@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -13,6 +14,7 @@ use crate::error::ErrorHandler;
 pub(crate) enum StdSiteMessage {
     AddJobs,
     MakeTarballs,
+    UpdateJson,
     StopGracefully,
     StopRapidly
 }
@@ -51,6 +53,7 @@ impl StdSiteManager {
                 let res = match m {
                     StdSiteMessage::AddJobs => self.add_needed_std_site_jobs().await,
                     StdSiteMessage::MakeTarballs => self.tar_std_sites_output().await,
+                    StdSiteMessage::UpdateJson => self.update_site_json().await,
                     StdSiteMessage::StopGracefully => break,
                     StdSiteMessage::StopRapidly => break,
                 };
@@ -109,6 +112,49 @@ impl StdSiteManager {
             .context("Error occurred while making standard site tarballs")?;
         info!("Standard site tarball check complete");
 
+        Ok(())
+    }
+
+    async fn update_site_json(&self) -> anyhow::Result<()> {
+        
+        let (flat_file, grouped_file) = {
+            let config = self.shared_config.read().await;
+            (config.execution.flat_stdsite_json_file.clone(), config.execution.grouped_stdsite_json_file.clone())
+        };
+
+        // No reason to open a database connection if nothing to write!
+        if flat_file.is_none() && grouped_file.is_none() {
+            warn!("No output paths defined for the standard site JSON file (flat or grouped)");
+            return Ok(());
+        }
+
+        let mut conn = self.pool.get_connection().await
+        .context("Could not get database connection while updating standard site JSON")?;
+
+        let infos = orm::siteinfo::SiteInfo::get_all_site_info(&mut conn).await?;
+        if let Some(p) = flat_file {
+            let json_string = orm::siteinfo::SiteInfo::to_flat_json(&infos, true)
+                .context("Error occurred while making flat standard site JSON string")?;
+            Self::write_json(&p, &json_string)
+                .context("Error occurred while writing flat standard site JSON")?;
+        }
+
+        if let Some(p) = grouped_file {
+            let json_string = orm::siteinfo::SiteInfo::to_grouped_json(&infos, true)
+                .context("Error occurred while making grouped standard site JSON string")?;
+            Self::write_json(&p, &json_string)
+                .context("Error occurred while writing grouped standard site JSON")?;
+        }
+        
+        Ok(())
+    }
+
+    fn write_json(json_file: &Path, json_string: &str) -> anyhow::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::File::create(json_file)
+            .with_context(|| format!("Could not create standard site JSON file at {}", json_file.display()))?;
+        write!(f, "{}", json_string)
+            .with_context(|| format!("Could not write to standard site JSON file {}", json_file.display()))?;
         Ok(())
     }
 }

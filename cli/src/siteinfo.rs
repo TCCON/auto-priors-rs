@@ -1,9 +1,8 @@
-use std::str::FromStr;
 use anyhow::{self, Context};
 use chrono::NaiveDate;
 use clap::{self,Args, Subcommand};
 use log::warn;
-use orm::{self, siteinfo::{SiteType, StdSite, SiteInfo, StdOutputStructure}, MySqlConn};
+use orm::{self, siteinfo::{SiteType, StdSite, SiteInfo, StdOutputStructure, JsonType}, MySqlConn};
 use sqlx::Connection;
 
 /// Manage definition of standard sites and their locations
@@ -23,24 +22,6 @@ pub enum StdSiteActions {
     DeleteInfo(DeleteInfoCli),
     PrintInfo(PrintLocsCli),
     Json(InfoJsonCli),
-}
-
-#[derive(Debug)]
-enum JsonType {
-    Flat,
-    Grouped,
-}
-
-impl FromStr for JsonType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_ref() {
-            "flat" => Ok(Self::Flat),
-            "grouped" => Ok(Self::Grouped),
-            _ => Err(format!("Unknown variant of JsonType: {s}"))
-        }
-    }
 }
 
 #[derive(Debug, Args)]

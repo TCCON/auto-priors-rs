@@ -233,9 +233,21 @@ async fn driver() -> anyhow::Result<()> {
         .run(move || {
             debug!("Scheduler: sending MakeTarballs message to StdSiteManager");
             match tx_std_site_tar.try_send(stdsitejobs::StdSiteMessage::MakeTarballs) {
-                Ok(_) => debug!("Scheduler MakeTarballs message sent"),
+                Ok(_) => debug!("Scheduler: MakeTarballs message sent"),
                 Err(TrySendError::Closed(_)) => warn!("Could not send MakeTarballs message, channel closed"),
                 Err(TrySendError::Full(_)) => warn!("Could not send MakeTarballs message, channel full"),
+            }
+        });
+
+    let tx_std_site_json = tx_std_sites.clone();
+    sync_scheduler
+        .every(timing_config.std_site_json_hours.hours())
+        .run(move || {
+            debug!("Scheduler: sending UpdateJson message to StdSiteManager");
+            match tx_std_site_json.try_send(stdsitejobs::StdSiteMessage::UpdateJson) {
+                Ok(_) => debug!("Scheduler: UpdateJson message sent"),
+                Err(TrySendError::Closed(_)) => warn!("Could not send UpdateJson message, channel closed"),
+                Err(TrySendError::Full(_)) => warn!("Could not send UpdateJson message, channel full"),
             }
         });
     // END STD SITE MANAGER SETUP //

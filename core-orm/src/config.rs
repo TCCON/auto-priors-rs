@@ -68,6 +68,8 @@ pub enum ConfigValErrorCause {
     NoncanonicalPath{description: &'static str, path: PathBuf},
     MissingPath(String),
     MissingOptPath(String),
+    MissingParentPath(String),
+    ExpectedFileNotDir(String),
     QueueSameName{q1: &'static str, q2: &'static str, name: String},
     MissingEmail(&'static str),
 }
@@ -104,6 +106,12 @@ impl Display for ConfigValErrorCause {
             },
             ConfigValErrorCause::MissingOptPath(description) => {
                 write!(f, "The {description} path does not point to a valid file; remove the option entirely to make this a None")
+            },
+            ConfigValErrorCause::MissingParentPath(description) => {
+                write!(f, "The parent directory of the {description} path does not exist, is a file, or could not be determined from the given path.")
+            },
+            ConfigValErrorCause::ExpectedFileNotDir(description) => {
+                write!(f, "The {description} path is expected to be a file (extant or not), but points to an existing directory")
             },
             ConfigValErrorCause::QueueSameName { q1, q2, name } => {
                 write!(f, "The {q1} and {q2} queues have the same name: {name}")
@@ -547,6 +555,27 @@ impl Config {
             }
         }
 
+        // Check JSON paths' parent directories exist
+        if let Some(p) = &self.execution.flat_stdsite_json_file {
+            if !p.parent().map(|p| p.exists()).unwrap_or(false) {
+                errors.push(ConfigValErrorCause::MissingParentPath("execution.flat_stdsite_json_file".to_string()));
+            }
+
+            if p.is_dir() {
+                errors.push(ConfigValErrorCause::ExpectedFileNotDir("execution.flat_stdsite_json_file".to_string()));
+            }
+        }
+
+        if let Some(p) = &self.execution.grouped_stdsite_json_file {
+            if !p.parent().map(|p| p.exists()).unwrap_or(false) {
+                errors.push(ConfigValErrorCause::MissingParentPath("execution.grouped_stdsite_json_file".to_string()));
+            }
+
+            if p.is_dir() {
+                errors.push(ConfigValErrorCause::ExpectedFileNotDir("execution.grouped_stdsite_json_file".to_string()));
+            }
+        }
+
         // Check queues
         if self.execution.submitted_job_queue == self.execution.std_site_job_queue {
             errors.push(ConfigValErrorCause::QueueSameName { 
@@ -665,6 +694,16 @@ pub struct ExecutionConfig {
     /// Which error handler to use. Note that this cannot be changed by a config reload.
     pub error_handler: ErrorHandlerChoice,
 
+    /// If given, where to write the flat version of the standard site JSON file for users to download.
+    /// If omitted, the service will not write the flat JSON file.
+    #[serde(default)]
+    pub flat_stdsite_json_file: Option<PathBuf>,
+
+    /// If given, where to write the grouped version of the standard site JSON file for users to download.
+    /// If omitted, the service will not write the grouped JSON file.
+    #[serde(default)]
+    pub grouped_stdsite_json_file: Option<PathBuf>,
+
     /// Determines maximum number of jobs allowed to run simultaneously for different work sets
     #[serde(default)]
     pub queues: HashMap<String, JobQueueOptions>,
@@ -692,6 +731,8 @@ impl Default for ExecutionConfig {
             output_path: Default::default(), 
             std_sites_tar_output: Default::default(), 
             std_sites_output_base: Default::default(),
+            flat_stdsite_json_file: Default::default(),
+            grouped_stdsite_json_file: Default::default(),
             ginput: Default::default(),
             simulate: false,
             simulation_delay: default_sim_delay(),
@@ -1020,6 +1061,11 @@ pub struct ServiceTimingOptions {
     /// Default is 8:00 am. Weekly reports are always delivered on a Monday.
     #[serde(default)]
     pub weekly_report_time: NaiveTime,
+
+    /// How frequently (in hours) to regenerate the standard site JSON files.
+    /// Note that if the paths for the JSON files are not given in the `execution`
+    /// section, they will not be generated.
+    pub std_site_json_hours: u32,
 }
 
 impl Default for ServiceTimingOptions {
@@ -1040,6 +1086,7 @@ impl Default for ServiceTimingOptions {
             disable_reports: false,
             daily_report_time: NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
             weekly_report_time: NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
+            std_site_json_hours: 1,
         }
     }
 }

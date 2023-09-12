@@ -1250,6 +1250,24 @@ impl SiteInfo {
     }
 }
 
+#[derive(Debug)]
+pub enum JsonType {
+    Flat,
+    Grouped,
+}
+
+impl FromStr for JsonType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_ref() {
+            "flat" => Ok(Self::Flat),
+            "grouped" => Ok(Self::Grouped),
+            _ => Err(format!("Unknown variant of JsonType: {s}"))
+        }
+    }
+}
+
 /// Check if a date range of a `SiteInfo` instance brackets a given date.
 fn info_brackets_date(date: NaiveDate, start_date: NaiveDate, end_date: Option<NaiveDate>) -> bool {
     if let Some(end) = end_date {
