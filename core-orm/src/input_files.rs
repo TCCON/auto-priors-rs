@@ -2,7 +2,7 @@ use std::{path::{PathBuf, Path}, ffi::OsStr, io::BufRead, str::FromStr, collecti
 
 use chrono::{NaiveDate, DateTime, Local};
 use itertools::Itertools;
-use log::{debug, info, warn};
+use log::{debug, info, warn, error};
 
 use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::{Config, BlacklistIdentifier, BlacklistEntry}, utils};
 
@@ -42,6 +42,7 @@ impl From<std::io::Error> for FailedParsingError {
     }
 }
 
+#[derive(Debug)]
 enum MissingMetError {
     CouldNotCheck(anyhow::Error),
     MissingDates(Vec<NaiveDate>)
@@ -121,6 +122,7 @@ impl InputJob {
         // was one of the problems encountered in the input file
         if let (Some(start), Some(end)) = (builder.start_date, builder.end_date) {
             if let Err(e) = check_met_available(conn, config, start, end).await {
+                error!("Error occurred while checking met file availability for input file '{}': {e:?}", input_file.display());
                 problems.push(e.to_problem());
             }
         }
