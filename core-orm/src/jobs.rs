@@ -1901,7 +1901,8 @@ fn send_job_completion_email(job: &Job, config: &Config) -> anyhow::Result<()> {
         println!("deldate");
         body.push_str(&format!("Please note that it will be deleted at {deldate}"));
     }
-
+    
+    debug!("Sending completion email to {email}");
     config.email.send_mail(&[email], None, None, &subject, &body)
         .with_context(|| format!("Failed to send email about job {} to {}", job.job_id, email))
 }

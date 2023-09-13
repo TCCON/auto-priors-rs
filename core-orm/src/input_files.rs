@@ -507,7 +507,10 @@ pub async fn add_jobs_from_input_files(
                     }
 
                     if job.confirmation {
+                        debug!("Sending confirmation email for input file {}", infile.display());
                         confirm_successful_parsing(&job, config, infile);
+                    } else {
+                        debug!("Confirmation email declined for input file {}", infile.display());
                     }
                 },
                 Err(e) => {
