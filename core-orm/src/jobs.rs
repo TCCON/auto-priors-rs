@@ -769,6 +769,21 @@ impl Job {
         Ok(jobs?)
     }
 
+    pub async fn get_jobs_for_user_submitted_after(conn: &mut MySqlConn, user: &str, submitted_after: NaiveDate) -> anyhow::Result<Vec<Job>> {
+        let jobs: Result<Vec<Job>, _> = sqlx::query_as!(
+            QJob,
+            "SELECT * FROM Jobs WHERE email = ? AND submit_time >= ?",
+            user,
+            submitted_after.and_hms_opt(0, 0, 0).unwrap()
+        ).fetch_all(conn)
+        .await?
+        .into_iter()
+        .map(|q| q.try_into())
+        .collect();
+        
+        Ok(jobs?)
+    }
+
     pub async fn summarize_active_jobs_by_submitter(conn: &mut MySqlConn) -> anyhow::Result<JobSummary> {
         let active_jobs = sqlx::query!(
             "SELECT email,COUNT(*) as num FROM Jobs WHERE state = ? OR state = ? GROUP BY email",

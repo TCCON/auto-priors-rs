@@ -17,6 +17,7 @@ pub(crate) enum JobMessage {
     StartJobs,
     RegenLut,
     CleanUpJobs,
+    SendStatusReports,
     StopGracefully,
     StopRapidly,
 }
@@ -109,7 +110,7 @@ pub(crate) struct JobManager<T: Queueable> {
     pub(crate) pool: PoolWrapper,
     pub(crate) shared_config: Arc<RwLock<Config>>,
     pub(crate) job_queues: HashMap<String, Queue<T>>,
-    pub(crate) input_file_mover: orm::input_files::InputFileMoveHandler,
+    pub(crate) input_file_mover: orm::input_files::InputFileCleanupHandler,
     pub(crate) error_handler: ErrorHandler,
     pub(crate) msg_recv: tokio::sync::mpsc::Receiver<JobMessage>
 }
@@ -152,7 +153,7 @@ impl<T: Queueable> JobManager<T> {
             pool,
             shared_config,
             job_queues: HashMap::new(), 
-            input_file_mover: orm::input_files::InputFileMoveHandler::new(),
+            input_file_mover: orm::input_files::InputFileCleanupHandler::new(),
             error_handler,
             msg_recv
         };
@@ -172,6 +173,7 @@ impl<T: Queueable> JobManager<T> {
                     JobMessage::StartJobs => self.start_jobs_entry_point().await.context("Error occurred while starting jobs"),
                     JobMessage::RegenLut => self.schedule_lut_regen().await.context("Error occurred while scheduling LUT regeneration"),
                     JobMessage::CleanUpJobs => self.clean_up_expired_jobs().await.context("Error occurred while cleaning up jobs"),
+                    JobMessage::SendStatusReports => self.scan_for_status_requests().await.context("Error occurred while handling status requests"),
                     JobMessage::StopGracefully => {
                         self.msg_recv.close();
                         self.wait_for_jobs_to_finish().await;
@@ -320,6 +322,34 @@ impl<T: Queueable> JobManager<T> {
         orm::input_files::add_jobs_from_input_files(&mut self.pool.get_connection().await?.detach(), &config, &input_files, &save_dir, &mut self.input_file_mover).await?;
 
         info!("Jobs from input files added to queue");
+        Ok(())
+    }
+
+    async fn scan_for_status_requests(&mut self) -> anyhow::Result<()> {
+        let config = self.shared_config.read().await;
+        let input_glob_pattern = &config.execution.status_request_file_pattern;
+
+        let request_files = glob::glob(input_glob_pattern)
+            .with_context(|| format!("Globbing for input files in {input_glob_pattern} failed"))?
+            .collect::<Result<Vec<_>, _>>()
+            .with_context(|| format!("Error collecting input files in {input_glob_pattern}"))?;
+
+        if request_files.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.pool.get_connection()
+            .await
+            .context("Error occurred while trying to get a database connection to send status reports")?;
+
+        if let Err(errors) = orm::input_files::send_status_reports(&mut conn, &config, request_files, &mut self.input_file_mover).await {
+            // Because this can return a list of errors and there isn't a clean way to really transform those into a single
+            // error, we'll just handle them here.
+            for err in errors {
+                self.error_handler.report_error(err.as_ref());
+            }
+        }
+
         Ok(())
     }
 

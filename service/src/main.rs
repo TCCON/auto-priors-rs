@@ -153,6 +153,19 @@ async fn driver() -> anyhow::Result<()> {
     if let Some(at) = timing_config.lut_regen_at {
         lut_job.at_time(at);
     }
+
+    info!("Setting up job status request handling");
+    let tx_job_status_request = tx_jobs.clone();
+    sync_scheduler
+        .every(timing_config.status_report_seconds.seconds())
+        .run(move || {
+            debug!("Scheduler: sending SendStatusReports message");
+            match tx_job_status_request.try_send(jobs::JobMessage::SendStatusReports) {
+                Ok(_) => (),
+                Err(TrySendError::Closed(_)) => warn!("Could not send SendStatusReports message, channel closed"),
+                Err(TrySendError::Full(_)) => warn!("Could not send SendStatusReports message, channel full"),
+            }
+        });
     
     // END JOB MANAGER SETUP //
 

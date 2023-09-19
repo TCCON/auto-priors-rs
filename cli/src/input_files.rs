@@ -27,6 +27,6 @@ pub struct ParseInputFilesManualCli {
 
 
 pub async fn add_jobs_from_input_files_cli(conn: &mut MySqlConn, clargs: ParseInputFilesManualCli, config: &orm::config::Config) -> anyhow::Result<()> {
-    let mut mover = orm::input_files::InputFileMoveHandler::new();
+    let mut mover = orm::input_files::InputFileCleanupHandler::new();
     orm::input_files::add_jobs_from_input_files(conn, config, &clargs.input_files, &config.execution.output_path, &mut mover).await
 }

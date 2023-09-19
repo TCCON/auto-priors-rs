@@ -651,6 +651,9 @@ pub struct ExecutionConfig {
     /// Full glob pattern (including directory) to use to find input files
     pub input_file_pattern: String,
 
+    /// Full glob pattern (including directory) to use to find status request files
+    pub status_request_file_pattern: String,
+
     /// Directory to which successfully parsed input files go
     pub success_input_file_dir: PathBuf,
 
@@ -724,6 +727,7 @@ impl Default for ExecutionConfig {
             max_numpy_threads: 2, 
             hours_to_keep: 168,
             input_file_pattern: "input_file_2020*.txt".to_owned(),
+            status_request_file_pattern: "ginput_status*.txt".to_owned(),
             success_input_file_dir: PathBuf::from("."),
             failure_input_file_dir: PathBuf::from("."),
             ftp_download_server: Url::parse(&format!("ftp://{host}/")).unwrap_or_else(|_| Url::parse("ftp://localhost/").unwrap()), 
@@ -1013,6 +1017,9 @@ pub struct ServiceTimingOptions {
     /// the attempts run on even multiples of this value.
     pub job_start_seconds: u32,
 
+    /// How many seconds between scans for status reports
+    pub status_report_seconds: u32,
+
     /// How frequently (in days) to insert jobs to regenerate the stratosphere
     /// look up tables for ginput. 
     pub lut_regen_days: u32,
@@ -1075,6 +1082,7 @@ impl Default for ServiceTimingOptions {
             met_download_hours: 6, 
             disable_job: false,
             job_start_seconds: 60, 
+            status_report_seconds: 60,
             lut_regen_days: 24, 
             lut_regen_at: NaiveTime::from_hms_opt(0, 0, 0),
             delete_expired_jobs_minutes: 12,

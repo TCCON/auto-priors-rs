@@ -1,6 +1,7 @@
-use std::{path::{PathBuf, Path}, ffi::OsStr, io::BufRead, str::FromStr, collections::HashSet, fmt::Display};
+use std::{path::{PathBuf, Path}, ffi::OsStr, io::{BufRead, Read}, str::FromStr, collections::HashSet, fmt::Display};
 
-use chrono::{NaiveDate, DateTime, Local};
+use anyhow::Context;
+use chrono::{NaiveDate, DateTime, Local, Duration};
 use itertools::Itertools;
 use log::{debug, info, warn, error};
 
@@ -417,7 +418,7 @@ pub async fn add_jobs_from_input_files(
     config: &Config,
     input_files: &[PathBuf],
     save_dir: &Path,
-    mover: &mut InputFileMoveHandler
+    mover: &mut InputFileCleanupHandler
 ) -> anyhow::Result<()> {
     let mut jobs = vec![];
     let mut successful_input_files = vec![];
@@ -449,7 +450,7 @@ pub async fn add_jobs_from_input_files(
                 let dest_file = config.execution.failure_input_file_dir.join(
                     format!("failed_input_file_{}.txt", now.format("%Y-%m-%d %H:%M:%S.%f"))
                 );
-                if let Err(e) = mover.move_file(&input_file, &dest_file) {
+                if let Err(e) = mover.move_file(&input_file, Some(&dest_file)) {
                     unmoved_input_file_errors.push(e);
                 }
             }
@@ -470,7 +471,7 @@ pub async fn add_jobs_from_input_files(
                 format!("blacklisted_input_file_{}.txt", chrono::Local::now())
             );
 
-            if let Err(e) = mover.move_file(&infile, &dest_file) {
+            if let Err(e) = mover.move_file(&infile, Some(&dest_file)) {
                 unmoved_input_file_errors.push(e);
             }
         } else {
@@ -502,7 +503,7 @@ pub async fn add_jobs_from_input_files(
                         format!("job_{new_id:09}_input_file.txt")
                     );
 
-                    if let Err(e) = mover.move_file(&infile, &dest_file) {
+                    if let Err(e) = mover.move_file(&infile, Some(&dest_file)) {
                         unmoved_input_file_errors.push(e);
                     }
 
@@ -610,6 +611,66 @@ fn handle_blacklisted_input(blacklist_entry: &BlacklistEntry, submitter_email: &
         .unwrap_or_else(|e| warn!("Failed to send blacklist email to {submitter_email}, error was: {e:?}"));
 }
 
+pub async fn send_status_reports(
+    conn: &mut crate::MySqlConn,
+    config: &Config,
+    request_files: Vec<PathBuf>, 
+    deleter: &mut InputFileCleanupHandler
+) -> Result<(), Vec<anyhow::Error>> {
+    let mut errors = vec![];
+
+    for file in request_files {
+        let res = match std::fs::File::open(&file) {
+            Ok(f) => handle_status_request(conn, config, f).await,
+            Err(e) => Err(anyhow::Error::from(e)),
+        }.with_context(|| format!("Error occurred on status request file {}", file.display()));
+
+        if let Err(e) = res {
+            errors.push(e);
+        }
+
+        if let Err(e) = deleter.move_file(&file, None) {
+            errors.push(anyhow::anyhow!("Failed to delete status request file {}, error was: {e}", file.display()));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+async fn handle_status_request(conn: &mut crate::MySqlConn, config: &Config, mut request: std::fs::File) -> anyhow::Result<()> {
+    use std::fmt::Write;
+    
+    let mut buf = String::new();
+    request.read_to_string(&mut buf)?;
+    let buf = buf.trim();
+
+    let sub_date = Local::now().date_naive() - Duration::days(31);
+
+    let jobs = crate::jobs::Job::get_jobs_for_user_submitted_after(
+        conn, &buf, sub_date
+    ).await?;
+
+    let job_report = if jobs.is_empty() {
+        format!("There were no jobs submitted by {buf} in the last 31 days.")
+    } else {
+        let mut report = format!("There were {} job(s) submitted by {buf} in the last 31 days:\n", jobs.len());
+        for j in jobs {
+            writeln!(&mut report, "  - {}: state = {}", j.to_long_string(), j.state)?;
+        }
+        report
+    };
+
+    let subject = "AutoModMaker job report";
+
+    config.email.send_mail(&[&buf], None, None, subject, &job_report)?;
+
+    Ok(())
+}
+
 async fn check_met_available(conn: &mut crate::MySqlConn, config: &Config, start_date: NaiveDate, end_date: NaiveDate) -> Result<(), MissingMetError> {
     let mut missing_dates = vec![];
     let mut unsupported_dates = vec![];
@@ -641,12 +702,12 @@ async fn check_met_available(conn: &mut crate::MySqlConn, config: &Config, start
 }
 
 #[derive(Debug)]
-pub struct InputFileMoveHandler {
+pub struct InputFileCleanupHandler {
     last_clear_time: DateTime<Local>,
     errored_files: HashSet<PathBuf>
 }
 
-impl InputFileMoveHandler {
+impl InputFileCleanupHandler {
     pub fn new() -> Self {
         Self { last_clear_time: Local::now(), errored_files: HashSet::new() }
     }
@@ -658,13 +719,15 @@ impl InputFileMoveHandler {
 
     /// Move `from_file` into the directory `to_dir`
     /// 
+    /// Pass `None` as `to_dir` to only try deleting the file instead.
+    /// 
     /// # Returns
     /// - `Ok(true)` if the move succeeded
     /// - `Ok(false)` if the move failed, but removing the file failed recently
     /// - `Err(e)` if this is the first time moving this file has failed recently
     /// 
     /// This is intended to help avoid spamming the admin emails if a file cannot be deleted.
-    fn move_file(&mut self, from_file: &Path, to_file: &Path) -> anyhow::Result<bool> {
+    fn move_file(&mut self, from_file: &Path, to_file: Option<&Path>) -> anyhow::Result<bool> {
         let now = Local::now();
         // Clear the cache of failed files every 3 days. That keeps it from getting too large (hopefully)
         // but gives time to respond to emails about failed file removals.
@@ -688,8 +751,12 @@ impl InputFileMoveHandler {
         }
     }
 
-    fn move_file_inner<'p>(from_file: &'p Path, to_file: &Path) -> InputFileMoveError<'p> {
-        let res_copy = std::fs::copy(from_file, to_file);
+    fn move_file_inner<'p>(from_file: &'p Path, to_file: Option<&Path>) -> InputFileMoveError<'p> {
+        let res_copy = if let Some(to) = to_file {
+            std::fs::copy(from_file, to)
+        } else {
+            Ok(0)
+        };
         let res_rm = std::fs::remove_file(from_file);
 
         if let (Err(e_cp), Err(e_rm)) = (&res_copy, &res_rm) {
