@@ -2,14 +2,15 @@ from argparse import ArgumentParser
 from datetime import datetime
 import enum
 import json
+from pathlib import Path
+import re
+from subprocess import run
 import sqlalchemy as db
-from sqlalchemy import orm, sql, func
+from sqlalchemy import orm, sql
 
 BaseSqlite = orm.declarative_base()
 BaseSql = orm.declarative_base()
 
-# TODO: Jobs table (simple mapping between sqlite3 and sql)
-# TODO: StdSites table (more complex, needs to be split and reorganized)
 
 # https://docs.sqlalchemy.org/en/14/tutorial/metadata.html#declaring-mapped-classes
 class GeosPathsSqlite(BaseSqlite):
@@ -70,8 +71,20 @@ class MetFilesSql(BaseSql):
         return f'MetFilesSql(file_id = {self.file_id}, file_path = {self.file_path}, product = {self.product}, filedate = {self.filedate}, levels = {self.levels}, type = {self.data_type})'
 
     @classmethod
-    def from_sqlite(cls, obj):
-        return cls(file_id=obj.file_id, file_path=obj.path, product=obj.product, filedate=obj.filedate, levels=obj.levels, data_type=obj.type)
+    def from_sqlite(cls, obj, unknown_products=set()):
+        if obj.product == 'fpit':
+            product = 'geosfpit'
+        elif product not in unknown_products:
+            product = obj.product
+            unknown_products.add(product)
+            print(f'WARNING: unknown product {product}, double check that it is recognized by AutoModRust')
+        else:
+            product = obj.product
+
+        return cls(file_id=obj.file_id, file_path=obj.path, product=product, filedate=obj.filedate, levels=obj.levels, data_type=obj.type)
+
+
+_map_type_mapping = {'none': 'None', 'text': 'Text', 'netcdf': 'NetCDF'}
 
 
 class JobsSqlite(BaseSqlite):
@@ -110,6 +123,7 @@ class JobsSql(BaseSql):
     email = db.Column(db.String(64))
     delete_time = db.Column(db.DateTime)
     priority = db.Column(db.Integer)
+    queue = db.Column(db.String(32))
     save_dir = db.Column(db.Text)
     save_tarball = db.Column(db.Integer)
     mod_fmt = db.Column(db.String(8))
@@ -125,9 +139,27 @@ class JobsSql(BaseSql):
         lat = cls._convert_latlon(obj.lat)
         lon = cls._convert_latlon(obj.lon)
         site_id, lat, lon = cls._match_lengths(site_id, lat, lon)
+
+        mod_fmt = obj.mod_fmt.capitalize()
+        vmr_fmt = obj.vmr_fmt.capitalize()
+        map_fmt = _map_type_mapping[obj.map_fmt]
+
+        if obj.email is None and all(x is None for x in lon):
+            queue = 'std-sites'
+        else:
+            queue = 'submitted'
+
+        if obj.delete_time == datetime(9999, 12, 31, 23, 59, 59):
+            delete_time = None
+        else:
+            delete_time = obj.delete_time
+
+        # met_key and ginput_key are both NULL in the test so far (meaning use the default met/ginput for those dates)
+        # so we should not need to set them, in theory.
+
         return cls(job_id=obj.job_id, state=obj.state, site_id=site_id, start_date=obj.start_date, end_date=obj.end_date,
-                   lat=lat, lon=lon, email=obj.email, delete_time=obj.delete_time, priority=obj.priority, save_dir=obj.save_dir,
-                   save_tarball=obj.save_tarball, mod_fmt=obj.mod_fmt, map_fmt=obj.map_fmt, vmr_fmt=obj.vmr_fmt, submit_time=obj.submit_time,
+                   lat=lat, lon=lon, email=obj.email, delete_time=delete_time, priority=obj.priority, queue=queue, save_dir=obj.save_dir,
+                   save_tarball=obj.save_tarball, mod_fmt=mod_fmt, map_fmt=map_fmt, vmr_fmt=vmr_fmt, submit_time=obj.submit_time,
                    complete_time=obj.complete_time, output_file=obj.output_file)
 
     @staticmethod
@@ -171,12 +203,24 @@ class SiteTypeEnum(enum.Enum):
     EM27 = 3
 
 
+class StdOutputStructure(enum.Enum):
+    FlatModVmr = 1
+    FlatAll = 2
+    FlatAllMapNc = 3
+    TreeModVmr = 4
+    TreeAll = 5
+    TreeAllMapNc = 6
+
+
+
 class StdSiteSql(BaseSql):
     __tablename__ = 'StdSiteList'
 
     id = db.Column(db.Integer, primary_key=True)
     site_id = db.Column(db.String(2))
+    name = db.Column(db.String(32))
     site_type = db.Column(db.Enum(SiteTypeEnum))
+    output_structure = db.Column(db.Enum(StdOutputStructure))
 
 
 class StdSiteJob(BaseSql):
@@ -187,6 +231,7 @@ class StdSiteJob(BaseSql):
     date = db.Column(db.Date)
     state = db.Column(db.Integer)
     job = db.Column(db.Integer)
+    tarfile = db.Column(db.Text)
 
     def __repr__(self) -> str:
         return f'StdSiteJob({self.site} {self.date}: job {self.job}, state {self.state}'
@@ -197,7 +242,6 @@ class StdSiteInfoSql(BaseSql):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     site = db.Column(db.Integer)
-    name = db.Column(db.String(32))
     location = db.Column(db.String(64))
     latitude = db.Column(db.Float)
     longitude = db.Column(db.Float)
@@ -206,20 +250,52 @@ class StdSiteInfoSql(BaseSql):
     comment = db.Column(db.Text)
 
 
-def migrate(sqlite_db, sql_db, sql_user, sql_pw, host='localhost', sites_json=None):
+def migrate(sites_json, sqlite_db, sql_db=None, sql_user=None, sql_pw=None, host='localhost', dotenv_file=None, reset_database=False):
+    if dotenv_file is not None:
+        mysql_url = _get_mysql_dotenv_url(dotenv_file)
+    elif sql_db is None or sql_user is None or sql_pw is None:
+        raise TypeError('dotenv_file or all of sql_db, sql_user, and sql_pw are required')
+    else:
+        mysql_url = f'mysql://{sql_user}:{sql_pw}@{host}/{sql_db}?charset=utf8mb4'
+
+    if reset_database:
+        # cargo doesn't get the URL with the charset thing added normally
+        _reset_db_with_cargo(mysql_url.split('?', maxsplit=1)[0])
+
     print('Copying')
     print(f'sqlite:///{sqlite_db}')
     print('to')
-    print(f'mysql://{sql_user}:********@{host}/{sql_db}?charset=utf8mb4')
+    print(_obscure_pw(mysql_url))
     # The utf8mb4 is required to handle all unicode characters, see https://docs.sqlalchemy.org/en/14/dialects/mysql.html#charset-selection
     sqlite_engine = db.create_engine(f'sqlite:///{sqlite_db}', future=True)
-    mysql_engine = db.create_engine(f'mysql://{sql_user}:{sql_pw}@{host}/{sql_db}?charset=utf8mb4', future=True)
+    mysql_engine = db.create_engine(mysql_url, future=True)
+    add_site_ids(mysql_engine, sites_json)
+    add_site_info(mysql_engine, sites_json)
     migrate_table(sqlite_engine, mysql_engine, GeosPathsSqlite, GeosPathsSql)
     migrate_table(sqlite_engine, mysql_engine, GeosFilesSqlite, MetFilesSql)
     migrate_table(sqlite_engine, mysql_engine, JobsSqlite, JobsSql)
     migrate_std_sites(sqlite_engine, mysql_engine)
-    if sites_json:
-        add_site_info(mysql_engine, sites_json)
+
+def _get_mysql_dotenv_url(dotenv_file):
+    with open(dotenv_file) as f:
+        for line in f:
+            if line.startswith('DATABASE_URL'):
+                url = line.split('=')[1].strip().strip('"')
+                return f'{url}?charset=utf8mb4'
+            
+    raise IOError('Missing DATABASE_URL in dotenv file')
+
+
+def _obscure_pw(mysql_url):
+    return re.sub(r':\w+@', ':********@', mysql_url)
+
+
+def _reset_db_with_cargo(db_url):
+    print(f'Resetting SQL database at {_obscure_pw(db_url)}')
+    working_dir = Path(__file__).absolute().parent.parent.as_posix()
+    run(['cargo', 'sqlx', 'database', 'drop', '-y', '--database-url', db_url], cwd=working_dir)
+    run(['cargo', 'sqlx', 'database', 'create', '--database-url', db_url], cwd=working_dir)
+    run(['cargo', 'sqlx', 'migrate', 'run', '--database-url', db_url, '--source', './core-orm/migrations'], cwd=working_dir)
 
 
 def migrate_table(sqlite_engine, mysql_engine, sqlite_cls, sql_cls):
@@ -247,43 +323,81 @@ def migrate_std_sites(sqlite_engine, mysql_engine):
         sites = sorted([m.key for m in table.columns if len(m.key) == 2 and m.key not in StdSiteSqlite.__table__.columns.keys()])
     
     site_mapping = dict()
-    with orm.Session(mysql_engine) as s_mysql:
-        s_mysql.execute(db.delete(StdSiteJob))
-        s_mysql.execute(db.delete(StdSiteSql))
-        for i, site in enumerate(sites, start=1):
-            o = StdSiteSql(id=i, site_id=site, site_type=SiteTypeEnum.TCCON)
-            s_mysql.add(o)
-            site_mapping[site] = i
-
-        s_mysql.commit()
 
     with orm.Session(sqlite_engine) as s_lite, orm.Session(mysql_engine) as s_mysql:
+        s_mysql.execute(db.delete(StdSiteJob))
+        for site in sites:
+            stmt = db.select(StdSiteSql).where(StdSiteSql.site_id == site)
+            result = s_mysql.execute(stmt).scalar()
+            site_mapping[site] = result.id
+
         # My sqlite3 StdSites table has some duplicate rows. I'm sure we could come up with clever
         # SQL to select the entire rows with the most recent job, but getting the ORM to return
         # arbitrary columns is difficult.
         #
-        # TODO: properly, we should actually check against the job table to make sure which job produced
-        # which sites, since these duplicates are probably backfilling.
-        q = s_lite.query(StdSiteSqlite, func.max(StdSiteSqlite.job_id)).group_by(StdSiteSqlite.date)
-        jobs_to_include = set(r[1] for r in q)
-
-        result = s_lite.execute(sql.text('SELECT * FROM StdSites'))
-        
+        # There will be some inaccuracy in job IDs, since if a day had some sites filled in later,
+        # the row's job ID will only be for the latest run for that day.
+        #
+        # If a day isn't completed in the old sqlite table, then we probably shouldn't copy it and just
+        # let the Rust automation catch up eventually. Also, in my test case, the only day states were 0 and 2,
+        # and the 0s looked like backfilled days that got missed somehow.
+        result = s_lite.execute(sql.text('SELECT * FROM StdSites WHERE day_state != 0'))
+        dates = set()
         for i, row in enumerate(result, start=1):
-            if row['job_id'] not in jobs_to_include:
-                print(f'Skipping row {i}, another row has a more recent job for the same date')
-                continue
+            # Really this shouldn't trigger any more, selecting only rows with day_state != 0 should solve this.
+            if row['date'] in dates:
+                raise NotImplementedError('Duplicate date in std sites table')
+        
 
             print(f'\rCopying row {i} from StdSites', end='')
+            dates.add(row['date'])
+            date_obj = datetime.strptime(row['date'], '%Y-%m-%d %H:%M:%S')
             site_states = []
+            day_state = row['day_state']
             for site in sites:
-                site_fk = site_mapping[site]
-                state = row[site]
-                job_id = row['job_id'] if state >= 0 else None
-                site_states.append(StdSiteJob(site=site_fk, date=row['date'], job=job_id, state=state))
+                site_foreign_key = site_mapping[site]
+                site_state = row[site]
+                state, do_add = _map_old_std_site_states_to_new(day_state, site_state)
+                if do_add:
+                    job_id = row['job_id'] if state >= 0 else None
+                    # state == 2 means complete in the new scheme, that's the only state that should have an output tarfile
+                    assumed_tarfile = f'/oco2-data/tccon/ftp/ginput-std-sites/tarballs/{site}/{site}_ggg_inputs_{date_obj:%Y%m%d}.tgz' if state == 2 else None
+                    site_states.append(StdSiteJob(site=site_foreign_key, date=row['date'], job=job_id, state=state, tarfile=assumed_tarfile))
             s_mysql.add_all(site_states)
             s_mysql.commit()
         print('\nDone.')
+
+
+def _map_old_std_site_states_to_new(day_state, site_state):
+    if day_state != 2:
+        raise NotImplementedError('day_state != 2')
+    
+    if site_state == 0:
+        return 0, True  # old pending assumed to be the same as new JobNeeded
+    elif site_state == 1:
+        return 2, True  # old complete assumed to be the new Complete
+    elif site_state == -1:
+        return -3, False  # old nonop, don't add to the table
+    else:
+        raise NotImplementedError(f'site_state = {site_state}')
+
+
+def add_site_ids(sql_engine, site_json):
+    with open(site_json) as f:
+        site_info = json.load(f)
+
+    # Collapse this into a dictionary so that we have one entry per site - 
+    # assume that the name will not change over time, since the old ginput
+    # dictionary didn't allow for that.
+    site_info = {i['site_id']: i for i in site_info}
+
+    with orm.Session(sql_engine) as s_mysql:
+        for sid, info in site_info.items():
+            # The old ginput sites should be all TCCON, so they should all use the flat mod & vmr only output structure
+            new_site = StdSiteSql(site_id=sid, name=info['name'], site_type=SiteTypeEnum.TCCON, output_structure=StdOutputStructure.FlatModVmr)
+            s_mysql.add(new_site)
+
+        s_mysql.commit()
 
 
 def add_site_info(sql_engine, site_json):
@@ -292,14 +406,17 @@ def add_site_info(sql_engine, site_json):
 
     with orm.Session(sql_engine) as s_mysql:
         for info in site_info:
-            stmt = db.select(StdSiteSql).where(StdSiteSql.site_id == info.pop('site_id'))
+            stmt = db.select(StdSiteSql).where(StdSiteSql.site_id == info['site_id'])
             result = s_mysql.execute(stmt).scalar()
-            info['site'] = result.id
-            info['start_date'] = datetime.strptime(info['start_date'], '%Y-%m-%d').date()
-            info['end_date'] = None if info['end_date'] is None else datetime.strptime(info['end_date'], '%Y-%m-%d').date()
-            if info.get('comment') is None:
-                info['comment'] = ''
-            new_info = StdSiteInfoSql(**info)
+            new_info = StdSiteInfoSql(
+                site=result.id,
+                location=info['location'],
+                latitude=info['latitude'],
+                longitude=info['longitude'],
+                start_date = datetime.strptime(info['start_date'], '%Y-%m-%d').date(),
+                end_date = None if info['end_date'] is None else datetime.strptime(info['end_date'], '%Y-%m-%d').date(),
+                comment=info.get('comment', '')
+            )
             s_mysql.add(new_info)
         s_mysql.commit()
 
@@ -307,11 +424,13 @@ def add_site_info(sql_engine, site_json):
 def main():
     p = ArgumentParser('Migrate an AutoModPython sqlite3 database to MySQL')
     p.add_argument('--host', default='localhost', help='The host that the MySQL database resides on. Default is %(default)s.')
+    p.add_argument('--reset-database', action='store_true', help='Call cargo sqlx to reset the database to a clean state.')
+    p.add_argument('--dotenv-file', help='If given, read the MySQL URL from the DATABASE_URL line in this file. This removes the need for the sql_* positional and --host arguments.')
+    p.add_argument('sites_json', help='Flat JSON of TCCON site locations')
     p.add_argument('sqlite_db', help='Path to the sqlite3 file')
-    p.add_argument('sql_db', help='Name of the MySQL database')
-    p.add_argument('sql_user', help='MySQL username')
-    p.add_argument('sql_pw', help='MySQL password')
-    p.add_argument('sites_json', nargs='?', help='Optional flat JSON of TCCON site locations')
+    p.add_argument('sql_db', nargs='?', help='Name of the MySQL database')
+    p.add_argument('sql_user', nargs='?', help='MySQL username')
+    p.add_argument('sql_pw', nargs='?', help='MySQL password')
 
     clargs = vars(p.parse_args())
     migrate(**clargs)
