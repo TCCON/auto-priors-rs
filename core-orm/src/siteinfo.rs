@@ -72,11 +72,18 @@ impl Display for SiteType {
 #[derive(Debug, Type, Clone, Copy)]
 #[repr(i8)]  // NB: SQL enums start at 1
 pub enum StdOutputStructure {
+    /// Store only the `.mod` and `.vmr` files in a flat tarball (no directory structure)
     FlatModVmr = 1,
+    /// Store the `.mod`, `.vmr`, and text `.map` files in a flat tarball
     FlatAll = 2,
+    /// Store the `.mod`, `.vmr`, and netCDF `.map.nc` files in a flat tarball
     FlatAllMapNc = 3,
+    /// Store only the `.mod` and `.vmr` files in a tarball that retains the ginput output structure
+    /// (`job/met_product/site_id/file_type`)
     TreeModVmr = 4,
+    /// Store the `.mod`, `.vmr`, and text `.map` files in a tarball that retains the ginput output structure
     TreeAll = 5,
+    /// Store the `.mod`, `.vmr`, and netCDF `.map.nc` files in a tarball that retains the ginput output structure
     TreeAllMapNc = 6
 }
 
@@ -116,7 +123,35 @@ impl Display for StdOutputStructure {
 }
 
 impl StdOutputStructure {
-    pub fn make_std_site_tarball(&self, root_save_dir: &Path, site_id: &str, job: &Job, config: &crate::config::Config) -> anyhow::Result<PathBuf> {
+    /// Create a tarball of output files based on the variant of this enum.
+    /// 
+    /// See the enum help for descriptions of each structure.
+    /// 
+    /// # Inputs
+    /// 
+    /// - `root_save_dir`: top level directory; the tarballs will be saved in subdirectories
+    /// of this one named by site ID. The tarballs themselves will be named `{site_id}_ggg_inputs_{date}.tgz`
+    /// where `{site_id}` is the `site_id` value and `{date}` is the UTC date that the contained files are for,
+    /// in YYYYMMDD format. This root directory must exist, but the per-site subdirectories will be created as needed.
+    /// 
+    /// - `site_id`: the two letter site ID that these priors are for (used to get the right files, name the output subdirectory,
+    ///   and name the tarballs).
+    /// 
+    /// - `job`: reference to the [`Job`] instance that produced the files to tar.
+    /// 
+    /// - `config`: reference to the global configuration.
+    /// 
+    /// # Returns
+    /// 
+    /// A vector of paths to the output tarballs (one per date).
+    /// 
+    /// # Errors
+    /// 
+    /// - if `root_save_dir` is not a directory,
+    /// - if trying to create the site subdirectory fails,
+    /// - if identifying the files to go into the tarball fails (due to an I/O or database error),
+    /// - if writing the tarball fails.
+    pub fn make_std_site_tarball(&self, root_save_dir: &Path, site_id: &str, job: &Job, config: &crate::config::Config) -> anyhow::Result<Vec<PathBuf>> {
         if !root_save_dir.is_dir() {
             anyhow::bail!("root_save_dir must be a preexisting directory");
         }
@@ -127,32 +162,38 @@ impl StdOutputStructure {
                 .with_context(|| format!("Error occurred while trying to create standard site save directory for site {site_id}"))?;
         }
 
-        let tarball = site_save_dir.join(format!("{site_id}_ggg_inputs_{}.tgz", job.start_date.format("%Y%m%d")));
+        let mut tarball_files = vec![];
 
-        let files_for_tarball = self.get_files_for_tarball(job, Some(site_id), config)?;
+        for date in crate::utils::DateIterator::new_one_range(job.start_date, job.end_date) {
+            let tarball = site_save_dir.join(format!("{site_id}_ggg_inputs_{}.tgz", date.format("%Y%m%d")));
 
-        // Clever combination of tar archive builder and gzip compressor taken from
-        // https://stackoverflow.com/a/46521163
-        let tgz_file = std::fs::File::create(&tarball)
-            .with_context(|| format!("Error occurred trying to create the initial .tgz file for job {}", job.job_id))?;
-        let encoder = flate2::write::GzEncoder::new(tgz_file, flate2::Compression::default());
-        let mut archive = tar::Builder::new(encoder);
+            let files_for_tarball = self.get_files_for_tarball(job, Some(site_id), config, date)?;
 
-        for (src, dest) in files_for_tarball {
-            archive.append_path_with_name(src, dest)?;
+            // Clever combination of tar archive builder and gzip compressor taken from
+            // https://stackoverflow.com/a/46521163
+            let tgz_file = std::fs::File::create(&tarball)
+                .with_context(|| format!("Error occurred trying to create the initial .tgz file for job {}", job.job_id))?;
+            let encoder = flate2::write::GzEncoder::new(tgz_file, flate2::Compression::default());
+            let mut archive = tar::Builder::new(encoder);
+
+            for (src, dest) in files_for_tarball {
+                archive.append_path_with_name(src, dest)?;
+            }
+
+            let encoder = archive.into_inner()
+                .with_context(|| format!("Error occurred while trying to finalize tar archive for job {}", job.job_id))?;
+
+            // Unsure if this is needed, but doesn't seem to hurt
+            encoder.finish()
+                .with_context(|| format!("Error occurred while trying to finalize the gzip compression for job {}", job.job_id))?;
+
+            tarball_files.push(tarball);
         }
-
-        let encoder = archive.into_inner()
-            .with_context(|| format!("Error occurred while trying to finalize tar archive for job {}", job.job_id))?;
-
-        // Unsure if this is needed, but doesn't seem to hurt
-        encoder.finish()
-            .with_context(|| format!("Error occurred while trying to finalize the gzip compression for job {}", job.job_id))?;
         
-        Ok(tarball)
+        Ok(tarball_files)
     }
 
-    pub fn get_files_for_tarball(&self, job: &Job, site_id: Option<&str>, config: &crate::config::Config) -> anyhow::Result<Vec<(PathBuf, PathBuf)>> {
+    pub fn get_files_for_tarball(&self, job: &Job, site_id: Option<&str>, config: &crate::config::Config, date: NaiveDate) -> anyhow::Result<Vec<(PathBuf, PathBuf)>> {
         let site_ids = if let Some(sid) = site_id {
             vec![sid]
         } else {
@@ -165,6 +206,7 @@ impl StdOutputStructure {
                     job,
                     &site_ids,
                     config,
+                    date,
                     true, true, false, false
                 )
             },
@@ -174,6 +216,7 @@ impl StdOutputStructure {
                     job,
                     &site_ids,
                     config,
+                    date,
                     true, true, true, false
                 )
             },
@@ -183,6 +226,7 @@ impl StdOutputStructure {
                     job,
                     &site_ids,
                     config,
+                    date,
                     true, true, false, true
                 )
             },
@@ -192,6 +236,7 @@ impl StdOutputStructure {
                     job,
                     &site_ids,
                     config,
+                    date,
                     true, true, false, false
                 )
             },
@@ -201,6 +246,7 @@ impl StdOutputStructure {
                     job,
                     &site_ids,
                     config,
+                    date,
                     true, true, true, false
                 )
             },
@@ -210,16 +256,21 @@ impl StdOutputStructure {
                     job,
                     &site_ids,
                     config,
+                    date,
                     true, true, false, true
                 )
             },
         }
     }
 
-    fn get_files<F>(getter_fxn: F, job: &Job, site_ids: &[&str], config: &crate::config::Config, mod_files: bool, vmr_files: bool, map_files: bool, map_nc_files: bool) -> anyhow::Result<Vec<(PathBuf, PathBuf)>>
+    fn get_files<F>(getter_fxn: F, job: &Job, site_ids: &[&str], config: &crate::config::Config, date: NaiveDate, mod_files: bool, vmr_files: bool, map_files: bool, map_nc_files: bool) -> anyhow::Result<Vec<(PathBuf, PathBuf)>>
     where F: Fn(&mut Vec<(PathBuf, PathBuf)>, glob::Paths) -> anyhow::Result<()> 
     {
         let mut files = vec![];
+        // All the files *should* have YYYYMMDDHHZ in their names, so globbing for {date}??Z should get only files for the 
+        // desired date.
+        let date = date.format("%Y%m%d");
+
         for &sid in site_ids {
             if mod_files {
                 let mod_dirs = job.mod_output_dir(sid, config)?;
@@ -227,7 +278,7 @@ impl StdOutputStructure {
                     if !mod_dir.exists() {
                         anyhow::bail!(".mod output directory ({}) does not exist for site {sid} in job #{}", mod_dir.display(), job.job_id);
                     }
-                    let mod_glob = glob::glob(&mod_dir.join("*.mod").to_string_lossy())
+                    let mod_glob = glob::glob(&mod_dir.join(format!("*{date}??Z*.mod")).to_string_lossy())
                         .context("Error occurred while trying to make the glob pattern for .mod files")?;
 
                     getter_fxn(&mut files, mod_glob)
@@ -241,7 +292,7 @@ impl StdOutputStructure {
                     if !vmr_dir.exists() {
                         anyhow::bail!(".vmr output directory ({}) does not exist for site {sid} in job #{}", vmr_dir.display(), job.job_id);
                     }
-                    let vmr_glob = glob::glob(&vmr_dir.join("*.vmr").to_string_lossy())
+                    let vmr_glob = glob::glob(&vmr_dir.join(format!("*{date}??Z*.vmr")).to_string_lossy())
                         .context("Error occurred while trying to make the glob pattern for .vmr files")?;
 
                     getter_fxn(&mut files, vmr_glob)
@@ -255,7 +306,7 @@ impl StdOutputStructure {
                     if !map_dir.exists() {
                         anyhow::bail!(".map output directory ({}) does not exist for site {sid} in job #{}", map_dir.display(), job.job_id);
                     }
-                    let map_glob = glob::glob(&map_dir.join("*.map").to_string_lossy())
+                    let map_glob = glob::glob(&map_dir.join(format!("*{date}??Z*.map")).to_string_lossy())
                         .context("Error occurred while trying to make the glob pattern for .map files")?;
 
                     getter_fxn(&mut files, map_glob)
@@ -269,7 +320,7 @@ impl StdOutputStructure {
                     if !map_dir.exists() {
                         anyhow::bail!(".map output directory ({}) does not exist for site {sid} in job #{}", map_dir.display(), job.job_id);
                     }
-                    let map_glob = glob::glob(&map_dir.join("*.map.nc").to_string_lossy())
+                    let map_glob = glob::glob(&map_dir.join(format!("*{date}??Z*.map.nc")).to_string_lossy())
                         .context("Error occurred while trying to make the glob pattern for .mod files")?;
 
                     getter_fxn(&mut files, map_glob)

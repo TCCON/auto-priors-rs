@@ -1228,6 +1228,47 @@ impl Job {
         Ok(new_id as i32)
     }
 
+    /// Add a job with extra options, such as the met key and ginput key.
+    /// 
+    /// Note that this DOES NOT check that the values of met_key and ginput_key are valid.
+    pub async fn add_job_from_args_with_options(
+        conn: &mut MySqlConn,
+        site_id: Vec<String>,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        save_dir: PathBuf,
+        email: Option<String>,
+        lat: Vec<Option<f32>>,
+        lon: Vec<Option<f32>>,
+        queue: &str,
+        mod_fmt: Option<ModFmt>,
+        vmr_fmt: Option<VmrFmt>,
+        map_fmt: Option<MapFmt>,
+        priority: Option<i32>,
+        delete_time: Option<NaiveDateTime>,
+        save_tarball: Option<TarChoice>,
+        met_key: Option<&str>,
+        ginput_key: Option<&str>
+    ) -> anyhow::Result<i32> {
+        let mut transaction = conn.begin().await?;
+        let job_id = Self::add_job_from_args(&mut transaction, site_id, start_date, end_date, save_dir, email, lat, lon, queue, mod_fmt, vmr_fmt, map_fmt, priority, delete_time, save_tarball).await?;
+
+        if let Some(met) = met_key {
+            sqlx::query!("UPDATE Jobs SET met_key = ? WHERE job_id = ?", met, job_id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+
+        if let Some(ginput) = ginput_key {
+            sqlx::query!("UPDATE Jobs SET ginput_key = ? WHERE job_id = ?", ginput, job_id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+
+        transaction.commit().await?;
+        Ok(job_id)
+    }
+
     /// For any job whose delete_time is in the past, remove its output and set the state to "Cleaned"
     /// 
     /// Note that if an error occurs while cleaning up one job, any following jobs will not be cleaned

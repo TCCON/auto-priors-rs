@@ -437,8 +437,17 @@ impl StdSiteJob {
             }
 
             info!("Making standard site tarball ({} format) for {} on {}", row.output_structure, row.site_id, row.date);
-            let output_tarball = row.output_structure.make_std_site_tarball(&config.execution.std_sites_tar_output, &row.site_id, &job, config)?;
-            row.set_complete(conn, output_tarball).await?;
+            let output_tarballs = row.output_structure.make_std_site_tarball(&config.execution.std_sites_tar_output, &row.site_id, &job, config)?;
+            if output_tarballs.len() > 1 {
+                warn!("Multiple tarballs were created for standard site job {}, only the last one will be listed in the job's output file field", job.job_id);
+            }
+
+            let mut output_tarballs = output_tarballs.into_iter();
+            if let Some(output_tarball) = output_tarballs.next() {
+                row.set_complete(conn, output_tarball).await?;
+            } else {
+                anyhow::bail!("No output tarball path was returned while tarring job {}", job.job_id)
+            }
         }
 
         for jid in job_ids {

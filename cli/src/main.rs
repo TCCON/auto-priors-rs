@@ -214,6 +214,18 @@ async fn main() -> anyhow::Result<()> {
             stdsites::print_std_jobs_summary_cli(&mut conn, subargs).await?;
         },
 
+        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::SubmitSpecialRun(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            let loaded_config = load_config()?;
+            stdsites::special_std_site_run_cli(&mut conn, &loaded_config, subargs).await?;
+        },
+
+        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::TarSpecialRun(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            let loaded_config = load_config()?;
+            stdsites::tar_special_jobs_cli(&mut conn, &loaded_config, subargs).await?;
+        },
+
         Commands::SiteInfo( StdSiteCli { command: StdSiteActions::Json(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::site_info_json(&mut conn, &subargs).await?;
