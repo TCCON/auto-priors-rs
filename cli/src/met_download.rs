@@ -74,8 +74,10 @@ pub async fn get_date_iter(
 ) -> anyhow::Result<orm::utils::DateIterator>
 {
     if let Some(key) = met_key {
+        debug!("Setting up date iteration for met {key} as specified");
         get_date_iter_for_specified_met(conn, start_date, end_date, config, key, ignore_defaults).await
     } else {
+        debug!("Setting up date iteration for default mets in config");
         get_date_iter_for_defaults(conn, start_date, end_date, config).await
     }
 }
@@ -203,26 +205,33 @@ async fn get_date_iter_for_specified_met(
 
     let start_date = if let Some(d) = start_date {
         // the user provided start date takes precedence
+        debug!("Setting start date to {d} from command line");
         Some(d)
     } else if let Some(d) = orm::met::MetFile::get_first_or_last_complete_date_for_config_set(conn, dl_cfgs, false).await? {
         // if that's not available, assume we want to start with the day after the last date for which we have this met
         // data for
-        Some(d + Duration::days(1))
+        let start = d + Duration::days(1);
+        debug!("Setting start date to {start} given the last complete date for {met_key} was {d}");
+        Some(start)
     } else if let Some(d) = dl_cfgs.iter().map(|c| c.earliest_date).max() {
         // if there is no existing met data, take the latest date after which all the files needed for this met are available
         // this should never really *not* have a max value, because if there's an entry for the met in the download HashMap,
         // it really should have at least one entry in the TOML file. But it's possible someone could write the file like
         // `data.download.geosfpit = []`, so we'll be careful here.
+        debug!("Setting start date to {d} based on the configured earliest available dates for {met_key}");
         Some(d)
     } else {
+        warn!("Could not determine starting date for {met_key}");
         None
     };
 
     let end_date = if let Some(end) = end_date {
         // the user provided end date takes precedence
+        debug!("Setting end date to {end} from the command line");
         end
     }else {
         // otherwise we use today
+        debug!("Setting end date to today as no end date specified");
         chrono::offset::Utc::now().naive_utc().date()
     };
 
@@ -231,6 +240,7 @@ async fn get_date_iter_for_specified_met(
     // try to guess the start date from the default options. If those don't define one, then we can't deduce the starting date.
     if ignore_defaults { 
         if let Some(d) = start_date {
+            debug!("Will cover dates {d} to {end_date}");
             return Ok(orm::utils::DateIterator::new(vec![(d, end_date)]));
         } else {
             // This case should be EXTREMELY rare for the reasons in the last else if branch for start_date above
@@ -243,6 +253,7 @@ async fn get_date_iter_for_specified_met(
                     format!("No earliest date defined for met = {met_key} and either no default option sets reference this met or the first one to do so has no start date defined.")
                 ))?;
             
+            debug!("Will cover dates {defaults_start} to {end_date} based on configured earliest dates for {met_key}");
             return Ok(orm::utils::DateIterator::new(vec![(defaults_start, end_date)]));
         }
     }
@@ -260,12 +271,18 @@ async fn get_date_iter_for_specified_met(
                 "A default option set for met = {met_key} has no start date defined and that met has no earliest date defined."
             )))?;
         let this_end = opts.end_date.unwrap_or(end_date);
+        debug!("Adding date range {this_start} to {this_end} to iterate over");
         date_ranges.push((this_start, this_end))
+    }
+
+    if date_ranges.is_empty() {
+        warn!("Will not iterate over any dates; if trying to operate on a date range for which {met_key} is not the default, you may need to pass an extra flag to ignore the configured default met.");
     }
     
     // Still use bounds on the iterator even though we do use the defined start and end dates elsewhere. This
     // is needed in case all the default option sets define start and/or end dates; we still need to cut down
     // the iterator to the desired limits.
+    
     Ok(orm::utils::DateIterator::new_with_bounds(date_ranges, start_date, Some(end_date)))
 }
 
@@ -449,6 +466,10 @@ pub async fn report_default_met_status(conn: &mut orm::MySqlConn, config: &orm::
 /// Print a summary table of available met data for a time range
 #[derive(Debug, Args)]
 pub struct MetTableCli {
+    /// Pass this flag to print information about all met data for the given date range, not just the defaults.
+    #[clap(short = 'a', long)]
+    all_mets: bool,
+
     /// The first date to show in the table. If not given, defaults to 7 days ago.
     #[clap(short = 's', long)]
     start_date: Option<NaiveDate>,
@@ -466,7 +487,11 @@ pub async fn print_met_availability_table_cli(conn: &mut orm::MySqlConn, config:
         chrono::Utc::now().date_naive() - chrono::Duration::days(7)
     };
 
-    print_met_availability_table(conn, config, start_date, args.end_date).await
+    if args.all_mets {
+        print_met_availability_table_all_mets(conn, config, start_date, args.end_date).await
+    } else {
+        print_met_availability_table(conn, config, start_date, args.end_date).await
+    }
 }
 
 
@@ -494,10 +519,50 @@ pub async fn print_met_availability_table(conn: &mut orm::MySqlConn, config: &or
     }
 
     // Now we can build the table    
+    print_met_table_inner(rows, dates, met_types, "N/D")
+}
+
+
+pub async fn print_met_availability_table_all_mets(conn: &mut orm::MySqlConn, config: &orm::config::Config, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<()> {
+    let end_date = end_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
+
+    // First get the list of all mets defined in the config
+    let met_keys = config.data.download.keys()
+        .map(|k| k.to_string())
+        .collect_vec();
+
+    // Now we can loop through the dates and mets to check if complete
+    let mut rows = vec![];
+    let mut dates = vec![];
+    let mut met_types = vec![];
+
+    let mut first_date = true;
+    for date in orm::utils::DateIterator::new_one_range(start_date, end_date) {
+        let mut row = HashMap::new();
+        for key in met_keys.iter() {
+            let dl_cfgs = config.get_met_configs(&key)?;
+            for dl_cfg in dl_cfgs {
+                let state = orm::met::MetFile::is_date_complete_for_config(conn, date, dl_cfg).await?;
+                row.insert(dl_cfg.to_short_string(), state);
+
+                if first_date {
+                    met_types.push(dl_cfg.to_short_string());
+                }
+            }
+        }
+        rows.push(row);
+        dates.push(date);
+        first_date = false;
+    }
+
+    print_met_table_inner(rows, dates, met_types, "ERROR")
+}
+
+fn print_met_table_inner(rows: Vec<HashMap<String, MetDayState>>, dates: Vec<NaiveDate>, met_types: Vec<String>, fill: &str) -> anyhow::Result<()> {
     let row_iter = rows.iter().zip(dates.iter())
     .map(|(r, d)| {
         let mut states = met_types.iter().map(|k| {
-            r.get(k).map(|v| v.to_string()).unwrap_or_else(|| "N/A".to_string())
+            r.get(k).map(|v| v.to_string()).unwrap_or_else(|| fill.to_string())
         }).collect::<Vec<_>>();
         states.insert(0, d.to_string());
         states
@@ -508,6 +573,7 @@ pub async fn print_met_availability_table(conn: &mut orm::MySqlConn, config: &or
     
     let table = builder.build();
     println!("{}", orm::utils::table_to_std_string(table));
+
     Ok(())
 }
 
@@ -715,7 +781,19 @@ pub async fn download_missing_files(
     }
 }
 
-/// Rescan the directories with met files and add any new files found to the database
+/// Rescan the directories with met files and add any new files found to the database.
+/// 
+/// Which dates are scanned depends on a number of things. If you specify --met, then the rules for start dates are:
+/// - A start date given by --start-date takes precedence.
+/// - If --start-date not given, fall back on the day after the last complete day for that met.
+/// - If no complete days exist, fall back on the earliest date we expect this met product to be available
+///   (based on the config).
+/// - If the earliest date cannot be inferred from the met configuration, then the last fall back is to
+///   look at the defaults configured and use the start date for the first default that references this met.
+/// 
+/// For end dates:
+/// - An end date given by --end-date is preferred.
+/// - If not given, then the end date is set to today.
 #[derive(Debug, Args)]
 pub struct RescanMetCli {
     /// The first date to check for data, in yyyy-mm-dd format. If not given, it will default
@@ -733,12 +811,13 @@ pub struct RescanMetCli {
     #[clap(short = 'm', long = "met")]
     pub met_key: Option<String>,
 
-    /// Whether to ignore the default met types for different date ranges defined in the
-    /// configuration.
-    #[clap(short = 'i', long)]
-    pub ignore_defaults: bool,
+    /// By default when you specify --met, this will rescan any dates given by the date range rules,
+    /// regardless of whether that met type is configured as the default for those dates. Pass this
+    /// flag to ignore dates when that met type is not configured as the default.
+    #[clap(short = 'o', long)]
+    pub obey_defaults: bool,
 
-    /// Set this flag to print what would be downloaded, but not actually download anything.
+    /// Set this flag to print what would be added to the database, but not actually modify the database.
     #[clap(short = 'd', long="dry-run")]
     pub dry_run: bool
 }
@@ -750,11 +829,14 @@ pub async fn rescan_met_files_cli(conn: &mut orm::MySqlConn, clargs: RescanMetCl
         clargs.end_date,
         config,
         clargs.met_key.as_deref(),
-        clargs.ignore_defaults,
+        clargs.obey_defaults,
         clargs.dry_run
     ).await?;
 
     info!("{n} new met files added to the database.");
+    if n == 0 {
+        info!("")
+    }
     Ok(())
 }
 
@@ -764,10 +846,10 @@ pub async fn rescan_met_files(
     end_date: Option<NaiveDate>, 
     config: &orm::config::Config, 
     met_key: Option<&str>,
-    ignore_defaults: bool,
+    obey_defaults: bool,
     dry_run: bool) -> anyhow::Result<u64>
 {
-    let date_iter = get_date_iter(conn, config, start_date, end_date, met_key, ignore_defaults).await?;
+    let date_iter = get_date_iter(conn, config, start_date, end_date, met_key, !obey_defaults).await?;
 
     let mut n_added = 0;
     let mut transaction = conn.begin().await?;
