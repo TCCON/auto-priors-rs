@@ -2,7 +2,7 @@ use std::{path::{PathBuf, Path}, str::FromStr, fmt::Display};
 
 use anyhow::Context;
 use chrono::{NaiveDateTime, NaiveDate};
-use log::{warn, debug, trace};
+use log::{warn, debug, trace, info};
 use serde::{Deserialize, Serialize};
 use sqlx::{self, Type, FromRow};
 
@@ -600,6 +600,36 @@ impl MetFile {
         }
     }
 
+    /// Get a vector of [`MetFile`] instances representing downloaded met files in the database
+    /// 
+    /// All met files in the database with file datetimes between `start_date` (inclusive) and `end_date`
+    /// (exclusive). If `met_product` is not None, then only files for that product are returned. Otherwise
+    /// all files with file dates between those times are returned.
+    /// 
+    /// This function will return an error if the database query fails.
+    pub async fn get_files_by_dates(conn: &mut MySqlConn, start_date: NaiveDate, end_date: NaiveDate, met_product: Option<MetProduct>) -> anyhow::Result<Vec<MetFile>> {
+        let files = if let Some(prod) = met_product {
+            sqlx::query_as!(
+                MetFile,
+                "SELECT * From MetFiles WHERE filedate >= ? AND filedate < ? AND product = ?",
+                start_date,
+                end_date,
+                prod.to_string()
+            ).fetch_all(conn)
+            .await?
+        } else {
+            sqlx::query_as!(
+                MetFile,
+                "SELECT * From MetFiles WHERE filedate >= ? AND filedate < ?",
+                start_date,
+                end_date,
+            ).fetch_all(conn)
+            .await?
+        };
+        
+        Ok(files)
+    }
+
     /// Add a new met file to the database
     /// 
     /// The file must exist at the path given; if not, returns an error.
@@ -725,5 +755,34 @@ impl MetFile {
         .count;
 
         Ok(n > 0)
+    }
+
+    /// Delete the met file represented by this instance from both the file system and the database.
+    /// 
+    /// This function will return an error if the file cannot be deleted or the database delete query fails.
+    /// 
+    /// # Notes
+    /// 1. It is *not* an error if the file does not exist; this method will still try to remove the database entry.
+    ///    This way you can use this function to also clean up database entries for met files missing from the file system.
+    ///    You will see a warning in this case.
+    /// 2. If the database query fails, the met file will not be deleted. This way a user can either delete it manually
+    ///    or re-add it to the database. 
+    pub async fn delete_me(&self, conn: &mut MySqlConn) -> anyhow::Result<()> {
+        sqlx::query!("DELETE FROM MetFiles WHERE file_id = ?", self.file_id)
+            .execute(conn)
+            .await
+            .with_context(|| format!("Failed to delete MetFile row {}, either delete the file ({}) manually or re-add it to the database.", self.file_id, self.file_path.display()))?;
+
+        info!("Deleted MetFile row {}", self.file_id);
+
+        if self.file_path.exists() {
+            std::fs::remove_file(&self.file_path)
+                .with_context(|| format!("Failed to deleted met file at {}", self.file_path.display()))?;
+            info!("Deleted {}", self.file_path.display());
+        } else {
+            warn!("Met file {} does not exist, nothing to delete.", self.file_path.display());
+        }
+
+        Ok(())
     }
 }

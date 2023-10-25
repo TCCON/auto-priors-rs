@@ -83,6 +83,12 @@ async fn main() -> anyhow::Result<()> {
             met_download::download_missing_files_cli(&mut conn, subargs, &loaded_config, wget_dl).await?;
         },
 
+        Commands::Met(MetCli { command: MetActions::RemoveDates(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            let loaded_config = load_config()?;
+            met_download::remove_dates_cli(&mut conn, &loaded_config, subargs, wget_dl).await?;
+        },
+
         Commands::Met(MetCli{ command: MetActions::Rescan(subargs) }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;

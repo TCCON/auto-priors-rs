@@ -5,8 +5,8 @@ use anyhow::Context;
 use clap::{self, Args, Subcommand};
 use chrono::{NaiveDate, Duration};
 use itertools::Itertools;
-use log::{warn, info, debug};
-use orm::{self, met::{MetDayState, AddMetFileError}, utils::DateIterator};
+use log::{warn, info, debug, error};
+use orm::{self, met::{MetDayState, AddMetFileError, MetFile}, utils::DateIterator};
 use sqlx::Connection;
 
 use crate::utils::{self, DownloadError};
@@ -29,6 +29,9 @@ pub enum MetActions {
 
     /// Download missing model files
     DownloadMissing(DownloadMissingCli),
+
+    /// Delete (and possibly redownload) met files
+    RemoveDates(RemoveDatesCli),
 
     /// Report on the currently downloaded default met files
     Report(ReportMetCli),
@@ -900,6 +903,88 @@ pub async fn rescan_met_files(
 
     transaction.commit().await?;
     Ok(n_added)
+}
+
+
+
+/// Delete already downloaded met files between two dates. 
+/// 
+/// By default, all met files between START_DATE (inclusive) and END_DATE
+/// (exclusive) will be deleted from the database and the file system. To only
+/// delete a specific type of met data, use the --met-product option.
+#[derive(Debug, Args)]
+pub struct RemoveDatesCli {
+    /// The first date to delete, in YYYY-MM-DD format.
+    start_date: NaiveDate,
+    /// The day after the last date to delete, in YYYY-MM-DD format.
+    end_date: NaiveDate,
+    /// If given, only delete met files for this product.
+    #[clap(short='m', long)]
+    met_product: Option<orm::met::MetProduct>,
+    /// If given, print what would be done instead of actually deleting files.
+    #[clap(short='d', long)]
+    dry_run: bool,
+    /// If given, this code will try to redownload the deleted files. This must be the met key
+    /// from the configuration file to use to download.
+    #[clap(short='r', long)]
+    redownload: Option<String>,
+}
+
+pub async fn remove_dates_cli(conn: &mut orm::MySqlConn, config: &orm::config::Config, args: RemoveDatesCli, downloader: impl utils::Downloader + Clone) -> anyhow::Result<()> {
+    remove_dates(conn, config, downloader, args.start_date, args.end_date, args.met_product, args.dry_run, args.redownload.as_deref()).await
+}
+
+pub async fn remove_dates(
+    conn: &mut orm::MySqlConn,
+    config: &orm::config::Config,
+    downloader: impl utils::Downloader + Clone,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    met_product: Option<orm::met::MetProduct>,
+    dry_run: bool,
+    redownload: Option<&str>
+) -> anyhow::Result<()> {
+    // If we were given redownload, check that it is a valid met key before we proceed.
+    if let Some(met_key) = redownload {
+        config.get_met_configs(met_key)
+            .context("The met key provided as the redownload argument was not valid for the given config.")?;
+    }
+
+    let met_files = MetFile::get_files_by_dates(conn, start_date, end_date, met_product)
+        .await
+        .context("Error occurred while listing met files to remove")?;
+
+
+    let mut n_error_occurred = 0;
+    let n_files = met_files.len();
+
+    for file in met_files {
+        if dry_run {
+            println!("Would delete MetFile ID = {}, {}", file.file_id, file.file_path.display());
+        } else {
+            // This method has some info! calls so we don't need to print anything in the successful case.
+            // We don't immediately return if an error occurs because we want to try the other files.
+            file.delete_me(conn)
+                .await
+                .unwrap_or_else(|e| {
+                    error!("Failed to delete met file ID = {} ({}), reason was {e:?}", file.file_id, file.file_path.display());
+                    n_error_occurred += 1;
+                });
+        }
+    }
+
+    if n_error_occurred > 0 {
+        let dlmsg = if redownload.is_some() { " (Redownloading will not be attempted if it was requested.)" } else { "" };
+        anyhow::bail!("Failed to delete {n_error_occurred} of {n_files} met files.{dlmsg}");
+    }
+
+    if let Some(met_key) = redownload {
+        download_files_for_dates(conn, met_key, start_date, Some(end_date), config, downloader, dry_run)
+            .await
+            .context("Error occurred while redownloaded deleted met files")?;
+    }
+
+    Ok(())
 }
 
 pub async fn download_files_for_dates(
