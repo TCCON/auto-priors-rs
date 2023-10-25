@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use chrono::{NaiveDate, Duration};
 use itertools::Itertools;
 
@@ -301,6 +303,23 @@ pub fn format_lon_str(lon: f32, prec: u8) -> String {
         6 => format!("{lon:.6}{ew}"),
         7 => format!("{lon:.7}{ew}"),
         _ => unimplemented!("precision > 7 not implemented")
+    }
+}
+
+#[derive(Debug)]
+pub struct ParseInputBoolError(String);
+
+impl Display for ParseInputBoolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Given string ('{}') was not any of 'true', 'yes', 'y', 'false', 'no', 'n' (ignoring case)", self.0)
+    }
+}
+
+pub fn parse_bool_str(s: &str) -> Result<bool, ParseInputBoolError> {
+    match s.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "y" => Ok(true),
+        "false" | "no" | "n" => Ok(false),
+        _ => Err(ParseInputBoolError(s.to_string()))
     }
 }
 

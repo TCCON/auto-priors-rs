@@ -1,0 +1,9 @@
+email=jhedeliu@caltech.edu
+vmr_fmt=text
+map_fmt=none
+is_egi=true
+start_date=20230826
+end_date=20230827
+site_id=jp
+lat=34.180
+lon=-118.121

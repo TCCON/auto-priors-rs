@@ -35,6 +35,9 @@ impl Display for DownloadError {
 impl Error for DownloadError {}
 
 
+
+
+
 /// A trait to implement for any mechanism to download a list of files.
 /// This is usually used to download met data, for example.
 pub trait Downloader {

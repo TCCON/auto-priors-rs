@@ -102,6 +102,7 @@ struct InputJob {
     mod_fmt: ModFmt,
     vmr_fmt: VmrFmt,
     map_fmt: MapFmt,
+    is_egi: bool,
     confirmation: bool
 }
 
@@ -172,6 +173,7 @@ impl InputJob {
             "mod_fmt",
             "vmr_fmt",
             "map_fmt",
+            "is_egi",
             "confirmation"
         ]
     }
@@ -187,6 +189,7 @@ impl InputJob {
             "mod_fmt" => self.mod_fmt.to_string(),
             "vmr_fmt" => self.vmr_fmt.to_string(),
             "map_fmt" => self.map_fmt.to_string(),
+            "is_egi" => self.is_egi.to_string(),
             "confirmation" => self.confirmation.to_string(),
             _ => return None
         };
@@ -216,12 +219,13 @@ struct InputJobBuilder {
     mod_fmt: Option<ModFmt>,
     vmr_fmt: Option<VmrFmt>,
     map_fmt: Option<MapFmt>,
+    is_egi: Option<bool>,
     confirmation: Option<bool>,
 }
 
 impl InputJobBuilder {
     fn new() -> Self {
-        Self { site_id: None, start_date: None, end_date: None, lat: None, lon: None, email: None, mod_fmt: None, vmr_fmt: None, map_fmt: None, confirmation: None }
+        Self { site_id: None, start_date: None, end_date: None, lat: None, lon: None, email: None, mod_fmt: None, vmr_fmt: None, map_fmt: None, is_egi: None, confirmation: None }
     }
 
     fn finalize(self) -> Result<InputJob, Vec<String>> {
@@ -258,6 +262,7 @@ impl InputJobBuilder {
             mod_fmt: self.mod_fmt.unwrap_or_default(),
             vmr_fmt: self.vmr_fmt.unwrap_or_default(),
             map_fmt: self.map_fmt.unwrap_or_default(),
+            is_egi: self.is_egi.unwrap_or_default(),
             confirmation: self.confirmation.unwrap_or(true)
         };
 
@@ -380,8 +385,17 @@ impl InputJobBuilder {
         Ok(())
     }
 
+    fn is_egi(&mut self, valstr: &str) -> Result<(), String> {
+        let egi = match crate::utils::parse_bool_str(valstr) {
+            Ok(v) => v,
+            Err(e) => return Err(format!("{e}")),
+        };
+        self.is_egi = Some(egi);
+        Ok(())
+    }
+
     fn confirmation(&mut self, valstr: &str) -> Result<(), String> {
-        let conf = match bool::from_str(valstr) {
+        let conf = match crate::utils::parse_bool_str(valstr) {
             Ok(v) => v,
             Err(e) => return Err(format!("{e}"))
         };
@@ -404,6 +418,7 @@ impl InputJobBuilder {
             "mod_fmt" => self.mod_fmt(value),
             "vmr_fmt" => self.vmr_fmt(value),
             "map_fmt" => self.map_fmt(value),
+            "is_egi" => self.is_egi(value),
             "confirmation" => self.confirmation(value),
             _ => Err(format!("Unknown field '{field}'"))
         }?;
@@ -476,6 +491,8 @@ pub async fn add_jobs_from_input_files(
             }
         } else {
 
+            let save_tarball = if job.is_egi { crate::jobs::TarChoice::Egi } else { crate::jobs::TarChoice::Yes };
+
             let res = crate::jobs::Job::add_job_from_args(conn,
                 job.site_id.clone(),
                 job.start_date,
@@ -490,7 +507,7 @@ pub async fn add_jobs_from_input_files(
                 Some(job.map_fmt),
                 None,
                 None,
-                Some(crate::jobs::TarChoice::Yes)
+                Some(save_tarball)
             ).await;
 
             match res {
