@@ -12,6 +12,7 @@ use tccon_priors_cli::met_download::{self, MetActions, MetCli};
 use tccon_priors_cli::jobs::{self, JobActions, JobCli};
 use tccon_priors_cli::siteinfo::{self, StdSiteActions, StdSiteCli};
 use tccon_priors_cli::stdsites::{self, StdSiteJobActions, StdSiteJobCli};
+use tccon_priors_cli::dbexport::{self, DbActions, DbCli};
 use tokio;
 
 use tccon_priors_cli::utils;
@@ -35,6 +36,7 @@ enum Commands {
     SiteInfo(StdSiteCli),
     SiteJobs(StdSiteJobCli),
     Config(ConfigCli),
+    Db(DbCli),
     Completions(CompletionsCli),
 
 }
@@ -244,6 +246,16 @@ async fn main() -> anyhow::Result<()> {
         Commands::Config(ConfigCli { command: ConfigActions::Debug }) => {
             let loaded_config = load_config()?;
             config::debug_config(loaded_config);
+        },
+
+        Commands::Db(DbCli { command: DbActions::Export(subargs)}) => {
+            let mut conn = db.get_connection().await?;
+            dbexport::export_cli(&mut conn, subargs).await?;
+        },
+
+        Commands::Db(DbCli { command: DbActions::Import(subargs)}) => {
+            let mut conn = db.get_connection().await?;
+            dbexport::import_cli(&mut conn, subargs).await?;
         },
 
         Commands::Completions(CompletionsCli { commands: CompletionsActions::Generate(subargs) }) => {

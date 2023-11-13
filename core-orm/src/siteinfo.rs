@@ -5,7 +5,7 @@ use anyhow::{self, Context};
 use chrono::{NaiveDate, Duration};
 use itertools::Itertools;
 use log::{error, warn};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use sqlx::{self, FromRow, Type, Connection};
 use tabled::Tabled;
 
@@ -14,7 +14,7 @@ use crate::{utils, stdsitejobs::StdSiteJob, jobs::Job};
 use super::MySqlConn;
 
 /// An enum describing the type of site
-#[derive(Debug, Type, Clone, Copy)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
 #[repr(i8)]  // NB: SQL enums start at 1
 pub enum SiteType {
     /// This site is neither TCCON nor an EM27. (`i8` value = `0`.)
@@ -69,7 +69,7 @@ impl Display for SiteType {
     }
 }
 
-#[derive(Debug, Type, Clone, Copy)]
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
 #[repr(i8)]  // NB: SQL enums start at 1
 pub enum StdOutputStructure {
     /// Store only the `.mod` and `.vmr` files in a flat tarball (no directory structure)
@@ -548,13 +548,13 @@ impl StdSite {
 /// An internal query struct that represents the result of a SQL query on the StdSiteList table.
 /// 
 /// This should be converted to a [`StdSite`] instance for any public-facing functions.
-#[derive(Debug, FromRow)]
-struct QStdSite {
-    id: i32,
-    site_id: String,
-    name: String,
-    site_type: String,
-    output_structure: String,
+#[derive(Debug, FromRow, Serialize, Deserialize)]
+pub(crate) struct QStdSite {
+    pub(crate) id: i32,
+    pub(crate) site_id: String,
+    pub(crate) name: String,
+    pub(crate) site_type: String,
+    pub(crate) output_structure: String,
 }
 
 /// A structure representing a single information row for a standard site
@@ -583,6 +583,21 @@ pub struct SiteInfo {
     /// A comment to describe any special considerations with this site.
     pub comment: Option<String>
 }
+
+/// A version of SiteInfo that can be used to export to JSON file for database backups
+/// (it keeps the foreign site key when serialized)
+#[derive(Debug, FromRow, Serialize, Deserialize)]
+pub(crate) struct ExportSiteInfo {
+    pub(crate) id: i32,
+    pub(crate) site: i32,
+    pub(crate) location: String,
+    pub(crate) latitude: f32,
+    pub(crate) longitude: f32,
+    pub(crate) start_date: NaiveDate,
+    pub(crate) end_date: Option<NaiveDate>,
+    pub(crate) comment: Option<String>
+}
+
 
 impl Tabled for SiteInfo {
     const LENGTH: usize = 6;

@@ -24,7 +24,7 @@ fn str_to_json_arr<'a, T: Deserialize<'a>> (s: &'a str) -> JobResult<Vec<T>> {
 }
 
 /// An enum representing possible states for a priors job
-#[derive(Debug, Type, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Type, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i8)]
 pub enum JobState {
     /// **\[default\]** This job is queued but has not begun to execute. `i8` value = `0`.
@@ -95,7 +95,7 @@ impl TryFrom<i8> for JobState {
 
 
 /// An enum representing the possible options for creating a tarball of job output
-#[derive(Debug, Type, Clone, Copy)]
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
 pub enum TarChoice {
     /// Do not make a tarball of the job output. `i8` value = `0`.
     No = 0,
@@ -155,7 +155,7 @@ impl TryFrom<i8> for TarChoice {
 }
 
 /// An enum representing the possible output file types for the model (`.mod`) files.
-#[derive(Debug, Type, Clone, Copy)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
 pub enum ModFmt {
     /// Do not create `.mod` files. String representation = `"None"`.
     None,
@@ -201,7 +201,7 @@ impl FromStr for ModFmt {
 
 
 /// An enum representing the possible output file types for the `.vmr` files.
-#[derive(Debug, Type, Clone, Copy)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
 pub enum VmrFmt {
     /// Do not create `.vmr` files. String representation = `"None"`.
     None,
@@ -248,7 +248,7 @@ impl FromStr for VmrFmt {
 
 
 /// An enum representing the possible output file types for the model a priori (`.map`) files.
-#[derive(Debug, Type, Clone, Copy)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
 pub enum MapFmt {
     /// Do not create `.map` files. String representation = `"None"`.
     None,
@@ -307,29 +307,29 @@ impl FromStr for MapFmt {
 /// External crates should interact with the [`Job`] struct, and that should
 /// have methods that internally work with a `QJob` instance as needed to
 /// interface with the MySQL table.
-#[derive(Debug, FromRow)]
-struct QJob { 
-    job_id: i32,
-    state: i8,
-    site_id: String,
-    start_date: NaiveDate,
-    end_date: NaiveDate,
-    lat: String,
-    lon: String,
-    email: Option<String>,
-    delete_time: Option<NaiveDateTime>,
-    priority: i32,
-    queue: String,
-    met_key: Option<String>,
-    ginput_key: Option<String>,
-    save_dir: String,
-    save_tarball: i8,
-    mod_fmt: String,
-    vmr_fmt: String,
-    map_fmt: String,
-    submit_time: NaiveDateTime,
-    complete_time: Option<NaiveDateTime>,
-    output_file: Option<String>
+#[derive(Debug, FromRow, Serialize, Deserialize)]
+pub(crate) struct QJob { 
+    pub(crate) job_id: i32,
+    pub(crate) state: i8,
+    pub(crate) site_id: String,
+    pub(crate) start_date: NaiveDate,
+    pub(crate) end_date: NaiveDate,
+    pub(crate) lat: String,
+    pub(crate) lon: String,
+    pub(crate) email: Option<String>,
+    pub(crate) delete_time: Option<NaiveDateTime>,
+    pub(crate) priority: i32,
+    pub(crate) queue: String,
+    pub(crate) met_key: Option<String>,
+    pub(crate) ginput_key: Option<String>,
+    pub(crate) save_dir: String,
+    pub(crate) save_tarball: i8,
+    pub(crate) mod_fmt: String,
+    pub(crate) vmr_fmt: String,
+    pub(crate) map_fmt: String,
+    pub(crate) submit_time: NaiveDateTime,
+    pub(crate) complete_time: Option<NaiveDateTime>,
+    pub(crate) output_file: Option<String>
 }
 
 impl TryFrom<Job> for QJob {

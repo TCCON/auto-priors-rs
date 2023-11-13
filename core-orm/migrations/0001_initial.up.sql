@@ -4,6 +4,10 @@
 -- https://dev.mysql.com/doc/refman/8.0/en/set-transaction.html
 -- However it requires SUPER privilege and affects all databases.
 -- SET GLOBAL TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+--
+-- IMPORTANT: IF YOU CHANGE THIS OR ADD NEW MIGRATIONS, YOU MUST UPDATE
+-- orm::export TO EXPORT/IMPORT THE NEW/CHANGED COLUMNS. (Changes to views
+-- only does not require updates to orm::export).
 
 --
 -- Table structure for table `MetFiles`

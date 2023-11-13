@@ -269,13 +269,13 @@ impl Display for MetDataType {
     }
 }
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, FromRow, Serialize, Deserialize)]
 pub struct MetFile {
     pub file_id: i32,
     #[sqlx(try_from = "String")]
     pub file_path: PathBuf,
     #[allow(dead_code)]
-    file_path_sha256: Option<String>,
+    pub file_path_sha256: Option<String>,
     #[sqlx(try_from = "String")]
     pub product: MetProduct,
     pub filedate: NaiveDateTime,
@@ -686,6 +686,7 @@ impl MetFile {
 
         }
 
+        // TODO: make a method to insert a new metfile, use it here and update export::import_db_inner
         sqlx::query!(
             "INSERT INTO MetFiles (file_path, filedate, product, levels, data_type) VALUES (?, ?, ?, ?, ?)",
             file_str,

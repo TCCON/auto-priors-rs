@@ -6,6 +6,7 @@ pub mod jobs;
 pub mod email;
 pub mod siteinfo;
 pub mod stdsites;
+pub mod dbexport;
 
 pub fn get_user_input(prompt: &str) -> std::io::Result<String> {
     use std::io::Write;

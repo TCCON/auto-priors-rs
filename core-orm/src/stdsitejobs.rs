@@ -7,6 +7,7 @@ use chrono::{NaiveDate, Duration};
 use futures::TryStreamExt;
 use itertools::Itertools;
 use log::{info, warn};
+use serde::Deserialize;
 use serde::Serialize;
 use sqlx::{self, FromRow, Type, Connection};
 use tabled::Tabled;
@@ -19,7 +20,7 @@ use crate::utils::DateIterator;
 use crate::MySqlConn;
 
 
-#[derive(Debug, Type, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[repr(i8)]
 pub enum StdSiteJobState {
     /// Indicates an unexpected value for state
@@ -37,8 +38,6 @@ pub enum StdSiteJobState {
     /// Indicates that priors have been generated for this site
     Complete = 2,
 }
-
-// TODO: update the database converter tool to properly map the old states to match the new ones (complete = 1 in old, 2 in new)
 
 impl Default for StdSiteJobState {
     fn default() -> Self {
@@ -700,6 +699,18 @@ struct QStdSiteJob {
     job: Option<i32>,
     tarfile: Option<String>,
     output_structure: Option<String>,
+}
+
+/// A version of [`QStdSiteJob`] to use when exporting database contents
+/// (it omits fields that would be taken from the view).
+#[derive(Debug, FromRow, Serialize, Deserialize)]
+pub(crate) struct ExportStdSiteJob {
+    pub(crate) id: i32,
+    pub(crate) site: i32,
+    pub(crate) date: NaiveDate,
+    pub(crate) state: i8,
+    pub(crate) job: Option<i32>,
+    pub(crate) tarfile: Option<String>,
 }
 
 pub struct StdJobDateSummary {
