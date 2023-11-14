@@ -24,6 +24,9 @@ pub enum StdSiteJobActions {
     /// for which met data is available.
     AddJobs,
 
+    /// Enter existing std. site tarballs into the database.
+    UseExistingTars(UseExistingTarsCli),
+
     /// Collect completed standard site jobs outputs into the standard sites'
     /// tar files.
     TarFiles,
@@ -365,4 +368,30 @@ pub async fn tar_special_jobs(conn: &mut MySqlConn, config: &orm::config::Config
     }
     
     Ok(())
+}
+
+
+/// Add existing standard site tarballs to the database.
+/// 
+/// If standard site tarballs exist without a corresponding entry in the StdSiteJobs
+/// table, use this command to add them. It takes one or more paths to existing
+/// standard site tarballs, then checks to see if the corresponding site/date pairs
+/// have entries in the StdSiteJobs table. If not, and if it can find a job in the
+/// standard sites queue that could have produced this file (i.e. includes that site
+/// and date), then that tarball will be entered into the StdSiteJobs table.
+/// 
+/// Note that if there is already an entry in the StdSiteJobs table for the site/date
+/// of a given tarball that is in any state other than "job needed", that tarball will
+/// NOT be added. This protects against messing up the database by "completing" a standard
+/// site job entry before the actual job runs.
+#[derive(Debug, Args)]
+pub struct UseExistingTarsCli {
+    /// The existing ??_ggg_inputs_????????.tgz tarballs to put into the database.
+    tarballs: Vec<PathBuf>
+}
+
+pub async fn use_existing_tars_cli(conn: &mut MySqlConn, config: &orm::config::Config, args: UseExistingTarsCli) -> anyhow::Result<()> {
+    stdsitejobs::StdSiteJob::add_extant_files_to_std_site_records(
+        conn, config, &args.tarballs,
+    ).await
 }

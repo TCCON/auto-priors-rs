@@ -635,6 +635,7 @@ pub async fn check_default_files_for_dates(
     let end_date = check_start_end_date(start_date, end_date)?;
     let mut files_map = HashMap::new();
     
+    // TODO: add an indicatif progress bar if running in a tty
     for date in DateIterator::new_one_range(start_date, end_date) {
         let default_config = cfg.get_defaults_for_date(date)?;
         let dl_configs = cfg.get_met_configs(&default_config.met)?;

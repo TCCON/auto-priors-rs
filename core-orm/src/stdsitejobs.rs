@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::fmt::Display;
+use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -55,6 +57,20 @@ impl From<i8> for StdSiteJobState {
             1 => Self::InProgress,
             2 => Self::Complete,
             _ => Self::Unknown
+        }
+    }
+}
+
+impl Display for StdSiteJobState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StdSiteJobState::Unknown => write!(f, "unknown"),
+            StdSiteJobState::MissingMet => write!(f, "missing met"),
+            StdSiteJobState::NonopNeeded => write!(f, "nonop needed"),
+            StdSiteJobState::RegenNeeded => write!(f, "regen needed"),
+            StdSiteJobState::JobNeeded => write!(f, "job needed"),
+            StdSiteJobState::InProgress => write!(f, "in progress"),
+            StdSiteJobState::Complete => write!(f, "complete"),
         }
     }
 }
@@ -443,7 +459,7 @@ impl StdSiteJob {
 
             let mut output_tarballs = output_tarballs.into_iter();
             if let Some(output_tarball) = output_tarballs.next() {
-                row.set_complete(conn, output_tarball).await?;
+                row.set_complete(conn, output_tarball, None).await?;
             } else {
                 anyhow::bail!("No output tarball path was returned while tarring job {}", job.job_id)
             }
@@ -518,6 +534,42 @@ impl StdSiteJob {
         return Ok(avail_std_site_days)
     }
 
+    pub async fn get_std_job_by_id(conn: &mut MySqlConn, ss_id: i32) -> anyhow::Result<Option<Self>> {
+        let ssjob = sqlx::query_as!(
+            QStdSiteJob,
+            "SELECT * FROM v_StdSiteJobs WHERE id = ?",
+            ss_id
+        ).fetch_optional(conn)
+        .await?
+        .map(|q| StdSiteJob::from(q));
+
+        Ok(ssjob)
+    }
+
+    /// Get the standard site job entry for the given site on the given date.
+    /// 
+    /// If no entry exists, will return `Ok(None)`. Will return an error if (a) the
+    /// database query fails or (b) there is >1 entry that matches the site ID and date.
+    pub async fn get_std_job_for_site_on_date(conn: &mut MySqlConn, site_id: &str, date: NaiveDate) -> anyhow::Result<Option<Self>> {
+        let mut ssjob = sqlx::query_as!(
+            QStdSiteJob,
+            "SELECT * FROM v_StdSiteJobs WHERE site_id = ? and DATE = ?",
+            site_id, date
+        ).fetch_all(conn)
+        .await?
+        .into_iter()
+        .map(|q| StdSiteJob::from(q))
+        .collect_vec();
+
+        if ssjob.len() == 0 {
+            Ok(None)
+        } else if ssjob.len() == 1 {
+            Ok(ssjob.pop())
+        } else {
+            anyhow::bail!("Multiple standard site jobs matched {site_id} on {date}; databased inconsistent")
+        }
+    }
+
     /// Flag rows in the standard site jobs table for a given site and a date range for priors regeneration.
     /// 
     /// If `end_date` is `None`, then all rows from `start_date` on are flagged. Otherwise, rows up to but not
@@ -582,14 +634,29 @@ impl StdSiteJob {
         Ok(())
     }
 
-    pub async fn set_complete(&mut self, conn: &mut MySqlConn, tarball: PathBuf) -> anyhow::Result<()> {
-        sqlx::query!(
-            "UPDATE StdSiteJobs SET state = ?, tarfile = ? WHERE id = ?",
-            StdSiteJobState::Complete,
-            tarball.to_str().ok_or_else(|| anyhow::anyhow!("Could not convert tarball path to valid unicode"))?,
-            self.id
-        ).execute(conn)
-        .await?;
+    /// Set this entry to complete, including the path to the `ggg_inputs` tarball.
+    /// 
+    /// Optionally, if the job ID has not yet been set, provide that as well.
+    pub async fn set_complete(&mut self, conn: &mut MySqlConn, tarball: PathBuf, job_id: Option<i32>) -> anyhow::Result<()> {
+        if let Some(jid) = job_id {
+            sqlx::query!(
+                "UPDATE StdSiteJobs SET state = ?, tarfile = ?, job = ? WHERE id = ?",
+                StdSiteJobState::Complete,
+                tarball.to_str().ok_or_else(|| anyhow::anyhow!("Could not convert tarball path to valid unicode"))?,
+                jid,
+                self.id
+            ).execute(conn)
+            .await?;
+        } else {
+            sqlx::query!(
+                "UPDATE StdSiteJobs SET state = ?, tarfile = ? WHERE id = ?",
+                StdSiteJobState::Complete,
+                tarball.to_str().ok_or_else(|| anyhow::anyhow!("Could not convert tarball path to valid unicode"))?,
+                self.id
+            ).execute(conn)
+            .await?;
+        }
+        
 
         self.state = StdSiteJobState::Complete;
         self.tarfile = Some(tarball);
@@ -638,6 +705,86 @@ impl StdSiteJob {
         Ok(())
     }
 
+
+    /// Add/update entries in the standard site jobs table for the given tarballs.
+    /// 
+    /// This will only add entries for tarballs that do not have a corresponding entry or update entries
+    /// with a state of "job needed". Entries with other states will not be updated either because (a) the
+    /// required inputs don't exist so the tarball isn't reproducible or (b) a job is already in the queue
+    /// to generate this entry.
+    pub async fn add_extant_files_to_std_site_records<P: AsRef<Path>>(conn: &mut MySqlConn, config: &Config, std_site_tarballs: &[P]) -> anyhow::Result<()> {
+        let all_jobs = jobs::Job::get_jobs_list(conn, false)
+            .await
+            .context("Failed occurred while getting list of all jobs")?;
+
+        for tarball in std_site_tarballs {
+            // For each tarball, check if we have an entry in the database for this site/date yet
+            let tarball = tarball.as_ref();
+            let (site_id, date) = info_from_std_tarball_name(tarball)?;
+
+            let existing_ssjob = Self::get_std_job_for_site_on_date(conn, &site_id, date).await?;
+            if let Some(mut existing_ssjob) = existing_ssjob {
+                // If the standard site job already exists in the system and is waiting for a job to be created,
+                // we can set it to complete right now.
+                if let StdSiteJobState::JobNeeded = existing_ssjob.state {
+                    if let Some(job) = Self::find_existing_job_for_standard_site(&config.execution.std_site_job_queue, site_id, date, &all_jobs) {
+                        existing_ssjob.set_complete(conn, tarball.to_path_buf(), Some(job.job_id)).await?;
+                        info!("Updated standard site job {} to use tarball {} and job {}", existing_ssjob.id, tarball.display(), job.job_id);
+                    } else {
+                        warn!("Could not use tarball {}, no job in the standard sites queue matches its site ID and date", tarball.display());
+                    }
+                } else {
+                    info!("Did not update standard site job for {} because its state was '{}'.", tarball.display(), existing_ssjob.state);
+                }
+
+            } else {
+                // If there is no existing standard site job, then create it. 
+                if let Some(job) = Self::find_existing_job_for_standard_site(&config.execution.std_site_job_queue, site_id.clone(), date, &all_jobs) {
+                    let ss_id = Self::add_std_site_job_row_from_args(conn, &site_id, date, StdSiteJobState::InProgress, Some(job.job_id)).await?;
+                    let mut ss = Self::get_std_job_by_id(conn, ss_id).await?
+                        .ok_or_else(|| anyhow::anyhow!("Failed to get the standard site job just created with ID = {ss_id} (this should not happen)"))?;
+                    ss.set_complete(conn, tarball.to_path_buf(), Some(job.job_id)).await?;
+                    info!("Created standard site job to use tarball {} and job {}", tarball.display(), job.job_id);
+                } else {
+                    warn!("Could not use tarball {}, no job in the standard sites queue matches its site ID and date", tarball.display());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Given a list of all jobs in the database, find the most recently completed job in the standard site queue that
+    /// generated the given site ID and date. Will return `None` if no jobs match those criteria, otherwise returns
+    /// the job with the most recent completion date.
+    fn find_existing_job_for_standard_site<'a>(std_site_queue: &str, site_id: String, date: NaiveDate, all_jobs: &'a [jobs::Job]) -> Option<&'a jobs::Job> {
+        let mut matching_jobs = all_jobs.iter()
+            .filter(|&j| j.site_id.contains(&site_id) && date >= j.start_date && date < j.end_date && j.complete_time.is_some() && j.queue.as_str() == std_site_queue )
+            .collect_vec();
+
+        if matching_jobs.is_empty() {
+            return None
+        }
+
+        if matching_jobs.len() == 1 {
+            return matching_jobs.pop()
+        }
+
+        // Multiple jobs match, so find the one with the most recent completion time.
+        // We already filtered for jobs with completion times above, so it's safe to unwrap
+        // that field here. Since there's at least two elements in this iterator (given the
+        // two if statements above), we know this will return Some(_).
+        warn!("Multiple jobs could have produced the standard site {site_id} output for {date}, will use the most recently completed job.");
+        matching_jobs.into_iter()
+            .reduce(|curr, new| {
+                if new.complete_time.unwrap() > curr.complete_time.unwrap() {
+                    new
+                } else {
+                    curr
+                }
+            })
+    }
+
     /// Provide a summary the sites generated/pending/etc. for a given date
     pub async fn summarize_date(conn: &mut MySqlConn, date: NaiveDate) -> anyhow::Result<StdJobDateSummary> {
         let stdsites = siteinfo::SiteInfo::get_site_info_for_date(conn, date, false).await?;
@@ -680,6 +827,40 @@ impl StdSiteJob {
 
         Ok(summary)
     }
+}
+
+
+/// Given a path to a standard site tarball, extract the site ID and date.
+/// 
+/// Will error if:
+/// - The filename does not follow the pattern "XX_ggg_inputs_YYYYMMDD.tgz"
+/// - Could not get a filename from the given path.
+pub fn info_from_std_tarball_name(tarball: &Path) -> anyhow::Result<(String, NaiveDate)> {
+    let filename = tarball.file_stem()
+        .ok_or_else(|| anyhow::anyhow!("Could not get file name for standard site tarball to determine site ID and date"))?
+        .to_string_lossy();
+
+    // Filename should have format ID_ggg_inputs_YYYYMMDD.tgz
+    let mut parts = filename.split('_');
+    let site_id = parts.next()
+        .ok_or_else(|| anyhow::anyhow!("Could not get site ID from {filename} (failed to get first split on '_')"))?
+        .to_string();
+
+    if parts.next() != Some("ggg") {
+        anyhow::bail!("Standard site tarball {filename} does not match expected filename format (second split on '_' != 'ggg')");
+    }
+
+    if parts.next() != Some("inputs") {
+        anyhow::bail!("Standard site tarball {filename} does not match expected filename format (third split on '_' != 'inputs')");
+    }
+
+    let datestr = parts.next()
+        .ok_or_else(|| anyhow::anyhow!("Could not get date from {filename} (failed to get fourth split on '_')"))?;
+
+    let date = NaiveDate::parse_from_str(datestr, "%Y%m%d")
+        .with_context(|| format!("Date string ({datestr}) in {filename} could not be parsed."))?;
+
+    Ok((site_id, date))
 }
 
 pub struct AddStdJobSummary {
