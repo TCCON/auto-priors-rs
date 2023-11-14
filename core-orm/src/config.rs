@@ -1117,7 +1117,10 @@ pub struct EmailConfig {
     report_emails: Mailboxes,
 
     /// Which email backend to use to send the emails.
-    backend: EmailBackend
+    backend: EmailBackend,
+
+    /// Additional emails to send to when sending an email to all past submitters
+    pub extra_submitters: Mailboxes,
 }
 
 impl Default for EmailConfig {
@@ -1131,7 +1134,8 @@ impl Default for EmailConfig {
             from_address: from_addr, 
             admin_emails: Default::default(), 
             report_emails: Default::default(),
-            backend: Default::default() 
+            backend: Default::default(),
+            extra_submitters: Default::default()
         }
     }
 }

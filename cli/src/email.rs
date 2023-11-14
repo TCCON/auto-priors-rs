@@ -63,7 +63,11 @@ pub async fn email_past_job_submitters_cli(conn: &mut MySqlConn, config: &Config
 }
 
 pub async fn email_past_job_submitters(conn: &mut MySqlConn, config: &Config, to: &str, subject: &str, body: &str) -> anyhow::Result<()> {
-    let emails = Job::get_distinct_submitter_emails(conn).await?;
+    let mut emails = Job::get_distinct_submitter_emails(conn).await?;
+    for extra_addr in config.email.extra_submitters.iter() {
+        emails.push(extra_addr.to_string());
+    }
+
     let emails_ref: Vec<_> = emails.iter().map(|e| e.as_str()).collect();
     config.email.send_mail(
         &[to],
