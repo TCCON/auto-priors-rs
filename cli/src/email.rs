@@ -25,6 +25,9 @@ pub enum EmailActions {
 
 
 /// Send an email to anyone who has previously submitted a job
+/// 
+/// To add additional emails to this list, use the "extra_submitters"
+/// option in the email section of the configuration file.
 #[derive(Debug, Args)]
 pub struct EmailSubmittersCli {
     /// Who to use as the "to" email address; all the past submitters will be blind carbon copied
@@ -65,7 +68,10 @@ pub async fn email_past_job_submitters_cli(conn: &mut MySqlConn, config: &Config
 pub async fn email_past_job_submitters(conn: &mut MySqlConn, config: &Config, to: &str, subject: &str, body: &str) -> anyhow::Result<()> {
     let mut emails = Job::get_distinct_submitter_emails(conn).await?;
     for extra_addr in config.email.extra_submitters.iter() {
-        emails.push(extra_addr.to_string());
+        let extra_addr = extra_addr.to_string();
+        if !emails.contains(&extra_addr) {
+            emails.push(extra_addr.to_string());
+        }
     }
 
     let emails_ref: Vec<_> = emails.iter().map(|e| e.as_str()).collect();
