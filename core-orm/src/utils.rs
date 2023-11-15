@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, str::FromStr};
 
 use chrono::{NaiveDate, Duration};
 use itertools::Itertools;
@@ -340,6 +340,10 @@ where
     tabled::Table::new(iter)
         .with(table_config)
         .to_string()
+}
+
+pub fn is_valid_email(email: &str) -> bool {
+    lettre::Address::from_str(email).is_ok()
 }
 
 #[cfg(test)]

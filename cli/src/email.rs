@@ -3,7 +3,9 @@ use std::{path::PathBuf, io::Read};
 use anyhow::Context;
 use chrono::NaiveDate;
 use clap::{Args, Subcommand};
-use orm::{MySqlConn, config::Config, jobs::Job};
+use itertools::Itertools;
+use log::warn;
+use orm::{MySqlConn, config::Config, jobs::Job, email::SendMail};
 
 
 /// Send bulk emails about the priors
@@ -44,6 +46,10 @@ pub struct EmailSubmittersCli {
     /// Path to a file containing the body of the email. For short emails, you can use --body instead.
     #[clap(short='f', long)]
     body_file: Option<PathBuf>,
+
+    /// Use a mock email backend rather that the configured one.
+    #[clap(short='d', long)]
+    dry_run: bool,
 }
 
 pub async fn email_past_job_submitters_cli(conn: &mut MySqlConn, config: &Config, args: EmailSubmittersCli) -> anyhow::Result<()> {
@@ -62,28 +68,59 @@ pub async fn email_past_job_submitters_cli(conn: &mut MySqlConn, config: &Config
         anyhow::bail!("Must give one of --body or --body-file");
     };
 
-    email_past_job_submitters(conn, config, &args.to, &args.subject, &body).await
+    email_past_job_submitters(conn, config, &args.to, &args.subject, &body, args.dry_run).await
 }
 
-pub async fn email_past_job_submitters(conn: &mut MySqlConn, config: &Config, to: &str, subject: &str, body: &str) -> anyhow::Result<()> {
-    let mut emails = Job::get_distinct_submitter_emails(conn).await?;
-    for extra_addr in config.email.extra_submitters.iter() {
-        let extra_addr = extra_addr.to_string();
-        if !emails.contains(&extra_addr) {
-            emails.push(extra_addr.to_string());
-        }
-    }
+pub async fn email_past_job_submitters(conn: &mut MySqlConn, config: &Config, to: &str, subject: &str, body: &str, dry_run: bool) -> anyhow::Result<()> {
+    let emails = make_submitter_email_list(conn, config).await?;
 
     let emails_ref: Vec<_> = emails.iter().map(|e| e.as_str()).collect();
-    config.email.send_mail(
-        &[to],
-        None,
-        Some(&emails_ref),
-        subject,
-        body
-    )?;
+    if dry_run {
+        let mock = orm::email::MockEmail{};
+        mock.send_mail(
+            &[to],
+            &config.email.from_address.to_string(),
+            None,
+            Some(&emails_ref),
+            subject, 
+            body
+        )?;
+    } else {
+        config.email.send_mail(
+            &[to],
+            None,
+            Some(&emails_ref),
+            subject,
+            body
+        )?;
+    }
     Ok(())
 }
+
+async fn make_submitter_email_list(conn: &mut MySqlConn, config: &Config) -> anyhow::Result<Vec<String>> {
+    let mut emails = Job::get_distinct_submitter_emails(conn).await?
+        .into_iter()
+        .filter_map(|addr| {
+            // A common mistake is to put angle brackets around the email address
+            let trimmed_addr = addr.trim_start_matches('<').trim_end_matches('>');
+            if orm::utils::is_valid_email(trimmed_addr) {
+                Some(trimmed_addr.to_string())
+            } else {
+                warn!("Skipping invalid email address {trimmed_addr}");
+                None
+            }
+        }).collect_vec();
+
+    for extra_addr in config.email.extra_submitters.iter() {
+        emails.push(extra_addr.to_string());
+    }
+
+    emails.dedup();
+    emails.sort_unstable();
+
+    Ok(emails)
+}
+
 
 /// Send an email reporting on pending and running jobs
 #[derive(Debug, Args)]

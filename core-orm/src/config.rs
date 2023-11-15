@@ -1105,7 +1105,7 @@ pub struct EmailConfig {
     /// The email address that emails from this system come from.
     /// The default is "noreplay@<hostname>", where <hostname> is
     /// the host name of the system.
-    from_address: Mailbox,
+    pub from_address: Mailbox,
 
     /// A list of emails to contact in the event of a severe error
     /// that needs addressed by the administrators.
