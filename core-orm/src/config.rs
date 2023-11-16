@@ -681,6 +681,14 @@ pub struct ExecutionConfig {
     /// Run directory for standard site jobs.
     pub std_sites_output_base: PathBuf,
 
+    /// Maximum number of days allowed in a single job request. If omitted, no limit is imposed.
+    #[serde(default)]
+    pub job_max_days: Option<u32>,
+
+    /// If included, requests submitted by users will be split into jobs of this many days.
+    #[serde(default)]
+    pub job_split_into_days: Option<u32>,
+
     /// Run a simulation, do not execute ginput, but generate mock output files for testing
     #[serde(default)]
     pub simulate: bool,
@@ -738,6 +746,8 @@ impl Default for ExecutionConfig {
             flat_stdsite_json_file: Default::default(),
             grouped_stdsite_json_file: Default::default(),
             ginput: Default::default(),
+            job_max_days: None,
+            job_split_into_days: None,
             simulate: false,
             simulation_delay: default_sim_delay(),
             submitted_job_queue: "submitted".to_string(),

@@ -129,9 +129,18 @@ impl InputJob {
             }
         }
 
-        // Confirm that the required met files are available, unless missing start/end dates
-        // was one of the problems encountered in the input file
         if let (Some(start), Some(end)) = (builder.start_date, builder.end_date) {
+            // Check that the user's job isn't too long, unless missing start/end dates was one of the problems
+            // encountered in the input file
+            if let Some(max_days) = config.execution.job_max_days {
+                let job_ndays = (end - start).num_days();
+                if job_ndays > max_days as i64 {
+                    info!("Rejecting job from {} because it requests too many days: {job_ndays} requested vs. {max_days} allowed", input_file.display());
+                    problems.push(format!("Too many days requested: {job_ndays} requested but the maximum allowed is {max_days}"));
+                }
+            }
+            // Confirm that the required met files are available, unless missing start/end dates
+            // was one of the problems encountered in the input file
             if let Err(e) = check_met_available(conn, config, start, end).await {
                 error!("Error occurred while checking met file availability for input file '{}': {e:?}", input_file.display());
                 problems.push(e.to_problem());
