@@ -436,7 +436,7 @@ impl<T: Queueable> JobManager<T> {
                 info!("Starting jobs in queue '{queue_name}'");
                 let config = self.shared_config.read().await;
                 if let Some(queue) = self.job_queues.get_mut(queue_name) {
-                    queue.start(&self.pool, &config, &self.error_handler).await;
+                    queue.start(self.pool.clone(), &config, &self.error_handler).await;
                 } else {
                     warn!("Failed to get queue {queue_name} to start jobs, even though it was listed as a pending queue");
                 }
@@ -588,7 +588,7 @@ pub(crate) trait Queueable {
     fn new_lut_job(ginput_key: String) -> Self;
 
     /// Start the job, updating the database if needed.
-    async fn start(&mut self, conn: MySqlPC, config: &Config) -> anyhow::Result<()>;
+    async fn start(&mut self, pool: PoolWrapper, config: &Config) -> anyhow::Result<()>;
 
     /// Return whether this job has started yet. It can be `true` even if the job is complete,
     /// use `is_done` instead to check if a previously started job is complete or errored.
@@ -660,22 +660,11 @@ impl<T: Queueable> Queue<T> {
     }
 
     /// Start running any items in the queue not already in progrees.
-    pub async fn start(&mut self, pool: &PoolWrapper, config: &Config, error_handler: &ErrorHandler) {
+    pub async fn start(&mut self, pool: PoolWrapper, config: &Config, error_handler: &ErrorHandler) {
         for item in self.items.iter_mut() {
             if !item.has_started() {
                 debug!("Starting queued item: {}", item.describe());
-                let conn = match pool.get_connection().await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        item.mark_for_cleanup();
-                        error_handler.report_error_with_context(
-                            e.as_ref(),
-                            "Failed to acquire database connection while trying to start a job"
-                        );
-                        continue;
-                    }
-                };
-                item.start(conn, config).await
+                item.start(pool.clone(), config).await
                 .unwrap_or_else(|e| error_handler.report_error(e.as_ref()));
                 debug!("Queued item {} started successfully", item.describe());
             } else {
@@ -813,8 +802,8 @@ impl ServiceJobRunner {
         }
     }
 
-    async fn start_ginput_job(conn: MySqlPC, job: Job, config: Config, join_handle: &mut Option<GinputHandle>) -> anyhow::Result<()> {
-        *join_handle = Some(start_priors_gen_job(conn.detach(), job, config));
+    async fn start_ginput_job(pool: PoolWrapper, job: Job, config: Config, join_handle: &mut Option<GinputHandle>) -> anyhow::Result<()> {
+        *join_handle = Some(start_priors_gen_job(pool, job, config));
         debug!("Ginput job started, join handle = {join_handle:?}");
         Ok(())
     }
@@ -912,9 +901,9 @@ impl Queueable for ServiceJobRunner {
         }
     }
 
-    async fn start(&mut self, conn: MySqlPC, config: &Config) -> anyhow::Result<()> {
+    async fn start(&mut self, pool: PoolWrapper, config: &Config) -> anyhow::Result<()> {
         match self {
-            Self::GinputJob{job, join_handle, force_cleanup: _} => Self::start_ginput_job(conn, job.clone(), config.clone(), join_handle).await,
+            Self::GinputJob{job, join_handle, force_cleanup: _} => Self::start_ginput_job(pool, job.clone(), config.clone(), join_handle).await,
             Self::LutRegenJob{ginput_key, join_handle, force_cleanup: _} => Self::start_lut_job(ginput_key.clone(), join_handle, config.clone()).await,
         }
     }
@@ -975,7 +964,7 @@ mod tests {
             Self::new_from_seconds(5)
         }
 
-        async fn start(&mut self, mut _conn: MySqlPC, _config: &Config) -> anyhow::Result<()> {
+        async fn start(&mut self, mut _conn: PoolWrapper, _config: &Config) -> anyhow::Result<()> {
             self.start_time = Some(Instant::now());
             Ok(())
         }

@@ -14,7 +14,7 @@ use sqlx::{self, FromRow, Type, Acquire};
 use tabled::Tabled;
 use tokio::task::JoinHandle;
 
-use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::{Config, EmailConfig}, utils};
+use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::{Config, EmailConfig}, utils, PoolWrapper};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
@@ -1712,20 +1712,26 @@ struct GinputAutomationArgs {
 
 pub type GinputHandle = JoinHandle<anyhow::Result<()>>;
 
-pub fn start_priors_gen_job(conn: MySqlConn, job: Job, config: Config) -> GinputHandle {
+pub fn start_priors_gen_job(pool: PoolWrapper, job: Job, config: Config) -> GinputHandle {
     tokio::spawn(async move {
-        run_priors_gen_job(conn, job, config).await
+        run_priors_gen_job(pool, job, config).await
     })
 }
 
-async fn run_priors_gen_job(mut conn: MySqlConn, mut job: Job, config: Config) -> anyhow::Result<()> {
+async fn run_priors_gen_job(pool: PoolWrapper, mut job: Job, config: Config) -> anyhow::Result<()> {
+    // This function must take an SQL pool rather than a connection because holding the
+    // connection opening while long jobs run seems to cause a "connection reset by peer"
+    // issue.
     info!("Beginning job {} for dates {} to {}", job.job_id, job.start_date, job.end_date);
     let date_iter = crate::utils::DateIterator::new(
         vec![(job.start_date, job.end_date)]
     );
 
     for date in date_iter {
+        // Use this connection just to get the arguments, running the priors for many
+        // dates takes long enough for the connection to reset.
         let res = {
+            let mut conn = pool.get_connection().await?;
             setup_ginput_args_for_date(&mut conn, date, &job, &config).await
         };
         let res = res.with_context(|| format!("Error occurred setting up arguments to run date {date} in job {}", job.job_id));
@@ -1738,6 +1744,9 @@ async fn run_priors_gen_job(mut conn: MySqlConn, mut job: Job, config: Config) -
             .with_context(|| format!("Error occurred while running ginput for date {date} in job {}", job.job_id))?;
     }
 
+    // Now we should be okay to get a connection from the pool for the rest of the function
+    // since the rest of the function should be quick enough.
+    let mut conn = pool.get_connection().await?;
     let (make_tarball, output_path) = match job.save_tarball {
         TarChoice::No => {
             let root_save_dir = &job.root_save_dir;
