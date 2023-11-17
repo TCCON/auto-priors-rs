@@ -27,8 +27,8 @@ impl FailedParsingError {
         return format!("{prefix}{problems}")
     }
 
-    fn new_for_database_error(input_file: PathBuf, email: String) -> Self {
-        let reasons = vec!["There was an error while adding this job to the database. You may try submitting this job again; if it continues to fail, please report this problem".to_string()];
+    fn new_for_database_error(input_file: PathBuf, email: String, nfailures: usize, njobs: usize) -> Self {
+        let reasons = vec![format!("There was an error while adding this request to the database ({nfailures} of {njobs} component jobs failed). You may try submitting this job again; if it continues to fail, please report this problem")];
         Self { reasons: reasons, input_file, email: Some(email) }
     }
 }
@@ -502,49 +502,79 @@ pub async fn add_jobs_from_input_files(
 
             let save_tarball = if job.is_egi { crate::jobs::TarChoice::Egi } else { crate::jobs::TarChoice::Yes };
 
-            let res = crate::jobs::Job::add_job_from_args(conn,
-                job.site_id.clone(),
-                job.start_date,
-                job.end_date,
-                save_dir.to_owned(),
-                Some(job.email.clone()),
-                job.lat.clone(),
-                job.lon.clone(),
-                &config.execution.submitted_job_queue,
-                Some(job.mod_fmt),
-                Some(job.vmr_fmt),
-                Some(job.map_fmt),
-                None,
-                None,
-                Some(save_tarball)
-            ).await;
+            // If so configured, split up the input job into shorter jobs
+            let date_ranges = if let Some(ndays) = config.execution.job_split_into_days {
+                utils::split_date_range_by_days(job.start_date, job.end_date, ndays.into())
+            } else {
+                vec![(job.start_date, job.end_date)]
+            };
 
-            match res {
-                Ok(new_id) => {
-                    // Successfully added the job to the database, so move the file and email the user a confirmation
-                    // Moving the file might still error, so handle that internally
-                    info!("Added job {new_id} from file {}", infile.display());
+            let mut results = vec![];
+            for (sub_start, sub_end) in date_ranges {
+                let this_res = crate::jobs::Job::add_job_from_args(conn,
+                    job.site_id.clone(),
+                    sub_start,
+                    sub_end,
+                    save_dir.to_owned(),
+                    Some(job.email.clone()),
+                    job.lat.clone(),
+                    job.lon.clone(),
+                    &config.execution.submitted_job_queue,
+                    Some(job.mod_fmt),
+                    Some(job.vmr_fmt),
+                    Some(job.map_fmt),
+                    None,
+                    None,
+                    Some(save_tarball)
+                ).await;
+                results.push(this_res);
+            }
 
-                    let dest_file = config.execution.success_input_file_dir.join(
-                        format!("job_{new_id:09}_input_file.txt")
-                    );
-
-                    if let Err(e) = mover.move_file(&infile, Some(&dest_file)) {
-                        unmoved_input_file_errors.push(e);
+            let njobs = results.len();
+            let mut job_ids = vec![];
+            let mut errored = false;
+            for res in results {
+                match res {
+                    Ok(new_id) => {
+                        // Successfully added the job to the database, so move the file and email the user a confirmation
+                        // Moving the file might still error, so handle that internally
+                        info!("Added job {new_id} from file {}", infile.display());
+                        job_ids.push(new_id);
+                        
+                    },
+                    Err(e) => {
+                        warn!("Error adding job from input file {} to database: {e:?}", infile.display());
+                        errored = true;
                     }
-
-                    if job.confirmation {
-                        debug!("Sending confirmation email for input file {}", infile.display());
-                        confirm_successful_parsing(&job, config, infile);
-                    } else {
-                        debug!("Confirmation email declined for input file {}", infile.display());
-                    }
-                },
-                Err(e) => {
-                    warn!("Error adding job from input file {} to database: {e:?}", infile.display());
-                    let parsing_err = FailedParsingError::new_for_database_error(infile.to_path_buf(), job.email);
-                    email_user_for_failed_parsing(parsing_err, config);
                 }
+            }
+
+            if !errored {
+                let job_id_string = if job_ids.len() == 0 {
+                    "?????????".to_string()
+                } else if job_ids.len() == 1 {
+                    format!("{:09}", job_ids[0])
+                } else {
+                    format!("{:09}-{:09}", job_ids[0], job_ids.last().copied().unwrap_or_default())
+                };
+                let dest_file = config.execution.success_input_file_dir.join(
+                    format!("job_{job_id_string}_input_file.txt")
+                );
+
+                if let Err(e) = mover.move_file(&infile, Some(&dest_file)) {
+                    unmoved_input_file_errors.push(e);
+                }
+
+                if job.confirmation {
+                    debug!("Sending confirmation email for input file {}", infile.display());
+                    confirm_successful_parsing(&job, config, infile, njobs);
+                } else {
+                    debug!("Confirmation email declined for input file {}", infile.display());
+                }
+            } else {
+                let nfailures = njobs - job_ids.len();
+                let parsing_err = FailedParsingError::new_for_database_error(infile.to_path_buf(), job.email, nfailures, njobs);
+                email_user_for_failed_parsing(parsing_err, config);
             }
         }
     }
@@ -560,12 +590,15 @@ pub async fn add_jobs_from_input_files(
     }
 }
 
-fn confirm_successful_parsing(job: &InputJob, config: &Config, input_file: &Path) {
+fn confirm_successful_parsing(job: &InputJob, config: &Config, input_file: &Path, njobs: usize) {
     let email = &job.email;
     let input_file_name = input_file.file_name()
         .map(|n| n.to_string_lossy())
         .unwrap_or_else(|| "??".into());
-    let body = format!("This confirms successful receipt of the following request for GGG priors:\n\n{job}\n\nTo disable these emails, set 'confirmation=false' (without the quotes) as the last line of your input file");
+    let mut body = format!("This confirms successful receipt of the following request for GGG priors:\n\n{job}\n\nTo disable these emails, set 'confirmation=false' (without the quotes) as the last line of your input file.");
+    if njobs > 1 {
+        body.push_str(&format!(" Note that your request was split into {njobs} smaller jobs, you will receive completion emails for each."));
+    }
     config.email.send_mail(
         &[email],
         None,

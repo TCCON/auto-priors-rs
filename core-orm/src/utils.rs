@@ -346,6 +346,20 @@ pub fn is_valid_email(email: &str) -> bool {
     lettre::Address::from_str(email).is_ok()
 }
 
+pub fn split_date_range_by_days(start_date: NaiveDate, end_date: NaiveDate, num_days: i64) -> Vec<(NaiveDate, NaiveDate)> {
+    let mut ranges = vec![];
+    let mut curr_start = start_date;
+    while curr_start < end_date {
+        let mut curr_end = curr_start + chrono::Duration::days(num_days);
+        if curr_end > end_date {
+            curr_end = end_date;
+        }
+        ranges.push((curr_start, curr_end));
+        curr_start += chrono::Duration::days(num_days);
+    }
+    ranges
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDate;
@@ -354,6 +368,67 @@ mod tests {
 
     fn date(y: i32, m: u32, d: u32) -> Option<NaiveDate> {
         NaiveDate::from_ymd_opt(y, m, d)
+    }
+
+    #[test]
+    fn test_split_date_range_backwards() {
+        let ranges = split_date_range_by_days(date(2010, 1, 2).unwrap(), date(2010, 1, 1).unwrap(), 1);
+        assert_eq!(ranges, vec![], "Date range with end before start did not produce an empty vector");
+    }
+
+    #[test]
+    fn test_split_date_range_1day() {
+        let start = date(2010, 1, 1).unwrap();
+        
+        let ranges = split_date_range_by_days(start, date(2010, 1, 2).unwrap(), 1);
+        let correct = vec![(start, date(2010, 1, 2).unwrap())];
+        assert_eq!(ranges, correct, "Date range of 1 days did not produce the right range");
+
+        let ranges = split_date_range_by_days(start, date(2010, 1, 3).unwrap(), 1);
+        let correct = vec![
+            (start, date(2010, 1, 2).unwrap()),
+            (date(2010, 1, 2).unwrap(), date(2010, 1, 3).unwrap()),
+        ];
+        assert_eq!(ranges, correct, "Date range of 2 days did not produce the right range");
+
+        let ranges = split_date_range_by_days(start, date(2010, 1, 4).unwrap(), 1);
+        let correct = vec![
+            (start, date(2010, 1, 2).unwrap()),
+            (date(2010, 1, 2).unwrap(), date(2010, 1, 3).unwrap()),
+            (date(2010, 1, 3).unwrap(), date(2010, 1, 4).unwrap()),
+        ];
+        assert_eq!(ranges, correct, "Date range of 3 days did not produce the right range");
+    }
+
+    #[test]
+    fn test_split_date_range_10day() {
+        let start = date(2010, 1, 1).unwrap();
+        
+        let ranges = split_date_range_by_days(start, date(2010, 1, 10).unwrap(), 10);
+        assert_eq!(ranges, vec![(start, date(2010, 1, 10).unwrap())], "Date range <10 days did not produce the right range");
+
+        let ranges = split_date_range_by_days(start, date(2010, 1, 11).unwrap(), 10);
+        assert_eq!(ranges, vec![(start, date(2010, 1, 11).unwrap())], "Date range = 10 days did not produce the right range");
+
+        let ranges = split_date_range_by_days(start, date(2010, 1, 12).unwrap(), 10);
+        assert_eq!(ranges, vec![(start, date(2010, 1, 11).unwrap()), (date(2010, 1, 11).unwrap(), date(2010, 1, 12).unwrap())], "Date range = 10 + 1 days did not produce the right ranges");
+
+        let ranges = split_date_range_by_days(start, date(2010, 1, 16).unwrap(), 10);
+        assert_eq!(ranges, vec![(start, date(2010, 1, 11).unwrap()), (date(2010, 1, 11).unwrap(), date(2010, 1, 16).unwrap())], "Date range = 10 + 5 days did not produce the right ranges");
+
+        let ranges = split_date_range_by_days(start, date(2010, 1, 20).unwrap(), 10);
+        assert_eq!(ranges, vec![(start, date(2010, 1, 11).unwrap()), (date(2010, 1, 11).unwrap(), date(2010, 1, 20).unwrap())], "Date range = 10 + 9 days did not produce the right ranges");
+
+        let ranges = split_date_range_by_days(start, date(2010, 1, 21).unwrap(), 10);
+        assert_eq!(ranges, vec![(start, date(2010, 1, 11).unwrap()), (date(2010, 1, 11).unwrap(), date(2010, 1, 21).unwrap())], "Date range = 10 + 10 days did not produce the right ranges");
+
+        let ranges = split_date_range_by_days(start, date(2010, 1, 22).unwrap(), 10);
+        let correct = vec![
+            (start, date(2010, 1, 11).unwrap()), 
+            (date(2010, 1, 11).unwrap(), date(2010, 1, 21).unwrap()),
+            (date(2010, 1, 21).unwrap(), date(2010, 1, 22).unwrap())
+        ];
+        assert_eq!(ranges, correct, "Date range = 10 + 10 + 1 days did not produce the right ranges");
     }
 
     #[test]

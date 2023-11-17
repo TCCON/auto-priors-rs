@@ -288,19 +288,7 @@ pub async fn special_std_site_run(
 
 fn special_job_date_ranges(start_date: NaiveDate, end_date: NaiveDate, split_days: Option<i64>) -> Vec<(NaiveDate, NaiveDate)> {
     if let Some(num_days) = split_days {
-        let mut ranges = vec![];
-        let mut curr_start = start_date;
-        while curr_start < end_date {
-            let mut curr_end = curr_start + chrono::Duration::days(num_days);
-            dbg!(curr_end);
-            if curr_end > end_date {
-                curr_end = end_date;
-            }
-            dbg!(curr_end);
-            ranges.push((curr_start, curr_end));
-            curr_start += chrono::Duration::days(num_days);
-        }
-        ranges
+        orm::utils::split_date_range_by_days(start_date, end_date, num_days)
     } else {
         vec![(start_date, end_date)]
     }
