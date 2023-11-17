@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use clap::{self, Args, Subcommand};
+use log::debug;
 use orm::{jobs::{Job, ModFmt, VmrFmt, MapFmt, TarChoice}, MySqlConn, config::Config};
 
 
@@ -394,13 +395,19 @@ pub async fn print_job_status(conn: &mut MySqlConn, job_id: i32) -> anyhow::Resu
     let (start_time, ndays) = orm::utils::DateIterator::new_one_range(job.start_date, job.end_date)
         .fold((None, 0), |(time, n), date| {
             let run_args_file = orm::jobs::run_arg_file(&run_dir, date);
-            if let Ok(ctime) = orm::utils::get_file_creation_time(&run_args_file) {
-                let new_time = time
-                    .map(|t| if t < ctime { t } else { ctime })
-                    .unwrap_or(ctime);
-                (Some(new_time), n+1)
-            } else {
-                (time, n)
+            // Creation time would be better, but I found the ccycle filesystem
+            // doesn't provide that
+            match orm::utils::get_file_modification_time(&run_args_file) {
+                Ok(ctime) => {
+                    let new_time = time
+                        .map(|t| if t < ctime { t } else { ctime })
+                        .unwrap_or(ctime);
+                    (Some(new_time), n+1)
+                },
+                Err(e) => {
+                    debug!("While querying run arguments for {date}: {e}");
+                    (time, n)
+                }
             }
         });
 
@@ -418,7 +425,7 @@ pub async fn print_job_status(conn: &mut MySqlConn, job_id: i32) -> anyhow::Resu
         }
         return Ok(());
     } else {
-        println!("  Job not yet executing.");
+        println!("  Job not yet executing (no run args files under {}).", run_dir.display());
         return Ok(());
     }
 

@@ -346,10 +346,10 @@ pub fn is_valid_email(email: &str) -> bool {
     lettre::Address::from_str(email).is_ok()
 }
 
-pub fn get_file_creation_time(file: &Path) -> anyhow::Result<chrono::DateTime<chrono::Local>> {
+pub fn get_file_modification_time(file: &Path) -> anyhow::Result<chrono::DateTime<chrono::Local>> {
     let mdata = std::fs::metadata(file)?;
-    let ctime = mdata.created()?;
-    Ok(ctime.into())
+    let mtime = mdata.modified()?;
+    Ok(mtime.into())
 }
 
 pub fn duration_string(dur: chrono::Duration) -> String {
