@@ -39,6 +39,18 @@ pub enum JobState {
     Cleaned = 4,
 }
 
+impl JobState {
+    pub fn is_over(&self) -> bool {
+        match self {
+            JobState::Pending => false,
+            JobState::Running => false,
+            JobState::Complete => true,
+            JobState::Errored => true,
+            JobState::Cleaned => true,
+        }
+    }
+}
+
 impl Display for JobState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
@@ -1596,7 +1608,7 @@ impl Display for ShellGinputRunner {
 #[async_trait]
 impl InnerGinputRunner for ShellGinputRunner {
     async fn run_gen_priors_for_date(&self, ginput_args: GinputAutomationArgs, simulation_delay: Option<u32>) -> JobResult<()> {
-        let args_file = ginput_args.save_path.join(format!("ginput_run_args_{}.json", ginput_args.start_date));
+        let args_file = run_arg_file(&ginput_args.save_path, ginput_args.start_date);
         let args_file_h = std::fs::File::create(&args_file)
             .map_err(|e| JobError::RunDirectoryError(e))?;
         serde_json::to_writer_pretty(args_file_h, &ginput_args)?;
@@ -1685,6 +1697,10 @@ impl InnerGinputRunner for ShellGinputRunner {
             Err(JobError::WasCancelled)
         }
     }
+}
+
+pub fn run_arg_file(save_path: &Path, start_date: NaiveDate) -> PathBuf {
+    save_path.join(format!("ginput_run_args_{}.json", start_date))
 }
 
 #[derive(Debug, Serialize)]

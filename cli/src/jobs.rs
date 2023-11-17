@@ -28,7 +28,10 @@ pub enum JobActions {
     CleanErrored(CleanErroredCli),
 
     /// Print jobs in the database
-    Print(PrintJobsCli)
+    Print(PrintJobsCli),
+
+    /// Describe the current state of the job
+    Status(JobStatusCli),
 }
 
 #[derive(Debug, Args)]
@@ -363,6 +366,86 @@ pub async fn print_jobs_table(
         let table = orm::utils::to_std_table(jobs);
         println!("{table}");
     }
+
+    Ok(())
+}
+
+
+#[derive(Debug, Args)]
+pub struct JobStatusCli {
+    /// ID number of the job to check the status of
+    job_id: i32,
+}
+
+pub async fn print_job_status_cli(conn: &mut MySqlConn, args: JobStatusCli) -> anyhow::Result<()> {
+    print_job_status(conn, args.job_id).await
+}
+
+
+pub async fn print_job_status(conn: &mut MySqlConn, job_id: i32) -> anyhow::Result<()> {
+    let job = orm::jobs::Job::get_job_with_id(conn, job_id).await
+        .context("Error occurred while retrieving the job from the database")?;
+
+    let run_dir = job.run_dir(false);
+    println!("Job {}:", job.job_id);
+    // Loop through the ginput run args JSON files; they will be created for each day as it is run,
+    // so we can use the first one's creation/modification time to get when the job started as well
+    // as their presence to count how many days are done or in progress.
+    let (start_time, ndays) = orm::utils::DateIterator::new_one_range(job.start_date, job.end_date)
+        .fold((None, 0), |(time, n), date| {
+            let run_args_file = orm::jobs::run_arg_file(&run_dir, date);
+            if let Ok(ctime) = orm::utils::get_file_creation_time(&run_args_file) {
+                let new_time = time
+                    .map(|t| if t < ctime { t } else { ctime })
+                    .unwrap_or(ctime);
+                (Some(new_time), n+1)
+            } else {
+                (time, n)
+            }
+        });
+
+    if let Some(start_time) = start_time {
+        let run_dur = chrono::Local::now() - start_time;
+        println!("  Started at {}, running for {}", start_time.format("%Y-%m-%d %H:%M:%S"), orm::utils::duration_string(run_dur));
+        let total_ndays = (job.end_date - job.start_date).num_days();
+        println!("  Generating day {ndays} of {total_ndays}");
+    } else if job.state.is_over() {
+        println!("  Job is finished.");
+        if let Some(p) = job.output_file {
+            println!("  Output to {}", p.display());
+        } else {
+            println!("  No output.");
+        }
+        return Ok(());
+    } else {
+        println!("  Job not yet executing.");
+        return Ok(());
+    }
+
+    // Also count the .mod, .vmr, and .map files output; if the output directory is cleaned up,
+    // we'll have already returned.
+    let (nmod, nvmr, nmap) = walkdir::WalkDir::new(&run_dir)
+        .into_iter()
+        .filter_entry(|entry| entry.file_name().to_str().map(|s| !s.starts_with(".")).unwrap_or(true))
+        .fold((0, 0, 0), |(mods, vmrs, maps), entry| {
+            if let Ok(entry) = entry {
+                let name = entry.file_name().to_str().unwrap_or("");
+                if name.ends_with(".mod") {
+                    (mods +1, vmrs, maps)
+                } else if name.ends_with(".vmr") {
+                    (mods, vmrs + 1, maps)
+                } else if name.ends_with(".map") || name.ends_with(".map.nc") {
+                    (mods, vmrs, maps + 1)
+                } else {
+                    (mods, vmrs, maps)
+                }
+            } else {
+                (mods, vmrs, maps)
+            }
+        });
+
+    println!("  Output files so far: {nmod} .mod / {nvmr} .vmr / {nmap} .map or .map.nc");
+    println!("  under {}", run_dir.display());
 
     Ok(())
 }
