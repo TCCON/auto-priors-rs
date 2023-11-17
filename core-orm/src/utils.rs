@@ -1,4 +1,4 @@
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, str::FromStr, path::Path};
 
 use chrono::{NaiveDate, Duration};
 use itertools::Itertools;
@@ -344,6 +344,19 @@ where
 
 pub fn is_valid_email(email: &str) -> bool {
     lettre::Address::from_str(email).is_ok()
+}
+
+pub fn get_file_creation_time(file: &Path) -> anyhow::Result<chrono::DateTime<chrono::Local>> {
+    let mdata = std::fs::metadata(file)?;
+    let ctime = mdata.created()?;
+    Ok(ctime.into())
+}
+
+pub fn duration_string(dur: chrono::Duration) -> String {
+    let h = dur.num_hours();
+    let m = dur.num_minutes() - 60*h;
+    let s = dur.num_seconds() - 3600*h - 60*m;
+    format!("{h:02}:{m:02}:{s:02}")
 }
 
 #[cfg(test)]

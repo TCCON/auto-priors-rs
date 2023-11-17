@@ -18,6 +18,7 @@ tabled.workspace = true
 tokio.workspace = true
 
 orm = {path = "../core-orm", package = "tccon_priors_orm"}
+walkdir = "2.4.0"
 
 [dev-dependencies]
 hex-literal = "0.4"
