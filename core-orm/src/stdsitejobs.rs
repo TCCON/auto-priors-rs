@@ -443,7 +443,8 @@ impl StdSiteJob {
                 },
             }
             
-            // Always want to clean up finished jobs, as long as there isn't an error
+            // Usually want to clean up finished jobs, as long as there isn't an error
+            // and there aren't any lingering rows waiting for this job.
             job_ids.insert(jid); 
 
             if row.state != StdSiteJobState::InProgress {
@@ -466,9 +467,27 @@ impl StdSiteJob {
         }
 
         for jid in job_ids {
-            let mut job = jobs::Job::get_job_with_id(conn, jid).await?;
-            job.set_cleaned(conn).await?;
-            info!("Standard site job {jid} cleaned up");
+            // There is an occasional race condition that happens if a job completes while this function
+            // is partway through making tarballs. A concrete example: a job had priors for ny, we, and zs.
+            // This function started running before the job finished and got past all the ny rows in the StdSiteJobs
+            // table. Then the job finished, so this function got the we and zs rows and cleaned up the job. That left
+            // ny stuck because its job had already been cleaned up. So we do one last check that all rows referencing this
+            // job are done.
+            let count = sqlx::query!(
+                "SELECT COUNT(*) AS n FROM v_StdSiteJobs WHERE state = ? AND job = ?",
+                StdSiteJobState::InProgress,
+                jid
+            ).fetch_one(&mut *conn)
+            .await?;
+
+            if count.n == 0 {
+                let mut job = jobs::Job::get_job_with_id(&mut *conn, jid).await?;
+                job.set_cleaned(conn).await?;
+                info!("Standard site job {jid} cleaned up");
+            } else {
+                warn!("Not cleaning up standard site job {jid} yet, some sites still pending (this should be handle the next time making tarballs runs)");
+            }
+            
         }
 
         Ok(())
