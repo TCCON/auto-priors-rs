@@ -1040,14 +1040,14 @@ pub struct ServiceTimingOptions {
 
     /// How many hours between tries to clean up jobs whose output is ready
     /// to be deleted.
-    pub delete_expired_jobs_minutes: u32,
+    pub delete_expired_jobs_hours: u32,
 
     /// How many minutes to add to the time when determining when to clean
     /// up expired jobs' output. For example, setting this to 15 when 
     /// delete_expired_jobs_minutes` is 60 would run the standard sites at 
     /// 15 minutes past each hour.
     #[serde(default)]
-    pub delete_expired_jobs_offset_minutes: u32,
+    pub delete_expired_jobs_offset_minutes: Option<u32>,
 
     /// Set to true to disable generating standard site jobs/priors
     pub disable_std_site_gen: bool,
@@ -1095,8 +1095,8 @@ impl Default for ServiceTimingOptions {
             status_report_seconds: 60,
             lut_regen_days: 24, 
             lut_regen_at: NaiveTime::from_hms_opt(0, 0, 0),
-            delete_expired_jobs_minutes: 12,
-            delete_expired_jobs_offset_minutes: 0,
+            delete_expired_jobs_hours: 12,
+            delete_expired_jobs_offset_minutes: None,
             disable_std_site_gen: false,
             std_site_gen_hours: 24, 
             std_site_gen_offset_minutes: Some(180),

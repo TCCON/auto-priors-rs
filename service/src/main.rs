@@ -126,8 +126,8 @@ async fn driver() -> anyhow::Result<()> {
 
     info!("Setting up job cleanup to run");
     let tx_cleanup_jobs = tx_jobs.clone();
-    sync_scheduler
-        .every(timing_config.delete_expired_jobs_minutes.hours())
+    let delete_job = sync_scheduler
+        .every(timing_config.delete_expired_jobs_hours.hours())
         .run(move || {
             debug!("Scheduler: sending CleanUpJobs message");
             match tx_cleanup_jobs.try_send(jobs::JobMessage::CleanUpJobs) {
@@ -136,6 +136,9 @@ async fn driver() -> anyhow::Result<()> {
                 Err(TrySendError::Full(_)) => warn!("Could not send CleanUpJobs message, channel full"),
             }
         });
+    if let Some(offset) = timing_config.delete_expired_jobs_offset_minutes {
+        delete_job.plus(offset.minutes());
+    }
 
     
     info!("Setting up strat LUT regen to run");
