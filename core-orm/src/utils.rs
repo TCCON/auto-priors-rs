@@ -306,6 +306,35 @@ pub fn format_lon_str(lon: f32, prec: u8) -> String {
     }
 }
 
+
+pub fn softwrap<R: std::io::BufRead>(reader: R, buf: &mut String) -> std::io::Result<()> {
+    
+    let mut found_blank = false;
+    let mut needs_space = false;
+
+    for line in reader.lines() {
+        let line = line?;
+        let line = line.trim();
+        if needs_space {
+            buf.push_str(" ");
+        }
+
+        if line.is_empty() {
+            found_blank = true;
+            needs_space = false;
+        } else if found_blank {
+            buf.push_str(&format!("\n\n{line}"));
+            found_blank = false;
+            needs_space = true;
+        } else {
+            buf.push_str(line);
+            needs_space = true;
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct ParseInputBoolError(String);
 

@@ -47,6 +47,13 @@ pub struct EmailSubmittersCli {
     #[clap(short='f', long)]
     body_file: Option<PathBuf>,
 
+    /// By default, if --body-file is used for the body, then it will be softwrapped, meaning individual
+    /// newlines are removed and multiple consecutive newlines are reduced to 2. This makes the email
+    /// body look nicer in viewers that do softwrapping. Use this flag to disable that and keep all
+    /// newlines.
+    #[clap(short='k', long)]
+    keep_newlines: bool,
+
     /// Use a mock email backend rather that the configured one.
     #[clap(short='d', long)]
     dry_run: bool,
@@ -62,7 +69,11 @@ pub async fn email_past_job_submitters_cli(conn: &mut MySqlConn, config: &Config
     } else if let Some(path) = &args.body_file {
         let mut file = std::fs::File::open(path).context("Error occurred trying to open the --body-file")?;
         let mut buf = String::new();
-        file.read_to_string(&mut buf).context("Error occurred while trying to read the --body-file")?;
+        if args.keep_newlines {
+            file.read_to_string(&mut buf).context("Error occurred while trying to read the --body-file")?;
+        } else {
+            orm::utils::softwrap(std::io::BufReader::new(file), &mut buf)?;
+        }
         buf
     } else {
         anyhow::bail!("Must give one of --body or --body-file");
