@@ -1126,6 +1126,10 @@ pub struct EmailConfig {
     #[serde(default)]
     report_emails: Mailboxes,
 
+    /// A list of emails to send standard site requests to. If not present,
+    /// they'll need specified on the command line.
+    pub std_site_req_emails: Option<Mailboxes>,
+
     /// Which email backend to use to send the emails.
     backend: EmailBackend,
 
@@ -1144,6 +1148,7 @@ impl Default for EmailConfig {
             from_address: from_addr, 
             admin_emails: Default::default(), 
             report_emails: Default::default(),
+            std_site_req_emails: Default::default(),
             backend: Default::default(),
             extra_submitters: Default::default()
         }
