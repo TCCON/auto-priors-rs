@@ -288,7 +288,8 @@ pub struct PrintJobsCli {
     all: bool,
 
     /// Limit to certain job IDs, repeat this argument to specify multiple
-    /// job IDs.
+    /// job IDs. If given, these jobs will be displayed regardless of their
+    /// state (i.e. --all will have no effect). 
     #[clap(short = 'j', long)]
     job_id: Vec<i32>,
 
@@ -309,7 +310,7 @@ pub async fn print_jobs_table_cli(conn: &mut MySqlConn, args: PrintJobsCli) -> a
     print_jobs_table(
         conn, 
         args.details,
-        !args.all,
+        !(args.all || !args.job_id.is_empty()),
         args.job_id.as_slice(),
         (args.submitted_after, args.submitted_before),
         args.submitter_email.as_deref()
