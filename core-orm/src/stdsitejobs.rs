@@ -8,6 +8,7 @@ use anyhow::Context;
 use chrono::{NaiveDate, Duration};
 use futures::TryStreamExt;
 use itertools::Itertools;
+use log::debug;
 use log::{info, warn};
 use serde::Deserialize;
 use serde::Serialize;
@@ -350,6 +351,19 @@ impl StdSiteJob {
         ).fetch_all(&mut *conn)
         .await?;
 
+        // Determine a date after which jobs should get higher priority to ensure that "current"
+        // jobs don't get delayed by backfill jobs. If this isn't configured, use a date in the future
+        // to effectively disable this.
+        let high_priority_date = if let Some(ndays) = config.execution.std_site_priority_days {
+            debug!("execution.std_site_priority_days = {ndays}, will allocate higher priority to current standard site jobs");
+            let today = chrono::Utc::now().date_naive();
+            today - chrono::Duration::days(ndays)
+        } else {
+            debug!("execution.std_site_priority_days unset, will NOT allocate higher priority to current standard site jobs");
+            let today = chrono::Utc::now().date_naive();
+            today + chrono::Duration::days(1000)
+        };
+
         for rec in query {
             // Really the site_ids and ids values should never be None; the way the above query works, we should only get a record if there are rows with sites that 
             // need a job. However, we can't prove that the GROUP_CONCAT operation will produce something, so we double check that these aren't Nones. Also, we return
@@ -376,6 +390,12 @@ impl StdSiteJob {
                 // For all the jobs, we'll just make all the possible output files, then put only the ones we want
                 // into the tarballs later. This way we can still use one job per date, rather than splitting that
                 // job up by what the different sites want.
+                let priority = if rec.date >= high_priority_date { 
+                    debug!("Standard site job for {} receiving higher priority since it covers a recent period (on or after {})", rec.date, high_priority_date);
+                    Some(100) 
+                } else {
+                    None
+                };
                 let mut trans = conn.begin().await?;
 
                 let job_id = jobs::Job::add_job_from_args(
@@ -391,7 +411,7 @@ impl StdSiteJob {
                     Some(jobs::ModFmt::Text), 
                     Some(jobs::VmrFmt::Text), 
                     Some(jobs::MapFmt::TextAndNetCDF), 
-                    None, 
+                    priority, 
                     None, 
                     Some(jobs::TarChoice::No)
                 ).await.with_context(|| format!("Error occurred while adding standard sites job for date {}", rec.date))?;

@@ -702,6 +702,11 @@ pub struct ExecutionConfig {
     /// The queue that standard site jobs go into
     pub std_site_job_queue: String,
 
+    /// When adding jobs for standard sites, jobs covering dates from today - N days on
+    /// will have extra priority. If this is not specified, then these "current" jobs
+    /// get no extra priority.
+    pub std_site_priority_days: Option<i64>,
+
     /// Which error handler to use. Note that this cannot be changed by a config reload.
     pub error_handler: ErrorHandlerChoice,
 
@@ -751,7 +756,8 @@ impl Default for ExecutionConfig {
             simulate: false,
             simulation_delay: default_sim_delay(),
             submitted_job_queue: "submitted".to_string(),
-            std_site_job_queue: "std-sites".to_string()
+            std_site_job_queue: "std-sites".to_string(),
+            std_site_priority_days: Default::default(),
         }
     }
 }
