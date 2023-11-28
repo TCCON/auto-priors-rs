@@ -327,7 +327,6 @@ async fn count_jobs_for_request(conn: &mut MySqlConn, emails: Option<&str>, site
         let after_date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
         let mut all_jobs = vec![];
         for addr in re.split(emails) {
-            dbg!(addr);
             let addr_jobs = orm::jobs::Job::get_jobs_for_user_submitted_after(conn, addr, after_date).await?;
             all_jobs.extend(addr_jobs);
         }
