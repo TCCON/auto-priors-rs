@@ -98,6 +98,29 @@ impl From<serde_json::Error> for JobError {
     }
 }
 
+#[derive(Debug)]
+pub enum JobPriorityError {
+    StateNotPending,
+    Other(anyhow::Error),
+}
+
+impl Display for JobPriorityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JobPriorityError::StateNotPending => write!(f, "Job is not pending, changing priority will have no effect."),
+            JobPriorityError::Other(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl From<anyhow::Error> for JobPriorityError {
+    fn from(value: anyhow::Error) -> Self {
+        Self::Other(value)
+    }
+}
+
+impl Error for JobPriorityError {}
+
 
 #[derive(Debug)]
 pub enum EmailError {

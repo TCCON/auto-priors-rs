@@ -28,6 +28,9 @@ pub enum JobActions {
     /// Delete output from jobs that errored
     CleanErrored(CleanErroredCli),
 
+    /// Change the priority of a job
+    SetPriority(SetPriorityCli),
+
     /// Print jobs in the database
     Print(PrintJobsCli),
 
@@ -144,6 +147,32 @@ pub async fn delete_job(db: &mut orm::MySqlConn, clargs: DeleteJobCli) -> anyhow
     let n_deleted = orm::jobs::Job::delete_job_with_id(db, clargs.id).await?;
     println!("Deleted {n_deleted} job(s)");
     Ok(())
+}
+
+/// Change the priority of a job
+#[derive(Debug, Args)]
+pub struct SetPriorityCli {
+    /// The job ID to update
+    id: i32,
+
+    /// The new priority to give this job
+    #[clap(allow_hyphen_values = true)]
+    new_priority: i32,
+
+    /// By default, only jobs that are pending can have their priority updated
+    /// (because it will only affect them). Use this flag to allow changing any
+    /// job's priority.
+    #[clap(short='a', long)]
+    allow_any_state: bool,
+}
+
+pub async fn set_job_priority_cli(conn: &mut MySqlConn, args: SetPriorityCli) -> anyhow::Result<()> {
+    let res = Job::set_priority_by_id(args.id, conn, args.new_priority, args.allow_any_state).await;
+    match res {
+        Ok(_) => Ok(()),
+        Err(orm::error::JobPriorityError::StateNotPending) => Err(anyhow::anyhow!("{}. To allow changing this job's priority, use --allow-any-state.", orm::error::JobPriorityError::StateNotPending)),
+        Err(e) => Err(e.into())
+    }
 }
 
 impl AddJobArgs {

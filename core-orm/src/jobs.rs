@@ -14,7 +14,7 @@ use sqlx::{self, FromRow, Type, Acquire};
 use tabled::Tabled;
 use tokio::task::JoinHandle;
 
-use crate::{MySqlConn, siteinfo, error::{JobError, JobResult}, config::{Config, EmailConfig}, utils, PoolWrapper};
+use crate::{MySqlConn, siteinfo, error::{JobError, JobResult, JobPriorityError}, config::{Config, EmailConfig}, utils, PoolWrapper};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
@@ -1432,6 +1432,38 @@ impl Job {
         if let Some(config) = email_config {
             send_job_error_email(self, err, config)?;
         }
+        Ok(())
+    }
+
+    pub async fn set_priority_by_id(job_id: i32, conn: &mut MySqlConn, new_priority: i32, allow_any_state: bool) -> Result<(), JobPriorityError> {
+        let mut job = Job::get_job_with_id(conn, job_id).await
+            .with_context(|| format!("Error occurred while trying to retrieve job #{job_id} to set its priority"))?;
+        job.set_priority(conn, new_priority, allow_any_state).await
+    }
+
+    pub async fn set_priority(&mut self, conn: &mut MySqlConn, new_priority: i32, allow_any_state: bool) -> Result<(), JobPriorityError> {
+        let can_set = match self.state {
+            JobState::Pending => true,
+            JobState::Running => allow_any_state,
+            JobState::Complete => allow_any_state,
+            JobState::Errored => allow_any_state,
+            JobState::Cleaned => allow_any_state,
+        };
+
+        if !can_set {
+            return Err(JobPriorityError::StateNotPending)
+        }
+
+        sqlx::query!(
+            "UPDATE Jobs SET priority = ? WHERE job_id = ?",
+            new_priority,
+            self.job_id
+        ).execute(conn)
+        .await
+        .context("Error occurred while setting job priority")?;
+
+        self.priority = new_priority;
+
         Ok(())
     }
 

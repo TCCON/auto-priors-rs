@@ -135,6 +135,11 @@ async fn main() -> anyhow::Result<()> {
             jobs::reset_job(&mut conn, subargs).await?;
         },
 
+        Commands::Jobs(JobCli { commands: JobActions::SetPriority(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            jobs::set_job_priority_cli(&mut conn, subargs).await?;
+        },
+
         Commands::Jobs(JobCli { commands: JobActions::Status(subargs) }) => {
             let mut conn = db.get_connection().await?;
             jobs::print_job_status_cli(&mut conn, subargs).await?;
