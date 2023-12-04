@@ -3,6 +3,7 @@ use std::{collections::HashSet, path::{Path, PathBuf}};
 use chrono::{NaiveDate, Duration};
 use clap::{self, Subcommand, Args};
 use itertools::Itertools;
+use log::warn;
 use orm::{stdsitejobs,MySqlConn, siteinfo::StdSite, utils::DateIterator};
 
 /// Manage jobs for the standard sites
@@ -299,15 +300,36 @@ async fn special_job_locations(conn: &mut MySqlConn, start_date: NaiveDate, end_
         sids
     } else {
         let mut sids = HashSet::new();
-        for date in orm::utils::DateIterator::new_one_range(start_date, end_date) {
+        for (idate, date) in orm::utils::DateIterator::new_one_range(start_date, end_date).enumerate() {
             let active_site_info = orm::siteinfo::SiteInfo::get_site_info_for_date(conn, date, true).await?;
-            for info in active_site_info {
-                sids.insert(info.site_id.expect("Foreign key for standard site ID should match"));
+            
+            // Because we rely on the default location defined for the sites, if a site does not have an entry for some dates
+            // in the current range, that will cause a crash when the job goes to start. So we need to take only the subset of
+            // sites that have a location defined for all dates in this range.
+            if idate == 0 {
+                for info in active_site_info {
+                    sids.insert(info.site_id.expect("Foreign key for standard site ID should match"));
+                }
+            } else {
+                let this_sid_set = HashSet::from_iter(
+                    active_site_info.into_iter()
+                    .map(|info| info.site_id.expect("Foreign key for standard site ID should match"))
+                );
+
+                let common = Vec::from_iter(sids.intersection(&this_sid_set).cloned());
+                let to_remove = sids.clone().into_iter()
+                    .filter(|sid| !common.contains(sid));
+                for sid in to_remove {
+                    warn!("{sid} does not have a location defined for all dates in {start_date} to {end_date}, it will be skipped in the corresponding job.");
+                    sids.remove(&sid);
+                }
+                
             }
         }
         Vec::from_iter(sids.into_iter())
     };
 
+    // Create vecs of `None` to indicate that we just use the default lat/lon for these sites.
     let lat = Vec::from_iter(site_ids.iter().map(|_| None));
     let lon = lat.clone();
     Ok((site_ids, lat, lon))
