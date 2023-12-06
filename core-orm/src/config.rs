@@ -1381,9 +1381,9 @@ pub fn load_config_file<T>(path: T, validate: bool) -> anyhow::Result<Config>
 where T: AsRef<Path>
 {
     let mut f = File::open(path).context("Failed to open configuration file.")?;
-    let mut toml_str = vec![];
-    f.read_to_end(&mut toml_str)?;
-    let config: Config = toml::from_slice(&toml_str)?;
+    let mut toml_str = String::new();
+    f.read_to_string(&mut toml_str)?;
+    let config: Config = toml::from_str(&toml_str)?;
     if !validate {
         return Ok(config);
     } else if let Err(e) = config.validate() {
