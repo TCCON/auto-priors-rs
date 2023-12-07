@@ -196,6 +196,10 @@ pub struct SpecialRunCli {
     #[clap(long)]
     email: Option<String>,
 
+    /// Which queue to submit to. If not given, will use the submitted jobs queue.
+    #[clap(long)]
+    queue: Option<String>,
+
     /// First date to run for, in YYYY-MM-DD format
     start_date: NaiveDate,
 
@@ -207,6 +211,7 @@ pub struct SpecialRunCli {
 
 pub async fn special_std_site_run_cli(conn: &mut MySqlConn, config: &orm::config::Config, args: SpecialRunCli) -> anyhow::Result<()> {
     let site_ids = args.site_ids.map(|ids| ids.split(',').map(|s| s.to_owned()).collect_vec());
+    let queue = args.queue.as_deref().unwrap_or_else(|| &config.execution.submitted_job_queue);
     special_std_site_run(
         conn,
         config,
@@ -217,7 +222,8 @@ pub async fn special_std_site_run_cli(conn: &mut MySqlConn, config: &orm::config
         args.email,
         args.priority,
         args.start_date,
-        args.end_date
+        args.end_date,
+        queue,
     ).await
 }
 
@@ -231,7 +237,8 @@ pub async fn special_std_site_run(
     email: Option<String>,
     priority: Option<i32>,
     start_date: NaiveDate,
-    end_date: NaiveDate
+    end_date: NaiveDate,
+    queue: &str,
 ) -> anyhow::Result<()> {
 
     // Check that our met and ginput keys are defined in the config and the met data we need is available
@@ -271,7 +278,7 @@ pub async fn special_std_site_run(
             email.clone(),
             site_lats.clone(),
             site_lons.clone(),
-            &config.execution.submitted_job_queue,
+            queue,
             Some(orm::jobs::ModFmt::Text),
             Some(orm::jobs::VmrFmt::Text),
             Some(orm::jobs::MapFmt::TextAndNetCDF),
