@@ -963,7 +963,7 @@ impl Job {
     pub fn parse_site_id_str(site_id_str: &str) -> Vec<String> {
         return site_id_str
                 .split(',')
-                .map(|s| s.to_owned())
+                .map(|s| s.trim().to_owned())
                 .collect();
     }
 
