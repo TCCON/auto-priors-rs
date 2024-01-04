@@ -7,11 +7,12 @@
     </head>
     <body>
         <div class="sidebar">
-            <div>Home</div>
-            <div>Your jobs' status</div>
-            <div>Submit job</div>
-            <div>Job queue</div>
-            <div>Met data</div>
+            {{ sblink(uri='/', text='Home', link_page_id='home', page_id=page_id) }}
+            {{ sblink(uri='/job-statuses', text='Your job statuses', page_id=page_id) }}
+            {{ sblink(uri='/submit-job', text='Submit job', page_id=page_id) }}
+            {{ sblink(uri='/job-queue', text='Job queue', page_id=page_id) }}
+            {{ sblink(uri='/std-sites', text='Standard sites', page_id=page_id) }}
+            {{ sblink(uri='/met-data', text='Met data', page_id=page_id) }}
         </div>
 
         {% block content %}{% endblock content %}
