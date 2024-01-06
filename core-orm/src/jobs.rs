@@ -1561,6 +1561,7 @@ impl JobSummary {
 #[async_trait]
 pub trait FairShare {
     async fn next_job_in_queue(&self, conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>>;
+    async fn list_jobs_in_order(&self, conn: &mut MySqlConn, queue: &str, include_running: bool) -> JobResult<Vec<Job>>;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1581,6 +1582,32 @@ impl FairShare for PrioritySubmitFS {
 
         Ok(job)
     }
+
+    async fn list_jobs_in_order(&self, conn: &mut MySqlConn, queue: &str, include_running: bool) -> JobResult<Vec<Job>> {
+        let qjobs = if include_running {
+            sqlx::query_as!(
+                QJob,
+                "SELECT * FROM Jobs WHERE (state = ? OR state = ?) AND queue = ? ORDER BY priority desc, submit_time",
+                JobState::Running,
+                JobState::Pending,
+                queue
+            ).fetch_all(conn).await?
+        } else {
+            sqlx::query_as!(
+                QJob,
+                "SELECT * FROM Jobs WHERE state = ? AND queue = ? ORDER BY priority desc, submit_time",
+                JobState::Pending,
+                queue
+            ).fetch_all(conn).await?
+        };
+
+        let jobs: Vec<Job> = qjobs.into_iter()
+            .map(|qjob| qjob.try_into())
+            .try_collect()?;
+
+
+        Ok(jobs)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1600,6 +1627,10 @@ impl FairShare for PsuedoRoundRobinFS {
         // My idea for this one is to order the jobs by (1) priority, (2) number of jobs run in the last TIME_PERIOD_DAYS,
         // then (3) submit time. The idea here is to rotate through users if a bunch of people have requests at the same
         // time
+        todo!()
+    }
+
+    async fn list_jobs_in_order(&self, _conn: &mut MySqlConn, _queue: &str, _include_running: bool) -> JobResult<Vec<Job>> {
         todo!()
     }
 }

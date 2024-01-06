@@ -1,0 +1,16 @@
+{# This does not extend base because it is meant to be inserted as context. #}
+{# We do it this way so the table can be returned given an HTMX request, which lets us change the table columns #}
+
+<tr>
+{% for name in colnames %}
+<th>{{ name }}</th>
+{% endfor %}
+</tr>
+
+{% for job in jobs %}
+<tr>
+    {% for col in columns %}
+    <td>{{ job[col] }}</td>
+    {% endfor %}
+</tr>
+{% endfor %}

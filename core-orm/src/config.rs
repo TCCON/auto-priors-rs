@@ -449,7 +449,8 @@ impl Config {
     /// Get the information about a job queue by name
     /// 
     /// If the queue does not have a section defined in the configuration, then the
-    /// default queue (allocated 1 processor) is returned.
+    /// `None` is returned. Use `unwrap_or_default` to get the default queue with
+    /// one processor allocated.
     pub fn get_queue(&self, queue_name: &str) -> Option<JobQueueOptions> {
         self.execution.queues
             .get(queue_name)
@@ -1008,6 +1009,12 @@ impl crate::jobs::FairShare for FairSharePolicy {
     async fn next_job_in_queue(&self, conn: &mut crate::MySqlConn, queue: &str) -> crate::error::JobResult<Option<crate::jobs::Job>> {
         match self {
             Self::Simple(policy) => policy.next_job_in_queue(conn, queue).await
+        }
+    }
+
+    async fn list_jobs_in_order(&self, conn: &mut crate::MySqlConn, queue: &str, include_running: bool) -> crate::error::JobResult<Vec<crate::jobs::Job>> {
+        match self {
+            Self::Simple(policy) => policy.list_jobs_in_order(conn, queue, include_running).await
         }
     }
 }

@@ -3,6 +3,9 @@
 {% block content %}
 <div class="body-text">
     <h1>{{ subtitle }}</h1>
-    <p>This will be a queue of all running jobs.</p>
+    
+    <table>
+        {{ queue_table | safe }}
+    </table>
 </div>
 {% endblock content %}
