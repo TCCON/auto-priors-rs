@@ -299,7 +299,8 @@ impl InputJobBuilder {
     }
 
     fn site_id(&mut self, sid: &str) -> Result<(), String> {
-        let site_ids = crate::jobs::Job::parse_site_id_str(sid);
+        let site_ids = crate::jobs::Job::parse_site_id_str(sid)
+            .map_err(|e| e.to_string())?;
         self.site_id = Some(site_ids);
         Ok(())
     }

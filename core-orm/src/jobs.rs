@@ -960,11 +960,12 @@ impl Job {
     /// 
     /// # Parameters
     /// * `site_id_str` - a comma-separated list of site IDs, e.g. "pa,oc,ci"
-    pub fn parse_site_id_str(site_id_str: &str) -> Vec<String> {
+    pub fn parse_site_id_str(site_id_str: &str) -> JobResult<Vec<String>> {
         return site_id_str
                 .split(',')
                 .map(|s| s.trim().to_owned())
-                .collect();
+                .map(|s| if s.len() == 2 { Ok(s) } else { Err(JobError::CannotParseSiteId(site_id_str.to_string()))})
+                .try_collect();
     }
 
     /// Convert a user-inputted string of latitudes into a proper vector of latitudes

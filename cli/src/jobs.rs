@@ -180,7 +180,7 @@ impl AddJobArgs {
         if clargs.lat.is_none() != clargs.lon.is_none() {
             anyhow::bail!("lat and lon must be both given or neither given");
         }
-        let site_ids = orm::jobs::Job::parse_site_id_str(&clargs.site_id);
+        let site_ids = orm::jobs::Job::parse_site_id_str(&clargs.site_id)?;
 
         let lat = orm::jobs::Job::parse_lat_str(&clargs.lat.unwrap_or("".to_owned())).context("Problem with given latitude.")?;
         let lon = orm::jobs::Job::parse_lon_str(&clargs.lon.unwrap_or("".to_owned())).context("Problem with given longitude.")?;
