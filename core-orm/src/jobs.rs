@@ -84,6 +84,21 @@ impl From<JobState> for i8 {
     }
 }
 
+impl FromStr for JobState {
+    type Err = JobError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" | "p" => Ok(Self::Pending),
+            "running" | "r" => Ok(Self::Running),
+            "complete" | "d" => Ok(Self::Complete),
+            "errored" | "e" => Ok(Self::Errored),
+            "cleaned" | "x" => Ok(Self::Cleaned),
+            _ => Err(JobError::InvalidStateName(s.to_string()))
+        }
+    }
+}
+
 impl TryFrom<i8> for JobState {
     type Error = JobError;
 

@@ -1,10 +1,11 @@
-use std::path::PathBuf;
+use std::{fmt::Display, path::PathBuf, str::FromStr};
 
 use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use clap::{self, Args, Subcommand};
+use itertools::Itertools;
 use log::debug;
-use orm::{jobs::{Job, ModFmt, VmrFmt, MapFmt, TarChoice}, MySqlConn, config::Config};
+use orm::{config::Config, error::JobError, jobs::{Job, JobState, MapFmt, ModFmt, TarChoice, VmrFmt}, MySqlConn};
 
 
 /// Manage ginput jobs
@@ -303,6 +304,73 @@ pub async fn clean_errored_jobs(
     Ok(())
 }
 
+#[derive(Debug)]
+pub enum JobStateFilter {
+    Any,
+    PendingAndRunning,
+    Only(Vec<JobState>)
+}
+
+impl JobStateFilter {
+    /// Return `true` if only searching for pending and running jobs. If so, we can do a
+    /// more optimized search for jobs, since the Job query function has a special case
+    /// for that subset which only queries those jobs in the database.
+    pub fn pending_running_only(&self) -> bool {
+        match self {
+            JobStateFilter::Any => false,
+            JobStateFilter::PendingAndRunning => true,
+            JobStateFilter::Only(states) => {
+                states.len() == 2 && states.contains(&JobState::Pending) && states.contains(&JobState::Running)
+            },
+        }
+    }
+}
+
+impl Display for JobStateFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JobStateFilter::Any => write!(f, "any"),
+            JobStateFilter::PendingAndRunning => write!(f, "default"),
+            JobStateFilter::Only(states) => {
+                for (i, s) in states.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, "{s}")?;
+                }
+                Ok(())
+            },
+        }
+    }
+}
+
+impl FromStr for JobStateFilter {
+    type Err = JobError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s_lower = s.to_lowercase();
+        if s_lower == "all" {
+            return Ok(Self::Any);
+        }
+
+        if s_lower == "default" {
+            return Ok(Self::PendingAndRunning);
+        }
+
+        let states: Vec<_> = s.split(',')
+            .map(|x| JobState::from_str(x))
+            .try_collect()?;
+
+        Ok(Self::Only(states))
+    }
+}
+
+impl Default for JobStateFilter {
+    fn default() -> Self {
+        Self::PendingAndRunning
+    }
+}
+
 /// Print out jobs, either in a table or with more details
 #[derive(Debug, Args)]
 pub struct PrintJobsCli {
@@ -312,13 +380,19 @@ pub struct PrintJobsCli {
     #[clap(short = 'd', long)]
     details: bool,
 
-    /// List all jobs meeting the other criteria, not just pending jobs
-    #[clap(long)]
+    /// List jobs in certain states. The default is pending and running. Other valid
+    /// strings are "all" (all jobs), "pending" or "p", "running" or "r", "complete" or "d",
+    /// "errored" or "e", and "cleaned" or "x". This has no effect if --job-id is specified.
+    #[clap(short='s', long, default_value_t = JobStateFilter::default())]
+    states: JobStateFilter,
+
+    /// Shorthand for --states=all. Mutually exclusive with --states.
+    #[clap(long, conflicts_with = "states")]
     all: bool,
 
     /// Limit to certain job IDs, repeat this argument to specify multiple
     /// job IDs. If given, these jobs will be displayed regardless of their
-    /// state (i.e. --all will have no effect). 
+    /// state (i.e. --states will have no effect). 
     #[clap(short = 'j', long)]
     job_id: Vec<i32>,
 
@@ -336,10 +410,16 @@ pub struct PrintJobsCli {
 }
 
 pub async fn print_jobs_table_cli(conn: &mut MySqlConn, args: PrintJobsCli) -> anyhow::Result<()> {
+    let states = if args.all {
+        JobStateFilter::Any
+    } else {
+        args.states
+    };
+
     print_jobs_table(
         conn, 
         args.details,
-        !(args.all || !args.job_id.is_empty()),
+        states,
         args.job_id.as_slice(),
         (args.submitted_after, args.submitted_before),
         args.submitter_email.as_deref()
@@ -349,12 +429,18 @@ pub async fn print_jobs_table_cli(conn: &mut MySqlConn, args: PrintJobsCli) -> a
 pub async fn print_jobs_table(
     conn: &mut MySqlConn,
     detailed: bool,
-    pending_and_running_only: bool,
+    state_filter: JobStateFilter,
     job_ids: &[i32],
     submit_date_range: (Option<NaiveDate>, Option<NaiveDate>),
     submit_email: Option<&str>
 ) -> anyhow::Result<()> {
-    let jobs = Job::get_jobs_list(conn, pending_and_running_only).await?;
+    let state_filter = if !job_ids.is_empty() {
+        JobStateFilter::Any
+    } else {
+        state_filter
+    };
+
+    let jobs = Job::get_jobs_list(conn, state_filter.pending_running_only()).await?;
 
     // Because the filtering is kind of specific to this function, we'll do it in Rust here
     // rather than as specific SQL queries.
@@ -379,6 +465,10 @@ pub async fn print_jobs_table(
 
             if let Some(filter_email) = submit_email {
                 return j.email.as_deref().unwrap_or("NONE") == filter_email;
+            }
+
+            if let JobStateFilter::Only(states) = &state_filter {
+                return states.contains(&j.state);
             }
 
             return true;
