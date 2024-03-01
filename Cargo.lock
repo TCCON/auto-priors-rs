@@ -2273,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "tccon-priors-service"
-version = "2.0.0"
+version = "2.0.19"
 dependencies = [
  "anyhow",
  "async-trait",
