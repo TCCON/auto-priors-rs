@@ -1,0 +1,9 @@
+email=cr@test.net
+vmr_fmt=text
+map_fmt=none
+is_egi=true
+start_date=20180101
+end_date=20180102
+site_id=xd
+lat=34.691
+lon=-117.818

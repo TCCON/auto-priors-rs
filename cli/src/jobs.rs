@@ -472,6 +472,11 @@ pub async fn print_jobs_table(
             }
 
             return true;
+        }).map(|mut j| {
+            // Email should be the only field where a used string is
+            // stored. Carriage returns mess up the table, so escape them.
+            j.email = j.email.map(|s| s.replace('\r', "\\r"));
+            j
         });
 
     if detailed {

@@ -117,9 +117,9 @@ impl InputJob {
         for (line_idx, (line, field)) in lines.zip(Self::field_order()).enumerate() {
             if let Ok(line) = line {
                 let res = if let Some((key, value)) = line.split_once('=') {
-                    builder.set_field_in_place(key, value)
+                    builder.set_field_in_place(key, value.trim())
                 }else{
-                    builder.set_field_in_place(field, &line)
+                    builder.set_field_in_place(field, line.trim())
                 };
                 
                 if let Err(cause) = res {
