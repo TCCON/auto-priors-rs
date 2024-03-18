@@ -432,7 +432,11 @@ impl MetFile {
     pub async fn get_first_complete_day_for_default_mets(conn: &mut MySqlConn, cfg: &config::Config) -> anyhow::Result<Option<NaiveDate>> {
         let option_sets = cfg.get_all_defaults_check_overlap()?;
         // Since these are date-ordered and do not overlap, we know we can start from the first set and check for complete met data
-        for options in option_sets.iter() {
+        let today = chrono::Utc::now().date_naive();
+        for (iopt, options) in option_sets.iter().enumerate() {
+            if iopt == 0 && options.start_date.map(|d| d > today).unwrap_or(false) {
+                warn!("First default set {options} has a start date in the future, no complete day will be determined for any met.")
+            }
             let met_key = &options.met;
             let met_configs = cfg.get_met_configs(met_key)?;
             if let Some(first_date) = Self::get_first_or_last_complete_date_for_config_set(conn, met_configs, true).await? {
@@ -456,7 +460,13 @@ impl MetFile {
     pub async fn get_last_complete_date_for_default_mets(conn: &mut MySqlConn, cfg: &config::Config) -> anyhow::Result<Option<NaiveDate>> {
         let option_sets = cfg.get_all_defaults_check_overlap()?;
         // Since these are date-ordered and do not overlap, we know we can start from the last set and check for complete met data
+        // However, if the start date for a given set remains in the future, we shouldn't count it.
+        let today = chrono::Utc::now().date_naive();
         for options in option_sets.iter().rev() {
+            if options.start_date.map(|d| d > today).unwrap_or(false) {
+                debug!("Default set {options} starts in the future, not considering it when determining last complete date for met files");
+                continue;
+            }
             let met_key = &options.met;
             let met_configs = cfg.get_met_configs(met_key)?;
             if let Some(last_date) = Self::get_first_or_last_complete_date_for_config_set(conn, met_configs, false).await? {
