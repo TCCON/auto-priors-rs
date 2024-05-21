@@ -128,7 +128,13 @@ async fn main() -> anyhow::Result<()> {
         Commands::Jobs(JobCli { commands: JobActions::CleanErrored(subargs) }) => {
             let mut conn = db.get_connection().await?;
             jobs::clean_errored_jobs_cli(&mut conn, subargs).await?;
-        }
+        },
+
+        Commands::Jobs(JobCli { commands: JobActions::ChangeDeleteTime(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            let loaded_config = load_config()?;
+            jobs::change_jobs_delete_time_cli(&mut conn, &loaded_config, subargs).await?;
+        },
 
         Commands::Jobs(JobCli { commands: JobActions::Print(subargs) }) => {
             let mut conn = db.get_connection().await?;

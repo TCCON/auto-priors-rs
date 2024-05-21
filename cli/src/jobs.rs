@@ -4,7 +4,7 @@ use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use clap::{self, Args, Subcommand};
 use itertools::Itertools;
-use log::debug;
+use log::{debug, info};
 use orm::{config::Config, error::JobError, jobs::{Job, JobState, MapFmt, ModFmt, TarChoice, VmrFmt}, MySqlConn};
 
 
@@ -31,6 +31,9 @@ pub enum JobActions {
 
     /// Delete output from jobs that errored
     CleanErrored(CleanErroredCli),
+
+    /// Update deletion times for one or more jobs
+    ChangeDeleteTime(ChangeDeleteTimeCli),
 
     /// Change the priority of a job
     SetPriority(SetPriorityCli),
@@ -595,5 +598,66 @@ pub async fn print_job_status(conn: &mut MySqlConn, job_id: i32) -> anyhow::Resu
     println!("  Output files so far: {nmod} .mod / {nvmr} .vmr / {nmap} .map or .map.nc");
     println!("  under {}", run_dir.display());
 
+    Ok(())
+}
+
+
+#[derive(Debug, Args)]
+pub struct ChangeDeleteTimeCli {
+    /// Time to update jobs to. If not given, then will be computed 
+    /// as now plus the configured delay
+    #[clap(short='t', long)]
+    delete_time: Option<NaiveDateTime>,
+    
+    /// Job IDs to update.
+    #[clap(short='j', long)]
+    job_id: Vec<i32>,
+
+    /// The name of a queue; if given, jobs with a NULL deletion time in
+    /// that queue will have their deletion time updated. This works as 
+    /// an intersection with --job-id
+    #[clap(short='n', long)]
+    null_in_queue: Option<String>,
+
+    /// Set this to only print what will happen.
+    #[clap(short='d', long)]
+    dry_run: bool,
+}
+
+pub async fn change_jobs_delete_time_cli(conn: &mut MySqlConn, config: &Config, args: ChangeDeleteTimeCli) -> anyhow::Result<()> {
+    change_jobs_delete_time(conn, config, args.delete_time, &args.job_id, args.null_in_queue.as_deref(), args.dry_run).await
+}
+
+pub async fn change_jobs_delete_time(conn: &mut MySqlConn, config: &Config, delete_time: Option<NaiveDateTime>, job_ids: &[i32], null_in_queue: Option<&str>, dry_run: bool) -> anyhow::Result<()> {
+    let jobs = if let Some(queue) = null_in_queue {
+        Job::get_jobs_in_queue(conn, queue).await?
+    } else {
+        Job::get_jobs_list(conn, false).await?
+    };
+
+    let delete_time = Some(delete_time.unwrap_or_else(|| {
+        let now = chrono::Local::now().naive_local();
+        now + chrono::Duration::hours(config.execution.hours_to_keep.into())
+    }));
+
+    let mut nchanged = 0;
+    for job in jobs {
+        if null_in_queue.is_some() && job.delete_time.is_some() {
+            continue;
+        }
+
+        if !job_ids.is_empty() && !job_ids.contains(&job.job_id) {
+            continue;
+        }
+
+        if dry_run {
+            println!("Would change delete time on job {} from {:?} to {:?}", job.job_id, job.delete_time, delete_time);
+        } else {
+            Job::set_delete_time_by_id(job.job_id, conn, delete_time).await?;
+            debug!("Updated deletion time for job {}", job.job_id);
+        }
+        nchanged += 1;
+    }
+    info!("{nchanged} jobs deletion times updated to {}", delete_time.unwrap());
     Ok(())
 }

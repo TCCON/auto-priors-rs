@@ -758,6 +758,21 @@ impl Job {
         jobs
     }
 
+    pub async fn get_jobs_in_queue(conn: &mut MySqlConn, queue: &str) -> JobResult<Vec<Job>> {
+        let qjobs = sqlx::query_as!(
+            QJob,
+            "SELECT * FROM Jobs WHERE queue = ?",
+            queue
+        ).fetch_all(conn)
+        .await?;
+
+        let jobs: Result<Vec<_>, _> = qjobs.into_iter()
+            .map(|qjob| Job::try_from(qjob))
+            .collect();
+
+        jobs
+    }
+
     /// Return a `Job` instance with the given `job_id`.
     /// 
     /// # Parameters
@@ -1495,6 +1510,18 @@ impl Job {
         .context("Error occurred while setting job priority")?;
 
         self.priority = new_priority;
+
+        Ok(())
+    }
+
+    pub async fn set_delete_time_by_id(job_id: i32, conn: &mut MySqlConn, deletion_time: Option<NaiveDateTime>) -> JobResult<()> {
+        sqlx::query!(
+            "UPDATE Jobs SET delete_time = ? WHERE job_id = ?",
+            deletion_time,
+            job_id
+        ).execute(conn)
+        .await
+        .map_err(|e| JobError::QueryError(e))?;
 
         Ok(())
     }
