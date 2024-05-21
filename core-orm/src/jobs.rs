@@ -432,6 +432,16 @@ impl<'j> Display for VerboseDisplayJob<'j> {
         } else {
             "not completed yet".to_string()
         };
+
+        let delete_string = if let Some(time) = self.job.delete_time {
+            if let JobState::Cleaned = self.job.state {
+                format!("Deletion time was {time}.")
+            } else {
+                format!("Will be cleaned up after {time}.")
+            }
+        } else {
+            "Has no deletion time.".to_string()
+        };
         
         writeln!(f, "Job {} ({}):", self.job.job_id, self.job.state)?;
         writeln!(f, "  Submitted by {} at {}, {}", 
@@ -439,6 +449,7 @@ impl<'j> Display for VerboseDisplayJob<'j> {
             self.job.submit_time,
             complete_string
         )?;
+        writeln!(f, "  {delete_string}")?;
         writeln!(f, "  Priority {} in queue {}", self.job.priority, self.job.queue)?;
         writeln!(f, "  Dates: {} to {}", self.job.start_date, self.job.end_date)?;
         writeln!(f, "  Site IDs:   {}", self.job.site_id.join(", "))?;
@@ -1302,11 +1313,12 @@ impl Job {
     /// Note that if an error occurs while cleaning up one job, any following jobs will not be cleaned
     /// up. However, rerunning this function (after the root cause of the error has been fixed) should
     /// pick up where it left off.
-    pub async fn clean_up_expired_jobs(conn: &mut MySqlConn) -> anyhow::Result<()> {
+    pub async fn clean_up_expired_jobs(conn: &mut MySqlConn, dry_run: bool) -> anyhow::Result<()> {
         let jobs: Vec<_> = sqlx::query_as!(
             QJob,
-            "SELECT * FROM Jobs WHERE delete_time IS NOT NULL and delete_time <= ?",
-            chrono::Local::now().naive_local()
+            "SELECT * FROM Jobs WHERE delete_time IS NOT NULL AND delete_time <= ? AND state != ?",
+            chrono::Local::now().naive_local(),
+            JobState::Cleaned
         ).fetch_all(&mut *conn)
         .await?
         .into_iter()
@@ -1316,8 +1328,12 @@ impl Job {
         info!("{} jobs output expired, starting clean up", jobs.len());
 
         for mut job in jobs {
-            job.set_cleaned(conn).await?;
-            debug!("Job {} cleaned up", job.job_id);
+            if dry_run {
+                println!("Would clean up job {}", job.job_id);
+            } else {
+                job.set_cleaned(conn).await?;
+                debug!("Job {} cleaned up", job.job_id);
+            }
         }
 
         Ok(())

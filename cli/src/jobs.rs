@@ -26,6 +26,9 @@ pub enum JobActions {
     /// Delete a job, clearing any output
     Delete(DeleteJobCli),
 
+    /// Delete output and update status of expired jobs
+    CleanExpired(CleanExpiredCli),
+
     /// Delete output from jobs that errored
     CleanErrored(CleanErroredCli),
 
@@ -245,6 +248,19 @@ pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli, config: &Config
     .await?;
     println!("Added new job, ID = {id}");
     Ok(())
+}
+
+/// Delete output for jobs whose delete time has passed and set their
+/// status to "cleaned".
+#[derive(Debug, Args)]
+pub struct CleanExpiredCli {
+    /// Do not actually delete output or change status, just print what would occur.
+    #[clap(short='d', long)]
+    dry_run: bool,
+}
+
+pub async fn clean_expired_jobs_cli(conn: &mut MySqlConn, args: CleanExpiredCli) -> anyhow::Result<()> {
+    Job::clean_up_expired_jobs(conn, args.dry_run).await
 }
 
 /// Delete any existing output for jobs that errored. The job remains in the

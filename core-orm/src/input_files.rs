@@ -511,6 +511,8 @@ pub async fn add_jobs_from_input_files(
             };
 
             let mut results = vec![];
+            let delete_offset = chrono::Duration::hours(config.execution.hours_to_keep.into());
+            let delete_time = chrono::Local::now().naive_local() + delete_offset;
             for (sub_start, sub_end) in date_ranges {
                 let this_res = crate::jobs::Job::add_job_from_args(conn,
                     job.site_id.clone(),
@@ -525,7 +527,7 @@ pub async fn add_jobs_from_input_files(
                     Some(job.vmr_fmt),
                     Some(job.map_fmt),
                     None,
-                    None,
+                    Some(delete_time),
                     Some(save_tarball)
                 ).await;
                 results.push(this_res);
