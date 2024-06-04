@@ -1146,7 +1146,7 @@ pub struct EmailConfig {
 impl Default for EmailConfig {
     fn default() -> Self {
         let user = "noreply";
-        let host = whoami::hostname();
+        let host = whoami::fallible::hostname().unwrap_or_else(|_| "127.0.0.1".to_string());
         let email = lettre::Address::new(user, host)
             .expect("user@hostname cannot be used as a valid email address, you will need to configure the 'from_address' in the 'email' section of the config");
         let from_addr = Mailbox::new(None, email);
