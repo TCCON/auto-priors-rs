@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{Write, Read};
 use std::path::{PathBuf, Path};
 use anyhow::Context;
+use testcontainers_modules::{testcontainers::runners::AsyncRunner, testcontainers::core::ContainerAsync, mariadb};
 use orm::{self, MySqlConn, PoolWrapper};
 use orm::met::MetFile;
 use tccon_priors_cli::utils::Downloader;
@@ -41,33 +42,113 @@ pub(crate) fn make_dummy_config_with_temp_dirs(prefix: &str) -> anyhow::Result<(
     Ok((cfg, test_dir))
 }
 
-pub(crate) fn get_test_db_url() -> anyhow::Result<String> {
-    // First, try the regular environmental variables
-    for key in TEST_DB_ENV_VARS {
-        if let Ok(val) = env::var(key) {
-            log::debug!("Using database URL {val} from the environmental variable {key}");
-            return Ok(val)
-        }
-    }
-
-    // If we can't find the URL in existing environmental variables, try using dotenv.
-    let env_path = dotenv::dotenv().context("No database URL defined in existing environmental variables, and no .env file found.")?;
-    for key in TEST_DB_ENV_VARS {
-        if let Ok(val) = dotenv::var(key) {
-            let epd = env_path.display();
-            log::debug!("Using database URL {val} from the variable {key} in {epd}");
-            return Ok(val)
-        }
-    }
-
-    return Err(anyhow::anyhow!("Unable to find database URL."))
+pub(crate) enum TestDb {
+    Persistent(String),
+    Container(ContainerAsync<mariadb::Mariadb>, String)
 }
 
-pub(crate) async fn open_test_database(reset_db: bool) -> anyhow::Result<PoolWrapper> {
+impl TestDb {
+    fn new_persistent(url: String) -> Self {
+        Self::Persistent(url)
+    }
+
+    async fn new_container() -> anyhow::Result<Self> {
+        let instance = mariadb::Mariadb::default().start().await?;
+        let url = format!(
+            "mariadb://{}:{}/test",
+            instance.get_host().await?,
+            instance.get_host_port_ipv4(3306).await?
+        );
+        Ok(Self::Container(instance, url))
+    }
     
-    let db_url = get_test_db_url()?;
+    fn db_url(&self) -> &str {
+        match self {
+            Self::Persistent(url) => url,
+            Self::Container(_, url) => url,
+        }
+    }
+}
+
+/// Get the test database
+///
+/// The default behavior is to use [`testcontainers`] to create a
+/// ephemeral database to test in. If the environmental variable
+/// "PRIORS_TEST_PERSISTENT_DB" is set to 1 however, this will revert
+/// to using the URL specified by one of the [`TEST_DB_ENV_VARS`].
+/// It will look first in the existing environmental variables, then
+/// in those specified in a .env file.
+///
+/// **Note:** it is intended that the returned [`TestDb`] value be kept
+/// alive through the duration of the test. Because this holds the test
+/// container instance, when it is dropped, the container should be cleaned
+/// up.
+async fn get_test_db() -> anyhow::Result<TestDb> {
+    let use_persistent_db = env::var("PRIORS_TEST_PERSISTENT_DB")
+        .map(|s| s == "1")
+        .unwrap_or(false);
+
+    if !use_persistent_db {
+        // Prefer to use test containers to avoid messing up persistent databases
+        // and to let tests run on GitHub
+        let container = TestDb::new_container().await?;
+        log::debug!("Using database URL {} provided by test container", container.db_url());
+        Ok(container)
+    } else {
+        // First, try the regular environmental variables
+        for key in TEST_DB_ENV_VARS {
+            if let Ok(val) = env::var(key) {
+                log::debug!("Using database URL {val} from the environmental variable {key}");
+                return Ok(TestDb::new_persistent(val))
+            }
+        }
+
+        // If we can't find the URL in existing environmental variables, try using dotenv.
+        let env_path = dotenv::dotenv().context("No database URL defined in existing environmental variables, and no .env file found.")?;
+        for key in TEST_DB_ENV_VARS {
+            if let Ok(val) = dotenv::var(key) {
+                let epd = env_path.display();
+                log::debug!("Using database URL {val} from the variable {key} in {epd}");
+                return Ok(TestDb::new_persistent(val))
+            }
+        }
+
+        return Err(anyhow::anyhow!("Unable to find database URL."))
+    }
+}
+
+
+/// Open a pool of connections to the test database.
+///
+/// The default behavior is to use [`testcontainers`] to create a
+/// ephemeral database to test in. If the environmental variable
+/// "PRIORS_TEST_PERSISTENT_DB" is set to 1 however, this will revert
+/// to using the URL specified by one of the [`TEST_DB_ENV_VARS`].
+/// It will look first in the existing environmental variables, then
+/// in those specified in a .env file.
+///
+/// `reset_db` controls whether migrations are applied or not. If `false`,
+/// then the database is left in whatever state it was when the connection
+/// was established. When using test containers, this will be an empty
+/// database, whereas when using a non-container database, it may hold existing
+/// data. Setting this to `true` will result in a database with all the tables
+/// created but empty. In most cases, this argument should be `true`.
+///
+/// # Returns
+/// If successful, returns a [`PoolWrapper`] instance from which connections
+/// can be obtained and a [`TestDb`] instance. **Note:** it is intended that this
+/// [`TestDb`] value be kept alive through the duration of the test. Because it
+/// holds the test container instance, when it is dropped, the container should be
+/// cleaned up.
+///
+/// This will return an error if the connection to the database could not be established,
+/// or if applying the migrations failed.
+pub(crate) async fn open_test_database(reset_db: bool) -> anyhow::Result<(PoolWrapper, TestDb)> {
+    
+    let test_db = get_test_db().await?;
+    let db_url = test_db.db_url();
     println!("db_url = {db_url}");
-    let pool = orm::get_database_pool(Some(db_url)).await?;
+    let pool = orm::get_database_pool(Some(db_url.to_string())).await?;
 
     if reset_db {
         let mut conn = pool.get_connection().await?;
@@ -75,7 +156,7 @@ pub(crate) async fn open_test_database(reset_db: bool) -> anyhow::Result<PoolWra
         orm::apply_migrations(&mut conn).await?;
     }
 
-    Ok(pool)
+    Ok((pool, test_db))
 }
 
 /// Execute a multi-statement SQL file on the database behind a connections.
@@ -119,15 +200,22 @@ macro_rules! multiline_sql {
 /// the database. If you need control over how the connection to the database is
 /// 
 /// # Panics
-/// In addition to the 
+/// In addition to the panics that occur for [`multiline_sql!`], this will panic if
+/// it could not open or connect to the test database.
+///
+/// # Returns
+/// Returns a connection to the database which can be used to run further queries
+/// and a [`TestDb`] instance. **Note:** it is intended that this [`TestDb`] value
+/// be kept alive through the duration of the test. Because it holds the test container
+/// instance, when it is dropped, the container should be cleaned up.
 #[macro_export]
 macro_rules! multiline_sql_init {
     ($path:literal) => {
         {
-            let pool = common::open_test_database(true).await.expect("Failed to open test database");
+            let (pool, test_db) = common::open_test_database(true).await.expect("Failed to open test database");
             let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
             multiline_sql!($path, conn);
-            conn
+            (conn, test_db)
         }
     };
 }

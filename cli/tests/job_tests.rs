@@ -63,11 +63,11 @@ async fn mock_run_job_with_delay_transaction(mut conn: MySqlPC, delay_seconds: f
 // Any tests that rely on database access should be marked as #[serial] to prevent
 // them from conflicting. Even tests that use different tables should all be run
 // in serial because the default reset migration drops ALL tables.
-#[tokio::test]
+#[test_log::test(tokio::test)]
 #[serial]
 async fn test_next_job_no_transaction() {
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let pool = common::open_test_database(true).await
+    let (pool, _test_db) = common::open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -88,7 +88,7 @@ async fn test_next_job_no_transaction() {
 #[serial]
 async fn test_next_job_with_transaction() {
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let pool = common::open_test_database(true).await
+    let (pool, _test_db) = common::open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -119,7 +119,7 @@ async fn test_claim_job() {
     // capability to claim a job with a transaction and deadlock checking
 
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let pool = common::open_test_database(true).await
+    let (pool, _test_db) = common::open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -150,7 +150,7 @@ async fn test_claim_job() {
 #[tokio::test]
 #[serial]
 async fn test_set_job_state() {
-    let mut conn = multiline_sql_init!("sql/two_test_jobs.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/two_test_jobs.sql");
     let mut job = Job::get_job_with_id(&mut conn, 1)
         .await
         .expect("Could not get job with ID = 1");
