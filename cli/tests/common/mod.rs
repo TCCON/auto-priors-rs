@@ -30,7 +30,6 @@ pub(crate) fn make_dummy_config(download_root: PathBuf) -> anyhow::Result<orm::c
 pub(crate) fn make_dummy_config_with_temp_dirs(prefix: &str) -> anyhow::Result<(orm::config::Config, TestRootDir)> {
     let test_dir = TestRootDir::new(prefix)
         .with_context(|| "Failed to make parent temporary directory")?;
-    dbg!(&test_dir);
     let cfg = make_dummy_config(test_dir.path().to_owned())?;
     for (_, dl_cfgs) in cfg.data.download.iter() {
         for dl_cfg in dl_cfgs.iter() {

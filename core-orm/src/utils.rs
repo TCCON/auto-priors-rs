@@ -185,11 +185,12 @@ impl DateIterator {
     /// # Example
     /// ```
     /// use chrono::NaiveDate;
+    /// use tccon_priors_orm::utils::DateIterator;
     /// 
     /// let ranges = vec![
-    ///     (NaiveDate::from_ymd_opt(2010,1,1).unwrap(), NaiveDate::from_ymd_opt(2010,1,3)),
-    ///     (NaiveDate::from_ymd_opt(2010,1,30).unwrap(), NaiveDate::from_ymd_opt(2010,2,2)),
-    /// ]
+    ///     (NaiveDate::from_ymd_opt(2010,1,1).unwrap(), NaiveDate::from_ymd_opt(2010,1,3).unwrap()),
+    ///     (NaiveDate::from_ymd_opt(2010,1,30).unwrap(), NaiveDate::from_ymd_opt(2010,2,2).unwrap()),
+    /// ];
     /// 
     /// let iter_dates: Vec<_> = DateIterator::new(ranges).collect();
     /// let expected_dates = vec![

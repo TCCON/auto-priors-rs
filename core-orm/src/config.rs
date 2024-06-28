@@ -1529,7 +1529,7 @@ pub fn load_env_config_file(validate: bool) -> anyhow::Result<Config> {
 /// use tccon_priors_orm::config::{Config, load_config_file};
 /// use log::warn;
 /// let path = "does_not_exist.toml";
-/// let config = load_config_file(path).unwrap_or_else(|_| {
+/// let config = load_config_file(path, true).unwrap_or_else(|_| {
 ///     warn!("Using default configuration due to error reading {path}");
 ///     Config::default()
 /// });

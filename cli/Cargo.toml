@@ -26,7 +26,6 @@ walkdir = "2.4.0"
 [dev-dependencies]
 hex-literal = "0.4"
 md-5 = "0.10"
-serial_test = "1.0.0"
 tempdir = "0.3"
 testcontainers-modules.workspace = true
 test-log.workspace = true
