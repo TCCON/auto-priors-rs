@@ -1,8 +1,8 @@
 email=test@test.rs
 mod_fmt=text
 lon=-2
-start_date=20100704
-end_date=20100711
+start_date=20180104
+end_date=20180111
 lat=2
 vmr_fmt=none
 site_id=kc

@@ -20,8 +20,13 @@ error_handler = {type = "Logging"}
 entry_point_path = "./cli/tests/common/config_target_dummy"
 type = "Script"
 
-[requests]
-allowed_mets = {}
+[execution.ginput."v1.2.0"]
+entry_point_path = "./cli/tests/common/config_target_dummy"
+type = "Script"
+
+[requests.allowed_mets.co_reprocessing]
+met_key = 'geosit'
+ginput_key = 'v1.2.0'
 
 [data]
 zgrid_file = './cli/tests/common/config_target_dummy'
@@ -152,7 +157,7 @@ met = "geosit"
 [email]
 from_address = "jobs@test.net"
 admin_emails = ["admin@test.net"]
-backend = {type = "Mock"}
+backend = {type = "Testing"}
 extra_submitters = []
 
 [timing]

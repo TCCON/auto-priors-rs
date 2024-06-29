@@ -807,12 +807,22 @@ async fn check_met_available(conn: &mut crate::MySqlConn, config: &Config, start
 #[derive(Debug)]
 pub struct InputFileCleanupHandler {
     last_clear_time: DateTime<Local>,
-    errored_files: HashSet<PathBuf>
+    errored_files: HashSet<PathBuf>,
+    delete_original: bool,
 }
 
 impl InputFileCleanupHandler {
     pub fn new() -> Self {
-        Self { last_clear_time: Local::now(), errored_files: HashSet::new() }
+        Self { last_clear_time: Local::now(), errored_files: HashSet::new(), delete_original: true }
+    }
+
+    /// Create a new handler that will not delete the original input files.
+    /// This is mean for integration tests where you want to leave the original
+    /// file for future tests.
+    pub fn new_for_testing() -> Self {
+        let mut me = Self::new();
+        me.delete_original = false;
+        me
     }
 
     /// Returns `true` if we tried to delete `file` recently and doing so failed
@@ -839,7 +849,7 @@ impl InputFileCleanupHandler {
             self.last_clear_time = now;
         }
 
-        let res = Self::move_file_inner(from_file, to_file);
+        let res = Self::move_file_inner(from_file, to_file, self.delete_original);
         if res.is_err() && self.errored_files.contains(from_file) {
             // We've seen this file recently, so don't treat the move error as an actual error
             Ok(false)
@@ -854,13 +864,18 @@ impl InputFileCleanupHandler {
         }
     }
 
-    fn move_file_inner<'p>(from_file: &'p Path, to_file: Option<&Path>) -> InputFileMoveError<'p> {
+    fn move_file_inner<'p>(from_file: &'p Path, to_file: Option<&Path>, delete_original: bool) -> InputFileMoveError<'p> {
         let res_copy = if let Some(to) = to_file {
             std::fs::copy(from_file, to)
         } else {
             Ok(0)
         };
-        let res_rm = std::fs::remove_file(from_file);
+
+        let res_rm = if delete_original { 
+            std::fs::remove_file(from_file)
+        } else {
+            Ok(())
+        };
 
         if let (Err(e_cp), Err(e_rm)) = (&res_copy, &res_rm) {
             // anyhow::bail!("URGENT: could not copy or remove original input file {}. Errors were\nCopying: {e_cp}\nRemoving: {e_rm}", from_file.display())
@@ -898,7 +913,7 @@ impl<'p> Display for InputFileMoveError<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InputFileMoveError::Ok(p) => write!(f, "{} moved successfully", p.display()),
-            InputFileMoveError::CopyFail(p, e) => write!(f, "Could not copy original input file {}, file was deleted. Error was: {e}", p.display()),
+            InputFileMoveError::CopyFail(p, e) => write!(f, "Could not copy original input file {}. Error was: {e}", p.display()),
             InputFileMoveError::RemoveFail(p, e) => write!(f, "URGENT: Could not remove original input file {}. Error was: {e}", p.display()),
             InputFileMoveError::CopyAndRemoveFail(p, e_cp, e_rm) => write!(f, "URGENT: could not copy or remove original input file {}. Errors were\nCopying: {e_cp}\nRemoving: {e_rm}", p.display()),
         }

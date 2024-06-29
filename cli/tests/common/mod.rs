@@ -13,17 +13,20 @@ static TEST_DB_ENV_VARS: [&'static str; 2] = ["PRIORS_TEST_DATABASE_URL", "TEST_
 static TEST_FILE_DIR_VAR: &'static str = "PRIORS_TEST_FILE_ROOT";
 pub const TEST_MET_KEY: &'static str = "geosfpit";
 
-pub(crate) fn make_dummy_config(download_root: PathBuf) -> anyhow::Result<orm::config::Config> {
+pub(crate) fn make_dummy_config(scratch_root: PathBuf) -> anyhow::Result<orm::config::Config> {
     let s = include_str!("test_config.toml");
     let mut cfg: orm::config::Config = toml::from_slice(s.as_bytes())?;
 
-    cfg.execution.ftp_download_root = download_root.clone();
+    cfg.execution.ftp_download_root = scratch_root.clone();
     for (_, dl_cfgs) in cfg.data.download.iter_mut() {
         for dl_cfg in dl_cfgs.iter_mut() {
-            dl_cfg.download_dir = download_root.join(dl_cfg.levels.standard_subdir());
+            dl_cfg.download_dir = scratch_root.join(dl_cfg.levels.standard_subdir());
         }
     }
 
+    cfg.execution.success_input_file_dir = scratch_root.join("input_success");
+    cfg.execution.failure_input_file_dir = scratch_root.join("input_failure");
+    
     Ok(cfg)
 }
 
@@ -37,6 +40,11 @@ pub(crate) fn make_dummy_config_with_temp_dirs(prefix: &str) -> anyhow::Result<(
                 .with_context(|| "Failed to create a subdirectory for one of the file sets to download")?;
         }
     }
+
+    std::fs::create_dir_all(&cfg.execution.success_input_file_dir)
+        .with_context(|| "Failed to create the subdirectory for successful input files to be moved to")?;
+    std::fs::create_dir_all(&cfg.execution.failure_input_file_dir)
+        .with_context(|| "Failed to create the subdirectory for failed input files to be moved to")?;
     
     Ok((cfg, test_dir))
 }

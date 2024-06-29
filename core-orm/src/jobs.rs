@@ -122,7 +122,7 @@ impl TryFrom<i8> for JobState {
 
 
 /// An enum representing the possible options for creating a tarball of job output
-#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TarChoice {
     /// Do not make a tarball of the job output. `i8` value = `0`.
     No = 0,
@@ -182,7 +182,7 @@ impl TryFrom<i8> for TarChoice {
 }
 
 /// An enum representing the possible output file types for the model (`.mod`) files.
-#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub enum ModFmt {
     /// Do not create `.mod` files. String representation = `"None"`.
     None,
@@ -228,7 +228,7 @@ impl FromStr for ModFmt {
 
 
 /// An enum representing the possible output file types for the `.vmr` files.
-#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub enum VmrFmt {
     /// Do not create `.vmr` files. String representation = `"None"`.
     None,
@@ -275,7 +275,7 @@ impl FromStr for VmrFmt {
 
 
 /// An enum representing the possible output file types for the model a priori (`.map`) files.
-#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub enum MapFmt {
     /// Do not create `.map` files. String representation = `"None"`.
     None,

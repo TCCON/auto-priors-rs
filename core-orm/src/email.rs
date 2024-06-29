@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::{Command, Stdio}, io::Write};
+use std::{cell::RefCell, collections::VecDeque, fmt::Debug, io::Write, path::PathBuf, process::{Command, Stdio}, sync::{Arc, Mutex}};
 
 use chrono::NaiveDate;
 use lettre::{SmtpTransport, Transport, Message, message::Mailbox, Address};
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{error::EmailError, MySqlConn, config::Config};
 
 /// A trait that any email backend must implement
-pub trait SendMail {
+pub trait SendMail: Debug {
     /// Send an email
     fn send_mail(&self, to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError>;
 }
@@ -93,47 +93,7 @@ impl Lettre {
 
 impl SendMail for Lettre {
     fn send_mail(&self, to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError> {
-        
-        // Construct the basis of the email with the from address and subject
-        let email = Message::builder()
-            .from(parse_email_address(from)?)
-            .subject(subject);
-
-        // Add all of the recipients to the email
-        let to = to.into_iter()
-            .map(|&a| parse_email_address(a))
-            .collect::<Result<Vec<_>, _>>()?;
-        let email = to.into_iter()
-            .fold(email, |e, a| e.to(a));
-
-        // Add any cc'd recipients
-        let email = if let Some(cc) = cc {
-            let cc = cc.into_iter()
-            .map(|c| parse_email_address(c))
-            .collect::<Result<Vec<_>, _>>()?;
-            
-            cc.into_iter()
-                .fold(email, |e, c| e.cc(c))
-        } else {
-            email
-        };
-
-        // Add any bcc'd recipients
-        let email = if let Some(bcc) = bcc {
-            let bcc = bcc.into_iter()
-                .map(|&b| parse_email_address(b))
-                .collect::<Result<Vec<_>, _>>()?;
-            
-            bcc.into_iter()
-                    .fold(email, |e, b| e.bcc(b))
-        } else {
-            email
-        };
-
-        // Add the body to the message - this converts the MessageBuilder to a 
-        // Message so it has to go last.
-        let email = email.body(message.to_string())
-            .map_err(|e| EmailError::UnencodableBody(e.to_string()))?;
+        let email = build_message(to, from, cc, bcc, subject, message)?;
 
         // Send the email
         let mailer = match self.smtp {
@@ -186,6 +146,49 @@ impl SendMail for MockEmail {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct TestingEmail {
+    #[serde(skip, default)]
+    messages: Arc<Mutex<RefCell<VecDeque<Result<Message, String>>>>>
+}
+
+impl TestingEmail {
+    pub fn pop_front(&self) -> Option<Result<Message, String>> {
+        let mut lock = self.messages.lock()
+            .expect("Could not acquire mutex lock");
+        let r = lock.get_mut();
+        r.pop_front()
+    }
+
+    pub fn clear(&self) {
+        let mut lock = self.messages.lock()
+            .expect("Could not acquire mutex lock");
+        let r = lock.get_mut();
+        r.clear();
+    }
+
+    pub fn num_messages(&self) -> usize {
+        let mut lock = self.messages.lock()
+            .expect("Could not acquire mutex lock");
+        let r = lock.get_mut();
+        r.len()
+    }
+}
+
+impl SendMail for TestingEmail {
+    fn send_mail(&self, to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError> {
+        let msg_res = build_message(to, from, cc, bcc, subject, message)
+            .map_err(|e| e.to_string());
+
+        let mut lock = self.messages.lock()
+            .map_err(|e| EmailError::SendFailure(format!("Could not acquire mutex lock: {e}")))?;
+        let r = lock.get_mut();
+        r.push_back(msg_res);
+
+        Ok(())
+    }
+}
+
 
 /// A convenience function to parse a string into a [`Lettre::Mailbox`] with
 /// no name, just an email address.
@@ -194,6 +197,49 @@ pub fn parse_email_address(email: &str) -> Result<Mailbox, EmailError> {
         .map_err(|_| EmailError::UnparsableEmail(email.to_string()))?;
     
     Ok(Mailbox::new(None, email))
+}
+
+fn build_message(to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<Message, EmailError> {
+    // Construct the basis of the email with the from address and subject
+    let email = Message::builder()
+        .from(parse_email_address(from)?)
+        .subject(subject);
+
+    // Add all of the recipients to the email
+    let to = to.into_iter()
+        .map(|&a| parse_email_address(a))
+        .collect::<Result<Vec<_>, _>>()?;
+    let email = to.into_iter()
+        .fold(email, |e, a| e.to(a));
+
+    // Add any cc'd recipients
+    let email = if let Some(cc) = cc {
+        let cc = cc.into_iter()
+        .map(|c| parse_email_address(c))
+        .collect::<Result<Vec<_>, _>>()?;
+        
+        cc.into_iter()
+            .fold(email, |e, c| e.cc(c))
+    } else {
+        email
+    };
+
+    // Add any bcc'd recipients
+    let email = if let Some(bcc) = bcc {
+        let bcc = bcc.into_iter()
+            .map(|&b| parse_email_address(b))
+            .collect::<Result<Vec<_>, _>>()?;
+        
+        bcc.into_iter()
+                .fold(email, |e, b| e.bcc(b))
+    } else {
+        email
+    };
+
+    // Add the body to the message - this converts the MessageBuilder to a 
+    // Message so it has to go last.
+    email.body(message.to_string())
+        .map_err(|e| EmailError::UnencodableBody(e.to_string()))
 }
 
 
