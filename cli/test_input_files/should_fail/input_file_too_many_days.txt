@@ -1,6 +1,6 @@
 site_id=ka
 start_date=20180101
-end_date=20181231
+end_date=20180201
 lat=0
 lon=0
 email=test@test.com

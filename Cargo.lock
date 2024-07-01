@@ -3071,6 +3071,7 @@ dependencies = [
  "float-cmp",
  "hex-literal",
  "itertools 0.10.5",
+ "lettre",
  "log",
  "md-5",
  "regex",

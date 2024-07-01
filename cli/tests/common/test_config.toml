@@ -6,6 +6,7 @@ ftp_download_root = '.'
 output_path = '.'
 std_sites_tar_output = '.'
 std_sites_output_base = '.'
+job_max_days = 30
 start_jobs_freq = 5.0
 simulation = true
 input_file_pattern = "input_file_*.txt"
@@ -27,6 +28,8 @@ type = "Script"
 [requests.allowed_mets.co_reprocessing]
 met_key = 'geosit'
 ginput_key = 'v1.2.0'
+start_date = "2018-01-01"
+end_date = "2018-01-08"
 
 [data]
 zgrid_file = './cli/tests/common/config_target_dummy'

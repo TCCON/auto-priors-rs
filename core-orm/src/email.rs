@@ -1,6 +1,7 @@
 use std::{cell::RefCell, collections::VecDeque, fmt::Debug, io::Write, path::PathBuf, process::{Command, Stdio}, sync::{Arc, Mutex}};
 
 use chrono::NaiveDate;
+use itertools::Itertools;
 use lettre::{SmtpTransport, Transport, Message, message::Mailbox, Address};
 use serde::{Deserialize, Serialize};
 
@@ -149,11 +150,11 @@ impl SendMail for MockEmail {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct TestingEmail {
     #[serde(skip, default)]
-    messages: Arc<Mutex<RefCell<VecDeque<Result<Message, String>>>>>
+    messages: Arc<Mutex<RefCell<VecDeque<TestEmailData>>>>
 }
 
 impl TestingEmail {
-    pub fn pop_front(&self) -> Option<Result<Message, String>> {
+    pub fn pop_front(&self) -> Option<TestEmailData> {
         let mut lock = self.messages.lock()
             .expect("Could not acquire mutex lock");
         let r = lock.get_mut();
@@ -177,16 +178,32 @@ impl TestingEmail {
 
 impl SendMail for TestingEmail {
     fn send_mail(&self, to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError> {
-        let msg_res = build_message(to, from, cc, bcc, subject, message)
-            .map_err(|e| e.to_string());
+        let msg = TestEmailData {
+            to: to.into_iter().map(|s| s.to_string()).collect_vec(),
+            from: from.to_string(),
+            cc: cc.map(|val| val.into_iter().map(|s| s.to_string()).collect_vec()),
+            bcc: bcc.map(|val| val.into_iter().map(|s| s.to_string()).collect_vec()),
+            subject: subject.to_string(),
+            message: message.to_string()
+        };
 
         let mut lock = self.messages.lock()
             .map_err(|e| EmailError::SendFailure(format!("Could not acquire mutex lock: {e}")))?;
         let r = lock.get_mut();
-        r.push_back(msg_res);
+        r.push_back(msg);
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct TestEmailData {
+    pub to: Vec<String>,
+    pub from: String,
+    pub cc: Option<Vec<String>>,
+    pub bcc: Option<Vec<String>>,
+    pub subject: String,
+    pub message: String,
 }
 
 

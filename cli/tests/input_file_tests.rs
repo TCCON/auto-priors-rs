@@ -69,7 +69,67 @@ async fn test_successful_input_files() {
             assert_eq!(email_backend.num_messages(), 0, "Email was sent despite input file having confirmation=false");
         }
 
+        // TODO: confirm that a file was moved into the appropriate directory?
+
         prev_n_jobs_in_db = db_jobs.len();
+    }
+}
+
+#[test_log::test(tokio::test)]
+async fn test_failed_input_files() {
+    // We will programmatically add a year of met to the database, so call the pool function directly
+    // rather than use an SQL file.
+    let (pool, _test_db) = common::open_test_database(true).await
+        .expect("Could not open database");
+    let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("priors-test").expect("Failed to make test configuration");
+    let mut conn = pool.get_connection().await
+        .expect("Could not get database connection from pool");
+
+    let email_backend = if let orm::config::EmailBackend::Testing(backend) = &config.email.backend {
+        backend
+    } else {
+        panic!("This test requires the Testing email backend be configured");
+    };
+
+    populate_met_in_db(&mut conn, &config).await;
+    populate_standard_sites_in_db(&mut conn).await;
+
+    // For each job, add it to the database, then query out what was added and ensure
+    // that no job was created.
+    let test_input_files = list_test_input_files("should_fail");
+    let mut file_mover = input_files::InputFileCleanupHandler::new_for_testing();
+    let dummy_save_dir = PathBuf::from(".");
+
+    for file in test_input_files {
+        log::info!("Adding job for input file {}", file.display());
+        input_files::add_jobs_from_input_files(&mut conn, &config, &[file.clone()], &dummy_save_dir, &mut file_mover)
+            .await
+            .expect("Adding job from input file should not error");
+
+        // Confirm that no job was added
+        let db_jobs = Job::get_jobs_list(&mut conn, false).await.expect("Should be able to query jobs");
+        assert_eq!(db_jobs.len(), 0, "Job(s) incorrectly added for {}", file.file_name().unwrap_or_default().to_string_lossy());
+
+        // Confirm that an email with the expected content was sent or that if one was not sent,
+        // that was the expected behavior.
+        assert!(email_backend.num_messages() <= 1, "Should only send one email for a failed job");
+        let last_msg = email_backend.pop_front();
+        let expected_reasons = get_expected_error_list(file.file_name().unwrap());
+        match (last_msg, expected_reasons) {
+            (None, None) => {},
+            (Some(msg), Some(reasons)) => {
+                let missing_reasons = check_error_reasons_in_email(msg, &reasons);
+                assert!(
+                    missing_reasons.is_empty(),
+                    "Could not find {} of the expected reasons {} was not processed in the email. (Missing reasons: {:?}",
+                    missing_reasons.len(),
+                    file.file_name().unwrap().to_string_lossy(),
+                    missing_reasons
+                )
+            },
+            (Some(_), None) => assert!(false, "Expected no email sent for {}, but one was", file.file_name().unwrap().to_string_lossy()),
+            (None, Some(_)) => assert!(false, "Expected an email sent for {}, but no email was", file.file_name().unwrap().to_string_lossy())
+        }
     }
 }
 
@@ -153,6 +213,28 @@ fn list_test_input_files(subdir: &str) -> Vec<PathBuf> {
         files.push(f.path());
     }
     files
+}
+
+
+fn check_error_reasons_in_email<'r>(msg: orm::email::TestEmailData, expected_reasons: &[&'r str]) -> Vec<&'r str> {
+    let body = msg.message.as_str();
+
+    // First, get the lines from the list of errors - they should start with '*' after whitespace
+    let mut sent_reasons = vec![];
+    for line in body.lines() {
+        if line.trim_start().starts_with("*") {
+            let this_reason = line.trim_start_matches(|c| char::is_whitespace(c) || c == '*').trim_end();
+            sent_reasons.push(this_reason);
+        }
+    }
+
+    println!("Reasons found = {sent_reasons:#?}");
+
+    // Then figure out if we're missing any reasons
+    let missing_reasons = expected_reasons.into_iter()
+        .filter_map(|&reason| if sent_reasons.contains(&reason) { None } else { Some(reason) })
+        .collect_vec();
+    missing_reasons
 }
 
 // ---------------------------------------- //
@@ -250,6 +332,88 @@ fn get_expected_job(file_name: &OsStr) -> Vec<ExpectedJob> {
                 .with_lat_lon(vec![49.1025], vec![8.4397])
         ]},
         _ => unimplemented!("No expected job was defined for {}", file_name)
+    }
+}
+
+
+/// Returns a list of reasons that an input file could not be added
+/// which should correspond to the lines starting with '*' in the email
+/// (sans the '*'). If the file should not result in an email being sent
+/// (because the email could not be identified), returns `None`.
+fn get_expected_error_list(file_name: &OsStr) -> Option<&'static[&'static str]> {
+    let file_name = file_name.to_string_lossy();
+    match file_name.as_ref() {
+        "alt_met_out_of_range.txt" => {
+            Some(&["met 'co_reprocessing' spans dates from 2018-01-01 up to but not including 2018-01-08 but you requested dates (2018-01-21 to 2018-01-22) outside this range"])
+        }
+        "bad_alt_met.txt" => {
+            Some(&["'all_the_reprocessing' is not a valid met"])
+        }
+        "bad_date_fmt.txt" => {
+            Some(&[
+                "Line 2: input contains invalid characters",
+                "Line 3: input contains invalid characters",
+                "missing field start_date",
+                "missing field end_date"
+            ])
+        }
+        "bad_date_order.txt" => {
+            Some(&["Line 3: end_date 2018-01-01 must be at least 1 day after the start date 2018-01-02"])
+        }
+        "bad_file_fmt.txt" => {
+            Some(&[
+                "Line 7: Unknown ModFmt value: netcdf",
+                "Line 8: Unknown VmrFmt value: nothing",
+                "Line 9: Unknown MapFmt value: magic"
+            ])
+        }
+        "blank.txt" => {
+            None
+        }
+        "dates_out_of_range.txt" => {
+            Some(&["Your request could not be fulfilled: met data was unavailable for 1 of the dates requested: 2019-07-01. If you believe this should not be the case, contact the GGG priors automation administrators."])
+        }
+        "dates_same.txt" => {
+            Some(&["Line 3: end_date 2018-01-01 must be at least 1 day after the start date 2018-01-01"])
+        }
+        "input_file_too_many_days.txt" => {
+            Some(&["Too many days requested: 31 requested but the maximum allowed is 30"])
+        }
+        "latlon_out_of_range.txt" => {
+            Some(&[
+                "Line 4: Latitudes must be between -90.0 and +90.0",
+                "Line 5: Longitudes must be between -180.0 and +180.0"
+            ])
+        }
+        "long_multi_site_id.txt" => {
+            // TODO: alter the input file parsing code to not include the "missing field site_id" message in this case
+            Some(&["Line 1: Cannot parse 'ka,rich,bob': must be a single two-character site ID or a comma-separated list of such IDs"])
+        }
+        "long_site_id.txt" => {
+            // TODO: alter the input file parsing code to not include the "missing field site_id" message in this case
+            Some(&["Line 1: Cannot parse 'karl': must be a single two-character site ID or a comma-separated list of such IDs"])
+        }
+        "mismatch_site_latlon_1.txt" => {
+            Some(&["Inconsistent site_id/lat/lon: site_id must have length 1 or the same number of elements as lat & lon (got 2 site ID, 3 lat/lon)"])
+        }
+        "mismatch_site_latlon_2.txt" => {
+            Some(&["Inconsistent site_id/lat/lon: site_id must have length 1 or the same number of elements as lat & lon (got 3 site ID, 1 lat/lon)"])
+        }
+        "missing_most_fields.txt" => {
+            None
+        }
+        "unknown_std_site.txt" => {
+            // TODO: fix the error message actually sent in the email
+            Some(&["'ua' is not a known standard site, you must provide latitude and longitude"])
+        }
+        "wrong_key_value.txt" => {
+            Some(&["Line 2: Unknown field 'start'",
+                "Line 3: Unknown field 'end'",
+                "missing field start_date",
+                "missing field end_date"
+            ])
+        }
+        _ => unimplemented!("No expected error defined for test input file {file_name}.")
     }
 }
 
