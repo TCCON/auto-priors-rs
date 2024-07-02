@@ -103,6 +103,49 @@ impl From<serde_json::Error> for JobError {
 }
 
 #[derive(Debug)]
+pub enum JobAddError {
+    DifferentNumSidLatLon{n_sid: usize, n_lat: usize, n_lon: usize},
+    HalfNullCoord,
+    UnknownStdSid(Vec<String>),
+    InvalidUtf(&'static str),
+    SqlError(sqlx::Error),
+    SerializationError(serde_json::Error),
+}
+
+impl Display for JobAddError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JobAddError::DifferentNumSidLatLon { n_sid, n_lat, n_lon } => {
+                write!(f, "site_id, lat, and lon must all be the same length (got {n_sid}, {n_lat}, {n_lon})")
+            },
+            JobAddError::HalfNullCoord => write!(f, "At least one lat/lon pair has a value for one coordinate but not the other"),
+            JobAddError::UnknownStdSid(sids) => {
+                let s = if sids.len() == 1 { "ID" } else { "IDs" };
+                let sids = sids.join(", ");
+                write!(f, "The site {s} {sids} do not have standard lat/lons associated with them")
+            },
+            JobAddError::InvalidUtf(field) => write!(f, "Could not convert {field} to UTF string"),
+            JobAddError::SqlError(e) => write!(f, "Error during SQL operation: {e}"),
+            JobAddError::SerializationError(e) => write!(f, "Error during serialization: {e}"),
+        }
+    }
+}
+
+impl From<sqlx::Error> for JobAddError {
+    fn from(value: sqlx::Error) -> Self {
+        return Self::SqlError(value)
+    }
+}
+
+impl From<serde_json::Error> for JobAddError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::SerializationError(value)
+    }
+}
+
+impl Error for JobAddError {}
+
+#[derive(Debug)]
 pub enum JobPriorityError {
     StateNotPending,
     Other(anyhow::Error),

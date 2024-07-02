@@ -228,7 +228,7 @@ fn check_error_reasons_in_email<'r>(msg: orm::email::TestEmailData, expected_rea
         }
     }
 
-    println!("Reasons found = {sent_reasons:#?}");
+    // println!("Reasons found = {sent_reasons:#?}");
 
     // Then figure out if we're missing any reasons
     let missing_reasons = expected_reasons.into_iter()
@@ -404,10 +404,11 @@ fn get_expected_error_list(file_name: &OsStr) -> Option<&'static[&'static str]> 
         }
         "unknown_std_site.txt" => {
             // TODO: fix the error message actually sent in the email
-            Some(&["'ua' is not a known standard site, you must provide latitude and longitude"])
+            Some(&["Site ID 'ua' is not a known standard site, you must provide latitude and longitude"])
         }
         "wrong_key_value.txt" => {
-            Some(&["Line 2: Unknown field 'start'",
+            Some(&[
+                "Line 2: Unknown field 'start'",
                 "Line 3: Unknown field 'end'",
                 "missing field start_date",
                 "missing field end_date"

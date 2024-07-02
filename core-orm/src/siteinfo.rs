@@ -920,7 +920,7 @@ impl SiteInfo {
         }
     }
 
-    pub async fn verify_info_available_for_site(conn: &mut MySqlConn, site_id: &str) -> anyhow::Result<bool> {
+    pub async fn verify_info_available_for_site(conn: &mut MySqlConn, site_id: &str) -> Result<bool, sqlx::Error> {
         let n_match = sqlx::query!("SELECT COUNT(*) as count FROM v_StdSiteInfo WHERE site_id = ?", site_id)
             .fetch_one(conn)
             .await?

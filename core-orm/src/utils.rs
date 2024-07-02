@@ -336,6 +336,32 @@ pub fn softwrap<R: std::io::BufRead>(reader: R, buf: &mut String) -> std::io::Re
     Ok(())
 }
 
+pub enum BuilderValue<T> {
+    Unset,
+    Invalid,
+    Set(T)
+}
+
+impl<T> BuilderValue<T> {
+    pub fn is_unset(&self) -> bool {
+        if let Self::Unset = self { true } else { false }
+    }
+
+    pub fn is_invalid(&self) -> bool {
+        if let Self::Invalid = self { true } else { false }
+    }
+
+    pub fn is_set(&self) -> bool {
+        if let Self::Set(_) = self { true } else { false }
+    }
+}
+
+impl<T> Default for BuilderValue<T> {
+    fn default() -> Self {
+        Self::Unset
+    }
+}
+
 #[derive(Debug)]
 pub struct ParseInputBoolError(String);
 
