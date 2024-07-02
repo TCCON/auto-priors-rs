@@ -25,6 +25,19 @@ type = "Script"
 entry_point_path = "./cli/tests/common/config_target_dummy"
 type = "Script"
 
+[[blacklist]]
+identifier = {type = "SubmitterEmail", submitter = "dummy@oops.com"}
+silent = false
+
+[[blacklist]]
+identifier = {type = "SubmitterEmail", submitter = "spammer@spammy.com"}
+silent = true
+
+[[blacklist]]
+identifier = {type = "SubmitterEmail", submitter = "rtfm@rtfm.edu"}
+silent = false
+reason = "don't request a grid of priors"
+
 [requests.allowed_mets.co_reprocessing]
 met_key = 'geosit'
 ginput_key = 'v1.2.0'

@@ -8,9 +8,13 @@ use tccon_priors_cli::met_download;
 
 mod common;
 
+/// Test that all input files in the "should_pass" subdirectory create jobs in the database.
+/// 
+/// Each file under "should_pass" must have a corresponding match arm in [`get_expected_job`]
+/// that returns the vector of jobs that should be added.
 #[test_log::test(tokio::test)]
 async fn test_successful_input_files() {
-    // We will programmatically add a year of met to the database, so call the pool function directly
+    // We will programmatically add a month of met to the database, so call the pool function directly
     // rather than use an SQL file.
     let (pool, _test_db) = common::open_test_database(true).await
         .expect("Could not open database");
@@ -75,9 +79,15 @@ async fn test_successful_input_files() {
     }
 }
 
+/// Test that all input files under the "should_fail" subdirectory do not add jobs and send the right response to the user.
+/// 
+/// Each file in "should_fail" must have a corresponding match arm in [`get_expected_error_list`] which returns the
+/// list of reasons that job failed. They need not be in the same order, but all the expected reasons must be
+/// in the list part of the email for the test to pass. Input files can also be expected to not send an email if e.g.
+/// the user's email could not be determined.
 #[test_log::test(tokio::test)]
 async fn test_failed_input_files() {
-    // We will programmatically add a year of met to the database, so call the pool function directly
+    // We will programmatically add a month of met to the database, so call the pool function directly
     // rather than use an SQL file.
     let (pool, _test_db) = common::open_test_database(true).await
         .expect("Could not open database");
@@ -118,13 +128,14 @@ async fn test_failed_input_files() {
         match (last_msg, expected_reasons) {
             (None, None) => {},
             (Some(msg), Some(reasons)) => {
-                let missing_reasons = check_error_reasons_in_email(msg, &reasons);
+                let missing_reasons = check_error_reasons_in_email(&msg, &reasons);
                 assert!(
                     missing_reasons.is_empty(),
-                    "Could not find {} of the expected reasons {} was not processed in the email. (Missing reasons: {:?}",
+                    "Could not find {} of the expected reasons {} was not processed in the email. (Missing reasons: {:?}, message body follows)\n{}",
                     missing_reasons.len(),
                     file.file_name().unwrap().to_string_lossy(),
-                    missing_reasons
+                    missing_reasons,
+                    msg.message
                 )
             },
             (Some(_), None) => assert!(false, "Expected no email sent for {}, but one was", file.file_name().unwrap().to_string_lossy()),
@@ -133,6 +144,71 @@ async fn test_failed_input_files() {
     }
 }
 
+/// Test that all input files under "blacklisted" are correctly rejected by the system.
+/// 
+/// Each input file in "blacklisted" must have a corresponding match arm in [`get_blacklist_expectation`]
+/// that returns whether an email should be sent for that input file and the message that would be given
+/// if so.
+#[test_log::test(tokio::test)]
+async fn test_blacklisted_input_files() {
+    // We will programmatically add a year of met to the database, so call the pool function directly
+    // rather than use an SQL file.
+    let (pool, _test_db) = common::open_test_database(true).await
+        .expect("Could not open database");
+    let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("priors-test").expect("Failed to make test configuration");
+    let mut conn = pool.get_connection().await
+        .expect("Could not get database connection from pool");
+
+    let email_backend = if let orm::config::EmailBackend::Testing(backend) = &config.email.backend {
+        backend
+    } else {
+        panic!("This test requires the Testing email backend be configured");
+    };
+
+    populate_met_in_db(&mut conn, &config).await;
+    populate_standard_sites_in_db(&mut conn).await;
+
+    // For each job, add it to the database, then query out what was added and ensure
+    // that no job was created.
+    let test_input_files = list_test_input_files("blacklisted");
+    let mut file_mover = input_files::InputFileCleanupHandler::new_for_testing();
+    let dummy_save_dir = PathBuf::from(".");
+
+    for file in test_input_files {
+        log::info!("Adding job for input file {}", file.display());
+        input_files::add_jobs_from_input_files(&mut conn, &config, &[file.clone()], &dummy_save_dir, &mut file_mover)
+            .await
+            .expect("Adding job from input file should not error");
+
+        // Confirm that no job was added
+        let db_jobs = Job::get_jobs_list(&mut conn, false).await.expect("Should be able to query jobs");
+        assert_eq!(db_jobs.len(), 0, "Job(s) incorrectly added for {}", file.file_name().unwrap_or_default().to_string_lossy());
+
+        // Confirm that an email with the expected content was sent or that if one was not sent,
+        // that was the expected behavior.
+        assert!(email_backend.num_messages() <= 1, "Should only send one email for a blacklisted user's input file");
+        let file_name = file.file_name().unwrap();
+        let last_msg = email_backend.pop_front();
+        let (email_expected, expected_message) = get_blacklist_expectation(file_name);
+
+        let file_name = file_name.to_string_lossy();
+        match (email_expected, last_msg) {
+            (false, None) => {},
+            (true, None) => assert!(false, "An email should have been sent for {file_name} but was not."),
+            (false, Some(_)) => assert!(false, "An email should not have been sent for {file_name} but was."),
+            (true, Some(sent_msg)) => {
+                assert_eq!(sent_msg.message, expected_message, "The email sent for blacklisted file {file_name} did not match what was expected.")
+            }
+        }
+    }
+}
+
+/// Add dummy met files to the database.
+/// 
+/// This will create January 2018 GEOS FP-IT and GEOS IT fake data plus 30 & 31 May 2023 FP-IT and 1 & 2 June
+/// IT data. I usually use 2018 because it was one of the first years with GEOS IT data available so at this
+/// point it's just habit. Using 1 June 2023 as the test date for a met transition is because June 2023 is when
+/// I started developing that capability, so I chose the most recent month as the transition date.
 async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
     // All tests will have 2018 GEOS FP-IT and GEOS IT data available. I usually use 2018 because it was
     // one of the first years with GEOS IT data available so at this point it's just habit.
@@ -177,6 +253,11 @@ async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
         false).await.expect("'Downloading' June 2023 GEOS IT files did not complete successfully");
 }
 
+/// Create Caltech (ci), Lamont (oc), and Park Falls (pa) standard sites in the database.
+/// 
+/// This is necessary to test input files that don't provide a lat/lon. It creates entries
+/// in both the StdSite and StdSiteInfo tables to mimic how the database would be populated
+/// if these sites were really present.
 async fn populate_standard_sites_in_db(conn: &mut MySqlConn) {
     log::info!("Adding standard sites to database");
     let sites = [
@@ -196,6 +277,8 @@ async fn populate_standard_sites_in_db(conn: &mut MySqlConn) {
     }
 }
 
+
+/// Gets the list of all input files in a given subdirectory of `cli/test_input_files`.
 fn list_test_input_files(subdir: &str) -> Vec<PathBuf> {
     // This should resolve to the directory containing the Cargo.toml for the
     // cli crate, not the workspace.
@@ -215,8 +298,8 @@ fn list_test_input_files(subdir: &str) -> Vec<PathBuf> {
     files
 }
 
-
-fn check_error_reasons_in_email<'r>(msg: orm::email::TestEmailData, expected_reasons: &[&'r str]) -> Vec<&'r str> {
+/// Confirm that the reasons an input file failed to be parsed matched what was expected.
+fn check_error_reasons_in_email<'r>(msg: &orm::email::TestEmailData, expected_reasons: &[&'r str]) -> Vec<&'r str> {
     let body = msg.message.as_str();
 
     // First, get the lines from the list of errors - they should start with '*' after whitespace
@@ -227,8 +310,6 @@ fn check_error_reasons_in_email<'r>(msg: orm::email::TestEmailData, expected_rea
             sent_reasons.push(this_reason);
         }
     }
-
-    // println!("Reasons found = {sent_reasons:#?}");
 
     // Then figure out if we're missing any reasons
     let missing_reasons = expected_reasons.into_iter()
@@ -241,6 +322,7 @@ fn check_error_reasons_in_email<'r>(msg: orm::email::TestEmailData, expected_rea
 // Define expected jobs for each input file //
 // ---------------------------------------- //
 
+/// Return the list of jobs expected to be created for a given input file.
 fn get_expected_job(file_name: &OsStr) -> Vec<ExpectedJob> {
     let file_name = file_name.to_string_lossy();
     match file_name.as_ref() {
@@ -414,7 +496,31 @@ fn get_expected_error_list(file_name: &OsStr) -> Option<&'static[&'static str]> 
                 "missing field end_date"
             ])
         }
+
         _ => unimplemented!("No expected error defined for test input file {file_name}.")
+    }
+}
+
+/// Return whether an email should be sent for a blacklisted user and the expected message body.
+fn get_blacklist_expectation(file_name: &OsStr) -> (bool, String) {
+    let file_name = file_name.to_string_lossy();
+    let (email_sent, reason) = match file_name.as_ref() {
+        "no_reason_bl.txt" => {
+            (true, None)
+        }
+        "silent_bl.txt" => {
+            (false, None)
+        }
+        "with_reason_bl.txt" => {
+            (true, Some("don't request a grid of priors"))
+        }
+        _ => unimplemented!("No expected error defined for test input file {file_name}.")
+    };
+
+    if let Some(r) = reason {
+        (email_sent, format!("Your priors request input file '{file_name}' has been rejected; further requests will NOT be accepted. Reason: {r}."))
+    } else {
+        (email_sent, format!("Your priors request input file '{file_name}' has been rejected; further requests will NOT be accepted."))
     }
 }
 

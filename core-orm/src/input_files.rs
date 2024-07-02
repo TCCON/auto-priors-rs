@@ -752,9 +752,9 @@ fn handle_blacklisted_input(blacklist_entry: &BlacklistEntry, submitter_email: &
 
     let subj = "GGG priors request rejected";
     let body = if let Some(reason) = &blacklist_entry.reason {
-        format!("Your priors request input file {file_name} has been rejected; further requests will NOT be accepted. Reason: {reason}.")
+        format!("Your priors request input file '{file_name}' has been rejected; further requests will NOT be accepted. Reason: {reason}.")
     } else {
-        format!("Your priors request input file {file_name} has been rejected; further requests will NOT be accepted.")
+        format!("Your priors request input file '{file_name}' has been rejected; further requests will NOT be accepted.")
     };
 
     config.email.send_mail(&[submitter_email], None, None, subj, &body)
