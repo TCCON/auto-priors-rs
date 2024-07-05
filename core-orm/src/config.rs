@@ -147,6 +147,7 @@ pub struct Config {
     pub blacklist: Vec<BlacklistEntry>, // errors if later in the struct (might be okay after default_options now)
     pub default_options: Vec<DefaultOptions>, // errors if after data
     pub execution: ExecutionConfig,
+    #[serde(default)]
     pub requests: UserRequestConfig,
     pub data: DataConfig,
     #[serde(default)]
