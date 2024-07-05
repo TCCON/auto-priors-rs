@@ -23,6 +23,8 @@ pub struct EmailCli {
 pub enum EmailActions {
     /// Send an email to anyone who has previously submitted a job
     Submitters(EmailSubmittersCli),
+    /// Print a list of emails who have previously submitted a job
+    PrintSubs(PrintSubmittersCli),
     /// Send an email summarizing current jobs
     CurrentJobs(CurrentJobsReportCli),
     /// Send an email about previously finished jobs
@@ -110,6 +112,75 @@ pub async fn email_past_job_submitters(conn: &mut MySqlConn, config: &Config, to
             subject,
             body
         )?;
+    }
+    Ok(())
+}
+
+
+/// Print the list of people who have submitted.
+#[derive(Debug, Args)]
+pub struct PrintSubmittersCli {
+    /// By default, the emails will be printed one per line.
+    /// Use this argument to specify an alternate separator to
+    /// use instead of a newline.
+    #[clap(short = 's', long, default_value = "\n")]
+    separator: String,
+
+    /// By default, any email now on the blacklist will not
+    /// be included in the list. Pass this flag to include
+    /// them.
+    #[clap(short = 'k', long)]
+    keep_blacklisted: bool,
+
+    /// Use this argument to give a domain to exclude, emails that
+    /// end in this substring will not be printed. Specify multiple
+    /// times for multiple domains.
+    #[clap(short = 'e', long)]
+    exclude_domain: Vec<String>,
+}
+
+pub async fn print_submitters_emails_cli(conn: &mut MySqlConn, config: &Config, args: PrintSubmittersCli) -> anyhow::Result<()> {
+    let exclude_domains = args.exclude_domain.iter().map(|s| s.as_ref()).collect_vec();
+    print_submitters_emails(conn, config, &args.separator, args.keep_blacklisted, &exclude_domains).await
+}
+
+pub async fn print_submitters_emails(conn: &mut MySqlConn, config: &Config, separator: &str, keep_blacklisted: bool, exclude_domains: &[&str]) -> anyhow::Result<()> {
+    let mut emails = make_submitter_email_list(conn, config).await?;
+
+    let n_blacklisted = if !keep_blacklisted {
+        let n_init = emails.len();
+        for entry in &config.blacklist {
+            match entry.identifier {
+                orm::config::BlacklistIdentifier::SubmitterEmail { ref submitter } => {
+                    emails.retain(|s| s != submitter);
+                },
+            }
+        }
+        n_init - emails.len()
+    } else {
+        0
+    };
+
+    let n_excluded = if !exclude_domains.is_empty() {
+        let n_init = emails.len();
+        emails.retain(|s| {
+            for dom in exclude_domains {
+                if s.ends_with(dom) { return false; }
+            }
+            return true;
+        });
+        n_init - emails.len()
+    } else {
+        0
+    };
+
+    let to_print = emails.join(separator);
+    println!("{to_print}");
+    if n_blacklisted > 0 {
+        eprintln!("{n_blacklisted} emails removed because they were on the blacklist.");
+    }
+    if n_excluded > 0 {
+        eprintln!("{n_excluded} emails removed because they matched one of the excluded domains.");
     }
     Ok(())
 }
@@ -238,7 +309,6 @@ impl FromStr for RequestRow {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let row = split_google_sheets_csv_line(s);
         let record = csv::StringRecord::from(row);
-        dbg!(&record);
         let request: RequestRow = record.deserialize(None)?;
         Ok(request)
     }

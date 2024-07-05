@@ -168,6 +168,12 @@ async fn main() -> anyhow::Result<()> {
             email::email_past_job_submitters_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
+        Commands::Email( EmailCli { commands: EmailActions::PrintSubs(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            let loaded_config = load_config()?;
+            email::print_submitters_emails_cli(&mut conn, &loaded_config, subargs).await?;
+        },
+
         Commands::Email( EmailCli { commands: EmailActions::CurrentJobs(subargs) }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
