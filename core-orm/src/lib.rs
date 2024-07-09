@@ -68,7 +68,7 @@ pub fn get_database_url(url_in: Option<String>) -> anyhow::Result<String> {
 pub struct PoolWrapper(sqlx::MySqlPool);
 
 impl PoolWrapper {
-    pub async fn get_connection(&self) -> anyhow::Result<MySqlPC> {
+    pub async fn get_connection(&self) -> Result<MySqlPC, sqlx::Error> {
         let mut conn = self.0.acquire().await?;
         // This, theoretically, should provide the maximum protection against
         // transactions interfering with each other, see

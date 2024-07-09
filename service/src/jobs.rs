@@ -524,7 +524,7 @@ impl<T: Queueable> JobManager<T> {
             Ok(c) => c,
             Err(e) => {
                 self.error_handler.report_error_with_context(
-                    e.as_ref(),
+                    &e,
                     "Failed to acquire database connect while trying to cancel jobs"
                 );
 
@@ -557,7 +557,7 @@ impl<T: Queueable> JobManager<T> {
             Ok(c) => c,
             Err(e) => {
                 self.error_handler.report_error_with_context(
-                    e.as_ref(),
+                    &e,
                     "Failed to acquire database connection while trying to stop and reset jobs"
                 );
                 return;

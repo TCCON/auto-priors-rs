@@ -1,15 +1,19 @@
 use std::{sync::Arc, fmt::Debug};
 
-use axum::{Router, extract::State, routing::get, response::Html, http::StatusCode};
+use axum::{extract::State, http::StatusCode, response::Html, routing::{get, post}, Router};
+use axum_login::{login_required, AuthManagerLayerBuilder};
 use log::{error, info, debug};
 use tower_http::services::ServeDir;
 
 use orm;
 
+mod auth;
+mod auth_web;
 mod templates;
 mod jobs;
 
 use templates::{TEMPLATES, make_base_context};
+use tower_sessions::cookie::time::Duration;
 
 
 struct AppState {
@@ -20,6 +24,10 @@ impl AppState {
     async fn new() -> anyhow::Result<Self> {
         let pool = orm::get_database_pool(None).await?;
         Ok(Self { pool })
+    }
+
+    pub(crate) fn clone_pool(&self) -> orm::PoolWrapper {
+        self.pool.clone()
     }
 }
 
@@ -49,17 +57,39 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let address = "127.0.0.1:8080";
 
-    let shared_state = Arc::new(AppState::new().await.expect("Could not set up shared state"));
+    let state = AppState::new().await.expect("Could not set up shared state");
+    let pool = state.clone_pool();
+    let shared_state = Arc::new(state);
 
-    // TODO: static directory configuration
-    let static_server = ServeDir::new("static");
-    let app = Router::new()
-        .route("/", get(home))
+    // Set up session middleware. Should use SQL session eventually, memory is just for
+    // initial development.
+    let session_store = tower_sessions::MemoryStore::default();
+    let key = tower_sessions::cookie::Key::generate();
+    let session_layer = tower_sessions::SessionManagerLayer::new(session_store)
+        .with_expiry(tower_sessions::Expiry::OnInactivity(Duration::days(1)))
+        .with_signed(key);
+    let backend = auth::Backend::new(pool);
+    let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
+
+    let protected_routes = Router::new()
         .route("/job-statuses", get(job_statuses))
         .route("/submit-job", get(submit_job))
         .route("/job-queue", get(job_queue))
         .route("/std-sites", get(std_sites))
-        .route("/met-data", get(met_data))
+        .route("/met-data", get(met_data));
+
+    let unprotected_routes = Router::new()
+        .route("/", get(home))
+        .route("/login", post(auth_web::post::login))
+        .route("/login", get(auth_web::get::login))
+        .route("/logout", get(auth_web::get::logout));
+
+    // TODO: static directory configuration
+    let static_server = ServeDir::new("static");
+    let app = protected_routes
+        .route_layer(login_required!(auth::Backend, login_url = "/login"))
+        .merge(unprotected_routes)
+        .layer(auth_layer)
         .with_state(shared_state)
         .nest_service("/static", static_server);
 

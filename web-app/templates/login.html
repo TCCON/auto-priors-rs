@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="body-text">
+    <h1>{{ subtitle }}</h1>
+    <p>Please login to access this page.</p>
+    <form method="post">
+        <fieldset>
+            <legend>User login</legend>
+            <p>
+                <label for="username">Username</label>
+                <input name="username" id="username"/>
+            </p>
+            <p>
+                <label for="password">Password</label>
+                <input name="password" id="password" type="password"/>
+            </p>
+        </fieldset>
+        <input type="submit" value="Log in"/>
+
+        {% if has_next %}
+        <input type="hidden" name="next" value="{{next_url}}" />
+        {% endif %}
+    </form>
+</div>
+{% endblock content %}
