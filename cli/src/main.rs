@@ -192,6 +192,11 @@ async fn main() -> anyhow::Result<()> {
             email::email_std_site_request_info_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
+        Commands::Email( EmailCli { commands: EmailActions::TestEmail(subargs) }) => {
+            let loaded_config = load_config()?;
+            email::send_test_email_cli(&loaded_config, subargs)?;
+        },
+
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::AddSite(subargs) }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::add_new_std_site_cli(&mut conn, subargs).await?;

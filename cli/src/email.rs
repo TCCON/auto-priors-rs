@@ -31,6 +31,8 @@ pub enum EmailActions {
     PastJobs(CompletedJobsReportCli),
     /// Send an email summarizing new standard site requests
     StdSiteReq(StdSiteRequestCli),
+    /// Send a test email
+    TestEmail(TestEmailCli),
 }
 
 
@@ -259,6 +261,22 @@ pub async fn email_completed_jobs_cli(conn: &mut MySqlConn, config: &Config, arg
     orm::email::email_completed_jobs(conn, config, &to, args.start_date, args.end_date).await
 }
 
+#[derive(Debug, Args)]
+pub struct TestEmailCli {
+    /// Email address to send the test email to
+    to: String,
+}
+
+pub fn send_test_email_cli(config: &Config, args: TestEmailCli) -> anyhow::Result<()> {
+    config.email.send_mail(
+        &[&args.to],
+        None,
+        None,
+        "AutoMod test email",
+        "This is a test email from the Rust priors generation system"
+    )?;
+    Ok(())
+}
 
 #[derive(Debug, Args)]
 pub struct StdSiteRequestCli {
