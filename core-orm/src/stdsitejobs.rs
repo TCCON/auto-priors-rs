@@ -187,7 +187,7 @@ impl StdSiteJob {
             .with_context(|| format!("Failed to get site locations for site {site_id} while filling missing dates for standard site jobs"))?;
 
         if locations.is_empty() {
-            anyhow::bail!("No locations defined for site {site_id}");
+            log::warn!("No locations defined for site {site_id}");
         }
 
         let nopen = locations.iter()
