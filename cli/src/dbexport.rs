@@ -53,7 +53,7 @@ pub async fn export_cli(conn: &mut MySqlConn, args: ExportCli) -> anyhow::Result
     export::export_database(conn, &args.json_file, args.compact, !args.allow_missing_migrations).await
 }
 
-/// Import the database contents from a JSON file.
+/// Import the database contents from a JSON file, deleting the existing contents of the database after the JSON is read successfully.
 /// 
 /// By default, this will check that the SQLx migrations match between the database and the
 /// JSON file. If they don't, it will not proceed. You can reduce or disable this check with

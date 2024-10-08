@@ -214,12 +214,14 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::AddInfo(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            siteinfo::add_std_site_info_range_cli(&mut conn, subargs).await?;
+            let loaded_config = load_config()?;
+            siteinfo::add_std_site_info_range_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::SetNonop(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            siteinfo::clear_site_info_range_cli(&mut conn, subargs).await?;
+            let loaded_config = load_config()?;
+            siteinfo::clear_site_info_range_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::DeleteInfo(subargs) }) => {

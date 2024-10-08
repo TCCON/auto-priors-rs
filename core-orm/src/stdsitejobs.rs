@@ -18,6 +18,7 @@ use tabled::Tabled;
 use crate::config::Config;
 use crate::jobs;
 use crate::met;
+use crate::siteinfo::SiteInfo;
 use crate::siteinfo::{self, SiteType, StdOutputStructure};
 use crate::utils::DateIterator;
 use crate::MySqlConn;
@@ -286,11 +287,13 @@ impl StdSiteJob {
 
         let mut njobs = 0;
         for mut job in stdjobs {
+            log::debug!("Clearing outputs for site job {} and marking it as ready for a new job", job.id);
             job.clear_output_for_regen(conn, true).await?;
             njobs += 1;
         }
 
         for mut job in clearjobs {
+            log::debug!("Clearing outputs for site job {} but marking it as NONOPERATIONAL", job.id);
             job.clear_output_for_regen(conn, false).await?;
             njobs += 1;
         }
@@ -611,11 +614,14 @@ impl StdSiteJob {
 
     /// Flag rows in the standard site jobs table for a given site and a date range for priors regeneration.
     /// 
+    /// Unless you know whether this site and date range should be set as non-operational or not, you should prefer
+    /// [`Self::set_regen_flag_by_site_info`] over this function.
+    /// 
     /// If `end_date` is `None`, then all rows from `start_date` on are flagged. Otherwise, rows up to but not
     /// including `end_date` are flagged. Returns the number of rows affected if successful. Returns an `Err`
     /// if the database query fails.
-    pub async fn set_regen_flag(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>, clear_output: bool) -> anyhow::Result<u64> {
-        let new_state = if clear_output {
+    pub async fn set_regen_flag(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>, set_inop: bool) -> anyhow::Result<u64> {
+        let new_state = if set_inop {
             StdSiteJobState::NonopNeeded
         } else {
             StdSiteJobState::RegenNeeded
@@ -641,6 +647,24 @@ impl StdSiteJob {
         };
 
         Ok(q.rows_affected())
+    }
+
+    /// Flag rows in the standard site for regeneration, intelligently deciding whether it requires regeneration or to be converted to non-operational status.
+    /// 
+    /// If `end_date` is `None`, then all rows from `start_date` on are flagged. Otherwise, rows up to but not
+    /// including `end_date` are flagged. Returns an `Err` if the database query fails.
+    /// 
+    /// If you want all the rows for this site and date range to be flagged as non-operational or not regardless
+    /// of the site specifications, see [`Self::set_regen_flag`].
+    pub async fn set_regen_flag_by_site_info(conn: &mut MySqlConn, site_id: &str, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<()> {
+        let mut trans = conn.begin().await?;
+        let locations = SiteInfo::get_site_locations(&mut trans, site_id).await?;
+        Self::set_regen_flag(&mut trans, site_id, start_date, end_date, true).await?;
+        for loc in locations {
+            Self::set_regen_flag(&mut trans, site_id, loc.start_date, loc.end_date, false).await?;
+        }
+        trans.commit().await?;
+        Ok(())
     }
 
     pub async fn set_job_by_id(conn: &mut MySqlConn, row_id: i32, job_id: i32) -> anyhow::Result<()> {
