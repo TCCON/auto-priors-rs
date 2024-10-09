@@ -1,6 +1,6 @@
 [package]
 name = "tccon_priors_orm"
-version = "1.0.2"
+version = "1.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -15,6 +15,7 @@ hostname = "0.3"
 itertools.workspace = true
 lettre.workspace = true
 log.workspace = true
+netrc-rs = "0.1"
 # pyo3 = "0.16.5"
 serde.workspace = true
 serde_json.workspace = true

@@ -1,4 +1,4 @@
-use std::{fmt::Display, str::FromStr, path::Path};
+use std::{fmt::Display, io::Read, path::{Path, PathBuf}, str::FromStr};
 
 use chrono::{NaiveDate, Duration};
 use itertools::Itertools;
@@ -427,6 +427,48 @@ pub fn split_date_range_by_days(start_date: NaiveDate, end_date: NaiveDate, num_
         curr_start += chrono::Duration::days(num_days);
     }
     ranges
+}
+
+/// Retrieve credentials from a .netrc file for a given host.
+/// 
+/// The `host` parameter must match the value of the "machine" parameter in the
+/// .netrc file. If `netrc_file` is `None`, then the file is assumed to be at
+/// `~/.netrc` - note that this requires the `HOME` environmental variable be
+/// set.
+/// 
+/// # Returns
+/// If `host` is found in the .netrc file, returns an instance of [`netrc_rs::Machine`]
+/// which may or may not include login and password. If `host` is not present in the .netrc
+/// file, returns `None`. 
+/// 
+/// # Errors
+/// Returns an error if reading the netrc file fails for any reason or its contents cannot
+/// be parsed.
+pub fn get_netrc_credentials(host: &str, netrc_file: Option<&Path>) -> std::io::Result<Option<netrc_rs::Machine>> {
+    let mut f = if let Some(p) = netrc_file {
+        std::fs::File::open(p)?
+    } else {
+        let p = std::env::var_os("HOME").ok_or_else(|| 
+            std::io::Error::other("Could not get home directory")
+        ).map(PathBuf::from)?.join(".netrc");
+        if !p.exists() {
+            return Err(std::io::Error::other("~/.netrc file does not exist"));
+        }
+        std::fs::File::open(p)?
+    };
+
+    let mut netrc_contents = String::new();
+    f.read_to_string(&mut netrc_contents)?;
+    let netrc = netrc_rs::Netrc::parse(&netrc_contents, false)
+        .map_err(|e| std::io::Error::other(format!("Cannot parse .netrc file: {e}")))?;
+
+    for machine in netrc.machines {
+        if machine.name.as_deref() == Some(host) {
+            return Ok(Some(machine))
+        }
+    }
+    
+    Ok(None)
 }
 
 #[cfg(test)]

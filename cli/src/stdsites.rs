@@ -116,7 +116,7 @@ pub async fn flag_for_regen(conn: &mut MySqlConn, start_date: NaiveDate, end_dat
     };
 
     for sid in site_ids {
-        stdsitejobs::StdSiteJob::set_regen_flag(conn, &sid, start_date, Some(end_date), true).await?;
+        stdsitejobs::StdSiteJob::set_regen_flag_by_site_info(conn, &sid, start_date, Some(end_date)).await?;
     }
 
     Ok(())

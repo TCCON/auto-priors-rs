@@ -147,6 +147,7 @@ pub struct Config {
     pub blacklist: Vec<BlacklistEntry>, // errors if later in the struct (might be okay after default_options now)
     pub default_options: Vec<DefaultOptions>, // errors if after data
     pub execution: ExecutionConfig,
+    #[serde(default)]
     pub requests: UserRequestConfig,
     pub data: DataConfig,
     #[serde(default)]
@@ -1314,9 +1315,12 @@ impl EmailConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum EmailBackend {
-    /// Uses the `Lettre` crate to connect to a local SMTP server
-    /// Note that this is *unencrypted*, but that is assumed to be acceptible
-    /// since the connection is on the local machine. This is the default.
+    /// Uses the `Lettre` crate to connect to a SMTP server.
+    /// Note that connections to a local server are *unencrypted*, but that
+    /// is assumed to be acceptible since the connection is on the local
+    /// machine. This is the default. Alternatively, you can authenticate
+    /// over a TLS connection using a password, intended for a remote SMTP
+    /// host.
     Internal(crate::email::Lettre),
 
     /// Calls the `mailx` command line client via the shell to send

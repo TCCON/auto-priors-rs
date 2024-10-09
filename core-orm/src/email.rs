@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::VecDeque, fmt::Debug, io::Write, path::Pat
 
 use chrono::NaiveDate;
 use itertools::Itertools;
-use lettre::{SmtpTransport, Transport, Message, message::Mailbox, Address};
+use lettre::{message::Mailbox, transport::smtp::authentication::Credentials, Address, Message, SmtpTransport, Transport};
 use serde::{Deserialize, Serialize};
 
 use crate::{error::EmailError, MySqlConn, config::Config};
@@ -65,17 +65,79 @@ impl SendMail for Mailx {
 
 
 /// An enum defining different connection types the Lettre crate can use.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LettreSmtpType {
     /// Establish an unencrypted connection to an SMTP server running on the local host.
     /// This is the default.
-    Local
+    Local,
+
+    /// Establish an encrypted connection to an SMTP server using a username and password
+    /// to authentical. This works with Gmail for example; note that for Gmail you must
+    /// use an app password, set through https://myaccount.google.com/apppasswords as of
+    /// 24 Jul 2024. Requires the host (e.g. "smtp.gmail.com"), username (often the 
+    /// sending email address), and password. `user` and `password` can be "netrc",
+    /// which means this program will look for a machine named the value of `host`
+    /// in your ~/.netrc file - the intention is to keep sensitive information out
+    /// of the configuration file if desired and to minimize how long the password is
+    /// in memory.
+    TlsPassword{host: String, user: String, password: String},
+}
+
+impl LettreSmtpType {
+    fn get_mailer(&self) -> Result<SmtpTransport, EmailError> {
+        match self {
+            LettreSmtpType::Local => Ok(SmtpTransport::unencrypted_localhost()),
+            LettreSmtpType::TlsPassword { host, user, password } => {
+                let (user, password) = fill_user_or_pw_from_netrc(user.to_string(), password.to_string(), host)
+                    .map_err(|e| EmailError::SendFailure(e.to_string()))?;
+                let creds = Credentials::new(user, password);
+                let mailer = SmtpTransport::relay(&host)
+                    .map_err(|e| EmailError::SendFailure(e.to_string()))?
+                    .credentials(creds)
+                    .build();
+                Ok(mailer)
+            },
+        }
+    }
 }
 
 impl Default for LettreSmtpType {
     fn default() -> Self {
         Self::Local
     }
+}
+
+/// Given a username and password from the configuration, if either one is 
+/// "netrc", it will be replaced with the corresponding value from the
+/// ~/.netrc file for the `host`. User or password values other than
+/// "netrc" are returned unchanged.
+fn fill_user_or_pw_from_netrc(user: String, password: String, host: &str) -> std::io::Result<(String, String)> {
+    if user != "netrc" && password != "netrc" {
+        return Ok((user, password))
+    }
+
+    let machine = crate::utils::get_netrc_credentials(host, None)?;
+    let (netrc_user, netrs_pw) = machine.map(|m| (m.login, m.password)).ok_or_else(|| 
+        std::io::Error::other(format!("Host '{host}' not found in ~/.netrc"))
+    )?;
+
+    let user = if user == "netrc" { 
+        netrc_user.ok_or_else(|| std::io::Error::other(
+            format!("No username found for host '{host}'")
+        ))?
+    } else {
+        user
+    };
+
+    let password = if password == "netrc" {
+        netrs_pw.ok_or_else(|| std::io::Error::other(
+            format!("No password found for host '{host}'")
+        ))?
+    } else {
+        password
+    };
+
+    Ok((user, password))
 }
 
 
@@ -97,9 +159,7 @@ impl SendMail for Lettre {
         let email = build_message(to, from, cc, bcc, subject, message)?;
 
         // Send the email
-        let mailer = match self.smtp {
-            LettreSmtpType::Local => SmtpTransport::unencrypted_localhost()
-        };
+        let mailer = self.smtp.get_mailer()?;
         mailer.send(&email)
             .map_err(|e| EmailError::SendFailure(e.to_string()))?;
 
