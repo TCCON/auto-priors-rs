@@ -84,6 +84,21 @@ impl From<JobState> for i8 {
     }
 }
 
+impl FromStr for JobState {
+    type Err = JobError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" | "p" => Ok(Self::Pending),
+            "running" | "r" => Ok(Self::Running),
+            "complete" | "d" => Ok(Self::Complete),
+            "errored" | "e" => Ok(Self::Errored),
+            "cleaned" | "x" => Ok(Self::Cleaned),
+            _ => Err(JobError::InvalidStateName(s.to_string()))
+        }
+    }
+}
+
 impl TryFrom<i8> for JobState {
     type Error = JobError;
 
@@ -417,6 +432,16 @@ impl<'j> Display for VerboseDisplayJob<'j> {
         } else {
             "not completed yet".to_string()
         };
+
+        let delete_string = if let Some(time) = self.job.delete_time {
+            if let JobState::Cleaned = self.job.state {
+                format!("Deletion time was {time}.")
+            } else {
+                format!("Will be cleaned up after {time}.")
+            }
+        } else {
+            "Has no deletion time.".to_string()
+        };
         
         writeln!(f, "Job {} ({}):", self.job.job_id, self.job.state)?;
         writeln!(f, "  Submitted by {} at {}, {}", 
@@ -424,6 +449,7 @@ impl<'j> Display for VerboseDisplayJob<'j> {
             self.job.submit_time,
             complete_string
         )?;
+        writeln!(f, "  {delete_string}")?;
         writeln!(f, "  Priority {} in queue {}", self.job.priority, self.job.queue)?;
         writeln!(f, "  Dates: {} to {}", self.job.start_date, self.job.end_date)?;
         writeln!(f, "  Site IDs:   {}", self.job.site_id.join(", "))?;
@@ -732,6 +758,21 @@ impl Job {
         jobs
     }
 
+    pub async fn get_jobs_in_queue(conn: &mut MySqlConn, queue: &str) -> JobResult<Vec<Job>> {
+        let qjobs = sqlx::query_as!(
+            QJob,
+            "SELECT * FROM Jobs WHERE queue = ?",
+            queue
+        ).fetch_all(conn)
+        .await?;
+
+        let jobs: Result<Vec<_>, _> = qjobs.into_iter()
+            .map(|qjob| Job::try_from(qjob))
+            .collect();
+
+        jobs
+    }
+
     /// Return a `Job` instance with the given `job_id`.
     /// 
     /// # Parameters
@@ -960,11 +1001,12 @@ impl Job {
     /// 
     /// # Parameters
     /// * `site_id_str` - a comma-separated list of site IDs, e.g. "pa,oc,ci"
-    pub fn parse_site_id_str(site_id_str: &str) -> Vec<String> {
+    pub fn parse_site_id_str(site_id_str: &str) -> JobResult<Vec<String>> {
         return site_id_str
                 .split(',')
                 .map(|s| s.trim().to_owned())
-                .collect();
+                .map(|s| if s.len() == 2 { Ok(s) } else { Err(JobError::CannotParseSiteId(site_id_str.to_string()))})
+                .try_collect();
     }
 
     /// Convert a user-inputted string of latitudes into a proper vector of latitudes
@@ -1286,11 +1328,12 @@ impl Job {
     /// Note that if an error occurs while cleaning up one job, any following jobs will not be cleaned
     /// up. However, rerunning this function (after the root cause of the error has been fixed) should
     /// pick up where it left off.
-    pub async fn clean_up_expired_jobs(conn: &mut MySqlConn) -> anyhow::Result<()> {
+    pub async fn clean_up_expired_jobs(conn: &mut MySqlConn, dry_run: bool) -> anyhow::Result<()> {
         let jobs: Vec<_> = sqlx::query_as!(
             QJob,
-            "SELECT * FROM Jobs WHERE delete_time IS NOT NULL and delete_time <= ?",
-            chrono::Local::now().naive_local()
+            "SELECT * FROM Jobs WHERE delete_time IS NOT NULL AND delete_time <= ? AND state != ?",
+            chrono::Local::now().naive_local(),
+            JobState::Cleaned
         ).fetch_all(&mut *conn)
         .await?
         .into_iter()
@@ -1300,8 +1343,12 @@ impl Job {
         info!("{} jobs output expired, starting clean up", jobs.len());
 
         for mut job in jobs {
-            job.set_cleaned(conn).await?;
-            debug!("Job {} cleaned up", job.job_id);
+            if dry_run {
+                println!("Would clean up job {}", job.job_id);
+            } else {
+                job.set_cleaned(conn).await?;
+                debug!("Job {} cleaned up", job.job_id);
+            }
         }
 
         Ok(())
@@ -1463,6 +1510,18 @@ impl Job {
         .context("Error occurred while setting job priority")?;
 
         self.priority = new_priority;
+
+        Ok(())
+    }
+
+    pub async fn set_delete_time_by_id(job_id: i32, conn: &mut MySqlConn, deletion_time: Option<NaiveDateTime>) -> JobResult<()> {
+        sqlx::query!(
+            "UPDATE Jobs SET delete_time = ? WHERE job_id = ?",
+            deletion_time,
+            job_id
+        ).execute(conn)
+        .await
+        .map_err(|e| JobError::QueryError(e))?;
 
         Ok(())
     }
