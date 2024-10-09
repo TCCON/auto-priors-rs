@@ -29,7 +29,7 @@ async fn test_successful_input_files() {
     };
 
     populate_met_in_db(&mut conn, &config).await;
-    populate_standard_sites_in_db(&mut conn).await;
+    populate_standard_sites_in_db(&mut conn, &config).await;
 
     // For each job, add it to the database, then query out what was added and ensure
     // that the correct job was created.
@@ -102,7 +102,7 @@ async fn test_failed_input_files() {
     };
 
     populate_met_in_db(&mut conn, &config).await;
-    populate_standard_sites_in_db(&mut conn).await;
+    populate_standard_sites_in_db(&mut conn, &config).await;
 
     // For each job, add it to the database, then query out what was added and ensure
     // that no job was created.
@@ -166,7 +166,7 @@ async fn test_blacklisted_input_files() {
     };
 
     populate_met_in_db(&mut conn, &config).await;
-    populate_standard_sites_in_db(&mut conn).await;
+    populate_standard_sites_in_db(&mut conn, &config).await;
 
     // For each job, add it to the database, then query out what was added and ensure
     // that no job was created.
@@ -258,7 +258,7 @@ async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
 /// This is necessary to test input files that don't provide a lat/lon. It creates entries
 /// in both the StdSite and StdSiteInfo tables to mimic how the database would be populated
 /// if these sites were really present.
-async fn populate_standard_sites_in_db(conn: &mut MySqlConn) {
+async fn populate_standard_sites_in_db(conn: &mut MySqlConn, config: &Config) {
     log::info!("Adding standard sites to database");
     let sites = [
         ("ci", "Caltech", "Pasadena, CA, USA".to_string(), 34.1362, -118.1269, 2012, 9),
@@ -271,7 +271,7 @@ async fn populate_standard_sites_in_db(conn: &mut MySqlConn) {
             .await.expect("Should be able to add new site");
         let start_date = NaiveDate::from_ymd_opt(start_year, start_month, 1).unwrap();
         SiteInfo::set_site_info_for_dates(
-            conn, sid, start_date, None, Some(loc), Some(lon), Some(lat), None, false
+            conn, config, sid, start_date, None, Some(loc), Some(lon), Some(lat), None, false
         ).await.expect("Should be able to set location information for standard site.")
 
     }
