@@ -9,7 +9,7 @@ use serde::{Serialize, Deserialize};
 use sqlx::{self, FromRow, Type, Connection};
 use tabled::Tabled;
 
-use crate::{utils, stdsitejobs::StdSiteJob, jobs::Job};
+use crate::{config::Config, jobs::Job, stdsitejobs::StdSiteJob, utils};
 
 use super::MySqlConn;
 
@@ -1022,7 +1022,8 @@ impl SiteInfo {
     /// there is no public interface to change the start/end dates of a `SiteInfo` instance
     /// directly.
     pub async fn set_site_info_for_dates(
-        conn: &mut MySqlConn, 
+        conn: &mut MySqlConn,
+        config: &Config,
         site_id: &str, 
         start_date: NaiveDate, 
         end_date: Option<NaiveDate>, 
@@ -1147,10 +1148,23 @@ impl SiteInfo {
             }
         }
 
-        // Finally, mark any past or pending job as needed regenerated
+        // Next, mark any past or pending job as needed regenerated
         if regen_needed || set_inop {
-            StdSiteJob::set_regen_flag(&mut trans, site_id, start_date, end_date, set_inop).await?;
+            let nrows = StdSiteJob::set_regen_flag(&mut trans, site_id, start_date, end_date, set_inop).await?;
+            log::info!("Marked {nrows} rows in the site jobs table for regeneration");
+        } else {
+            log::info!("Did not mark any rows in the site jobs table for regeneration");
         }
+
+        // Finally, add rows that didn't already exist. This is usually needed when adding a new site.
+        let last_met_date = if let Some(d) = crate::met::MetFile::get_last_complete_date_for_default_mets(&mut trans, config).await
+            .context("Error occurred while trying to identify the last complete day for default meteorologies")? {
+                d
+            } else {
+                warn!("No available met data, nothing to be done to update the standard sites table");
+                return Ok(());
+            };
+        StdSiteJob::fill_missing_dates_for_site(&mut trans, config, site_id, start_date, last_met_date).await?;
 
         trans.commit().await?;
 

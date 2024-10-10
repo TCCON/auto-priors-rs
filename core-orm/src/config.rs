@@ -59,7 +59,7 @@ impl ConfigValidationError {
 
 #[derive(Debug)]
 pub enum ConfigValErrorCause {
-    UnknownGinputKey{key: String, defaults_index: usize},
+    UnknownGinputKey{key: String, location: String},
     UnknownMetKey{key: String, defaults_index: usize},
     BadMetConfig{key: String, reason: String},
     DefaultsDateInverted(usize),
@@ -72,13 +72,14 @@ pub enum ConfigValErrorCause {
     ExpectedFileNotDir(String),
     QueueSameName{q1: &'static str, q2: &'static str, name: String},
     MissingEmail(&'static str),
+    DuplicateKey{field: &'static str, key: String},
 }
 
 impl Display for ConfigValErrorCause {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConfigValErrorCause::UnknownGinputKey { key, defaults_index } => {
-                write!(f, "Undefined ginput key '{key}' in default options #{}", defaults_index+1)
+            ConfigValErrorCause::UnknownGinputKey { key, location } => {
+                write!(f, "Undefined ginput key '{key}' in {location}")
             },
             ConfigValErrorCause::UnknownMetKey { key, defaults_index } => {
                 write!(f, "Undefined met key '{key}' in default options #{}", defaults_index+1)
@@ -119,19 +120,26 @@ impl Display for ConfigValErrorCause {
             ConfigValErrorCause::MissingEmail(description) => {
                 write!(f, "The {description} email is empty")
             },
+            ConfigValErrorCause::DuplicateKey { field, key } => {
+                write!(f, "The key {key} occurs multiple times in {field}")
+            },
+            
         }
     }
 }
 
 /// Top level configuration structure, comprised of subsections represented by other structures:
 /// 
-/// - `execution`: an [`ExecutionConfig`] containing options about how the automation runs
-/// - `data`: a [`DataConfig`] containing options about where input data is located
+/// - `blacklist`: a list of [`BlacklistEntry`] instances that block specific users from 
+///    requesting jobs.
 /// - `default_options`: a `Vec` of [`DefaultOptions`] that specify which ginput and met version
 ///   to use by default for different time periods.
+/// - `execution`: an [`ExecutionConfig`] containing options about how the automation runs
+/// - `requests`: a [`UserRequestConfig`] that specifies extra options about what users can
+///   ask for in their runs.
+/// - `data`: a [`DataConfig`] containing options about where input data is located
 /// - `email`: an [`EmailConfig`] that determines how emails are sent (both for usual operation and
 ///   if something goes wrong)
-/// - `admin`: an [`AdminConfig`] that contains settings about how use of this service is controlled
 /// - `timing`: a [`ServiceTimingOptions`] that controls how often different parts of the service run.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -139,6 +147,8 @@ pub struct Config {
     pub blacklist: Vec<BlacklistEntry>, // errors if later in the struct (might be okay after default_options now)
     pub default_options: Vec<DefaultOptions>, // errors if after data
     pub execution: ExecutionConfig,
+    #[serde(default)]
+    pub requests: UserRequestConfig,
     pub data: DataConfig,
     #[serde(default)]
     pub email: EmailConfig,
@@ -479,6 +489,9 @@ impl Config {
         let ginput_errors = self.validate_ginputs();
         errors.extend(ginput_errors);
 
+        let request_errors = self.validate_request_opts();
+        errors.extend(request_errors);
+
         let data_errors = self.validate_data();
         errors.extend(data_errors);
 
@@ -493,7 +506,7 @@ impl Config {
 
         for (idx, default_opts) in self.default_options.iter().enumerate() {
             if !self.execution.ginput.contains_key(&default_opts.ginput) {
-                errors.push(ConfigValErrorCause::UnknownGinputKey { key: default_opts.ginput.clone(), defaults_index: idx });
+                errors.push(ConfigValErrorCause::UnknownGinputKey { key: default_opts.ginput.clone(), location: format!("default options #{}", idx+1) });
             }
 
             if self.get_met_configs(&default_opts.met).is_err() {
@@ -601,6 +614,22 @@ impl Config {
                         ));
                     }
                 },
+            }
+        }
+
+        errors
+    }
+
+    fn validate_request_opts(&self) -> ConfigValidationError {
+        let mut errors = ConfigValidationError::default();
+
+        for (idx, allowed_met) in self.requests.allowed_mets.values().enumerate() {
+            if let Err(e) = self.get_met_configs(&allowed_met.met_key) {
+                errors.push(ConfigValErrorCause::BadMetConfig { key: allowed_met.met_key.clone(), reason: e.to_string() });
+            }
+
+            if self.execution.ginput.get(&allowed_met.ginput_key).is_none() {
+                errors.push(ConfigValErrorCause::UnknownGinputKey { key: allowed_met.ginput_key.clone(), location: format!("request allowed met #{}", idx+1) })
             }
         }
 
@@ -774,6 +803,71 @@ pub enum GinputConfig {
     /// A ginput installation to be called via its `run_ginput.py` entry point. Requires
     /// one option, `entry_point_path`, which is the path to the `run_ginput.py` file.
     Script{entry_point_path: PathBuf}
+}
+
+/// Configuration section dealing with allowed options for user-requested jobs
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct UserRequestConfig {
+    /// A table of non-default combinations of met data and ginput that
+    /// users can request. The keys of this table will be the value the
+    /// user gives as the "reanalysis" line in the input file to request
+    /// this particular configuration.
+    pub allowed_mets: HashMap<String, AllowedRequestMet>,
+}
+
+impl UserRequestConfig {
+    pub fn check_met_request(&self, key: &str, request_start: Option<NaiveDate>, request_end: Option<NaiveDate>) -> Result<&AllowedRequestMet, String> {
+        let met = self.allowed_mets.get(key)
+            .ok_or_else(|| format!("'{key}' is not a valid met"))?;
+
+        if request_start.is_none() || request_end.is_none() {
+            // Requests must provide start and end dates, so if either is None, this is a malformed 
+            // request. It's not this function's job to check that.
+            return Ok(met)
+        }
+
+        let request_start = request_start.unwrap();
+        let request_end = request_end.unwrap();
+
+        match crate::utils::DateRangeOverlap::classify(met.start_date, met.end_date, Some(request_start), Some(request_end)) {
+            crate::utils::DateRangeOverlap::AContainsB | crate::utils::DateRangeOverlap::AEqualsB => Ok(met),
+            crate::utils::DateRangeOverlap::AInsideB |
+            crate::utils::DateRangeOverlap::AEndsInB |
+            crate::utils::DateRangeOverlap::AStartsInB |
+            crate::utils::DateRangeOverlap::None => {
+                let range_str = met.describe_date_range();
+                Err(format!("met '{key}' spans {range_str} but you requested dates ({request_start} to {request_end}) outside this range"))
+            },
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AllowedRequestMet {
+    /// The key from the `data.download` section that this request will use.
+    pub met_key: String,
+
+    /// The key from the `execution.ginput` section that this request will use.
+    pub ginput_key: String,
+
+    /// Optional, if given, requests that ask for a date before this using this
+    /// met will be rejected.
+    pub start_date: Option<NaiveDate>,
+
+    /// Optional, if given, requests that ask for a date on or after this using this
+    /// met will be rejected.
+    pub end_date: Option<NaiveDate>,
+}
+
+impl AllowedRequestMet {
+    fn describe_date_range(&self) -> String {
+        match (self.start_date, self.end_date) {
+            (None, None) => "all dates".to_string(),
+            (None, Some(end)) => format!("dates up to but not including {end}"),
+            (Some(start), None) => format!("dates from {start} on"),
+            (Some(start), Some(end)) => format!("dates from {start} up to but not including {end}"),
+        }
+    }
 }
 
 /// Configuration section dealing with input data for jobs
@@ -1153,7 +1247,7 @@ pub struct EmailConfig {
 impl Default for EmailConfig {
     fn default() -> Self {
         let user = "noreply";
-        let host = whoami::hostname();
+        let host = whoami::fallible::hostname().unwrap_or_else(|_| "127.0.0.1".to_string());
         let email = lettre::Address::new(user, host)
             .expect("user@hostname cannot be used as a valid email address, you will need to configure the 'from_address' in the 'email' section of the config");
         let from_addr = Mailbox::new(None, email);
@@ -1225,9 +1319,12 @@ impl EmailConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum EmailBackend {
-    /// Uses the `Lettre` crate to connect to a local SMTP server
-    /// Note that this is *unencrypted*, but that is assumed to be acceptible
-    /// since the connection is on the local machine. This is the default.
+    /// Uses the `Lettre` crate to connect to a SMTP server.
+    /// Note that connections to a local server are *unencrypted*, but that
+    /// is assumed to be acceptible since the connection is on the local
+    /// machine. This is the default. Alternatively, you can authenticate
+    /// over a TLS connection using a password, intended for a remote SMTP
+    /// host.
     Internal(crate::email::Lettre),
 
     /// Calls the `mailx` command line client via the shell to send

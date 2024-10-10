@@ -2,7 +2,7 @@ use anyhow::{self, Context};
 use chrono::NaiveDate;
 use clap::{self,Args, Subcommand};
 use log::warn;
-use orm::{self, siteinfo::{SiteType, StdSite, SiteInfo, StdOutputStructure, JsonType}, MySqlConn};
+use orm::{self, config::Config, siteinfo::{JsonType, SiteInfo, SiteType, StdOutputStructure, StdSite}, MySqlConn};
 use sqlx::Connection;
 
 /// Manage definition of standard sites and their locations
@@ -203,9 +203,10 @@ pub struct AddSiteInfoCli {
     comment: Option<String>,
 }
 
-pub async fn add_std_site_info_range_cli(conn: &mut MySqlConn, args: AddSiteInfoCli) -> anyhow::Result<()> {
+pub async fn add_std_site_info_range_cli(conn: &mut MySqlConn, config: &Config, args: AddSiteInfoCli) -> anyhow::Result<()> {
     add_std_site_info_range(
         conn,
+        config,
         &args.site_id,
         args.start_date,
         args.end_date,
@@ -218,6 +219,7 @@ pub async fn add_std_site_info_range_cli(conn: &mut MySqlConn, args: AddSiteInfo
 
 pub async fn add_std_site_info_range(
     conn: &mut MySqlConn, 
+    config: &Config,
     site_id: &str, 
     start_date: NaiveDate, 
     end_date: Option<NaiveDate>, 
@@ -228,6 +230,7 @@ pub async fn add_std_site_info_range(
 ) -> anyhow::Result<()> {
     SiteInfo::set_site_info_for_dates(
         conn, 
+        config,
         site_id, 
         start_date, 
         end_date, 
@@ -256,18 +259,20 @@ pub struct SetNonopCli {
     end_date: Option<NaiveDate>,
 }
 
-pub async fn clear_site_info_range_cli(conn: &mut MySqlConn, args: SetNonopCli) -> anyhow::Result<()> {
-    clear_site_info_range(conn, &args.site_id, args.start_date, args.end_date).await
+pub async fn clear_site_info_range_cli(conn: &mut MySqlConn, config: &Config, args: SetNonopCli) -> anyhow::Result<()> {
+    clear_site_info_range(conn, config, &args.site_id, args.start_date, args.end_date).await
 }
 
 pub async fn clear_site_info_range(
     conn: &mut MySqlConn,
+    config: &Config,
     site_id: &str,
     start_date: NaiveDate,
     end_date: Option<NaiveDate>
 ) -> anyhow::Result<()> {
     SiteInfo::set_site_info_for_dates(
         conn,
+        config,
         site_id,
         start_date,
         end_date,

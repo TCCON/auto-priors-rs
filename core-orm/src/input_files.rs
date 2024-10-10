@@ -103,23 +103,31 @@ struct InputJob {
     vmr_fmt: VmrFmt,
     map_fmt: MapFmt,
     is_egi: bool,
-    confirmation: bool
+    confirmation: bool,
+    reanalysis: Option<String>,
+
+    // Fields that must be set during parsing but which
+    // are not provided by the user
+    met_key: Option<String>,
+    ginput_key: Option<String>,
 }
 
 impl InputJob {
     async fn from_file(input_file: &Path, conn: &mut crate::MySqlConn, config: &Config) -> Result<Self, FailedParsingError> {
         let f = std::fs::File::open(input_file)?;
 
-        let mut builder = InputJobBuilder::new();
+        let mut builder = InputJobBuilder::default();
         let mut problems = vec![];
         let lines = std::io::BufReader::new(f).lines();
 
+        // TODO: refactor to remove the "zip" since that will cause problems if field_order is ever shorter
+        // than the file
         for (line_idx, (line, field)) in lines.zip(Self::field_order()).enumerate() {
             if let Ok(line) = line {
                 let res = if let Some((key, value)) = line.split_once('=') {
-                    builder.set_field_in_place(key, value)
+                    builder.set_field_in_place(key, value.trim())
                 }else{
-                    builder.set_field_in_place(field, &line)
+                    builder.set_field_in_place(field, line.trim())
                 };
                 
                 if let Err(cause) = res {
@@ -151,7 +159,7 @@ impl InputJob {
         let email = builder.email.clone();
 
         // Go ahead and try to make the final job - that way any error returned includes all of the problems.
-        match builder.finalize() {
+        match builder.finalize(config) {
             Ok(input_job) => {
                 if problems.len() == 0 {
                     return Ok(input_job);
@@ -183,6 +191,7 @@ impl InputJob {
             "vmr_fmt",
             "map_fmt",
             "is_egi",
+            "reanalysis",
             "confirmation"
         ]
     }
@@ -199,6 +208,7 @@ impl InputJob {
             "vmr_fmt" => self.vmr_fmt.to_string(),
             "map_fmt" => self.map_fmt.to_string(),
             "is_egi" => self.is_egi.to_string(),
+            "reanalysis" => self.reanalysis.as_deref().map(|s| s.to_string()).unwrap_or_else(|| "(default)".to_string()),
             "confirmation" => self.confirmation.to_string(),
             _ => return None
         };
@@ -218,6 +228,7 @@ impl Display for InputJob {
     }
 }
 
+#[derive(Default)]
 struct InputJobBuilder {
     site_id: Option<Vec<String>>,
     start_date: Option<NaiveDate>,
@@ -230,16 +241,21 @@ struct InputJobBuilder {
     map_fmt: Option<MapFmt>,
     is_egi: Option<bool>,
     confirmation: Option<bool>,
+    reanalysis: Option<String>,
 }
 
 impl InputJobBuilder {
-    fn new() -> Self {
-        Self { site_id: None, start_date: None, end_date: None, lat: None, lon: None, email: None, mod_fmt: None, vmr_fmt: None, map_fmt: None, is_egi: None, confirmation: None }
-    }
-
-    fn finalize(self) -> Result<InputJob, Vec<String>> {
+    fn finalize(self, config: &Config) -> Result<InputJob, Vec<String>> {
         let mut errors = vec![];
         let mut site_id_missing = false;
+
+        let (met_key, ginput_key) = match self.get_met_and_ginput_keys(config) {
+            Ok(keys) => keys,
+            Err(msg) => {
+                errors.push(msg);
+                (None, None)
+            },
+        };
 
         let site_ids = self.site_id.unwrap_or_else(|| {
             errors.push("missing field site_id".to_owned());
@@ -260,7 +276,6 @@ impl InputJobBuilder {
             }
         };
 
-
         let input_job = InputJob {
             site_id: site_ids,
             start_date: self.start_date.unwrap_or_else(|| {errors.push("missing field start_date".to_owned()); NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()}),
@@ -272,13 +287,29 @@ impl InputJobBuilder {
             vmr_fmt: self.vmr_fmt.unwrap_or_default(),
             map_fmt: self.map_fmt.unwrap_or_default(),
             is_egi: self.is_egi.unwrap_or_default(),
-            confirmation: self.confirmation.unwrap_or(true)
+            confirmation: self.confirmation.unwrap_or(true),
+            reanalysis: self.reanalysis,
+            met_key: met_key,
+            ginput_key: ginput_key
         };
 
         if errors.len() > 0 {
             return Err(errors)
         }else{
             return Ok(input_job)
+        }
+    }
+
+    fn get_met_and_ginput_keys(&self, config: &Config) -> Result<(Option<String>, Option<String>), String> {
+        // Check if the user requested a met other than the default and, if so, whether
+        // it is a valid key and if the dates are okay.
+        if let Some(key) = self.reanalysis.as_deref() {
+            match config.requests.check_met_request(key, self.start_date, self.end_date) {
+                Ok(met) => Ok((Some(met.met_key.to_string()), Some(met.ginput_key.to_string()))),
+                Err(msg) => Err(msg)
+            }
+        } else {
+            Ok((None, None))
         }
     }
 
@@ -294,12 +325,14 @@ impl InputJobBuilder {
             "vmr_fmt" => return self.vmr_fmt.is_some(),
             "map_fmt" => return self.map_fmt.is_some(),
             "confirmation" => return self.confirmation.is_some(),
+            "reanalysis" => return self.reanalysis.is_some(),
             _ => return false
         }
     }
 
     fn site_id(&mut self, sid: &str) -> Result<(), String> {
-        let site_ids = crate::jobs::Job::parse_site_id_str(sid);
+        let site_ids = crate::jobs::Job::parse_site_id_str(sid)
+            .map_err(|e| e.to_string())?;
         self.site_id = Some(site_ids);
         Ok(())
     }
@@ -412,6 +445,12 @@ impl InputJobBuilder {
         Ok(())
     }
 
+    fn reanalysis(&mut self, valstr: &str) -> Result<(), String> {
+        // Checking for date and value validity happens in finalize
+        self.reanalysis = Some(valstr.to_string());
+        Ok(())
+    }
+
     fn set_field_in_place(&mut self, field: &str, value: &str) -> Result<(), String> {
         if self.is_field_set(field) {
             return Err(format!("{field} given multiple times"))
@@ -429,6 +468,7 @@ impl InputJobBuilder {
             "map_fmt" => self.map_fmt(value),
             "is_egi" => self.is_egi(value),
             "confirmation" => self.confirmation(value),
+            "reanalysis" => self.reanalysis(value),
             _ => Err(format!("Unknown field '{field}'"))
         }?;
 
@@ -510,8 +550,10 @@ pub async fn add_jobs_from_input_files(
             };
 
             let mut results = vec![];
+            let delete_offset = chrono::Duration::hours(config.execution.hours_to_keep.into());
+            let delete_time = chrono::Local::now().naive_local() + delete_offset;
             for (sub_start, sub_end) in date_ranges {
-                let this_res = crate::jobs::Job::add_job_from_args(conn,
+                let this_res = crate::jobs::Job::add_job_from_args_with_options(conn,
                     job.site_id.clone(),
                     sub_start,
                     sub_end,
@@ -524,8 +566,10 @@ pub async fn add_jobs_from_input_files(
                     Some(job.vmr_fmt),
                     Some(job.map_fmt),
                     None,
-                    None,
-                    Some(save_tarball)
+                    Some(delete_time),
+                    Some(save_tarball),
+                    job.met_key.as_deref(),
+                    job.ginput_key.as_deref()
                 ).await;
                 results.push(this_res);
             }

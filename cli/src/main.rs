@@ -120,10 +120,21 @@ async fn main() -> anyhow::Result<()> {
             jobs::delete_job(&mut conn, subargs).await?;
         },
 
+        Commands::Jobs(JobCli { commands: JobActions::CleanExpired(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            jobs::clean_expired_jobs_cli(&mut conn, subargs).await?;
+        },
+
         Commands::Jobs(JobCli { commands: JobActions::CleanErrored(subargs) }) => {
             let mut conn = db.get_connection().await?;
             jobs::clean_errored_jobs_cli(&mut conn, subargs).await?;
-        }
+        },
+
+        Commands::Jobs(JobCli { commands: JobActions::ChangeDeleteTime(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            let loaded_config = load_config()?;
+            jobs::change_jobs_delete_time_cli(&mut conn, &loaded_config, subargs).await?;
+        },
 
         Commands::Jobs(JobCli { commands: JobActions::Print(subargs) }) => {
             let mut conn = db.get_connection().await?;
@@ -157,6 +168,12 @@ async fn main() -> anyhow::Result<()> {
             email::email_past_job_submitters_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
+        Commands::Email( EmailCli { commands: EmailActions::PrintSubs(subargs) }) => {
+            let mut conn = db.get_connection().await?;
+            let loaded_config = load_config()?;
+            email::print_submitters_emails_cli(&mut conn, &loaded_config, subargs).await?;
+        },
+
         Commands::Email( EmailCli { commands: EmailActions::CurrentJobs(subargs) }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
@@ -173,6 +190,11 @@ async fn main() -> anyhow::Result<()> {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             email::email_std_site_request_info_cli(&mut conn, &loaded_config, subargs).await?;
+        },
+
+        Commands::Email( EmailCli { commands: EmailActions::TestEmail(subargs) }) => {
+            let loaded_config = load_config()?;
+            email::send_test_email_cli(&loaded_config, subargs)?;
         },
 
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::AddSite(subargs) }) => {
@@ -192,12 +214,14 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::AddInfo(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            siteinfo::add_std_site_info_range_cli(&mut conn, subargs).await?;
+            let loaded_config = load_config()?;
+            siteinfo::add_std_site_info_range_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::SetNonop(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            siteinfo::clear_site_info_range_cli(&mut conn, subargs).await?;
+            let loaded_config = load_config()?;
+            siteinfo::clear_site_info_range_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
         Commands::SiteInfo(StdSiteCli { command: StdSiteActions::DeleteInfo(subargs) }) => {

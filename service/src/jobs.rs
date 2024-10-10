@@ -270,7 +270,7 @@ impl<T: Queueable> JobManager<T> {
 
         let mut conn = self.pool.get_connection().await
             .context("Could not get database connection to clean up expired jobs")?;
-        Job::clean_up_expired_jobs(&mut conn).await
+        Job::clean_up_expired_jobs(&mut conn, false).await
             .context("Error occurred in call to Job::clean_up_expired_jobs")?;
         Ok(())
     }
