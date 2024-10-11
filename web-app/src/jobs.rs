@@ -1,9 +1,9 @@
+use askama_axum::Template;
 use itertools::{izip, Itertools};
 
 use orm::{MySqlConn, jobs::{Job, FairShare}, utils};
-use tera::Context;
 
-use crate::{templates::TEMPLATES, server_error};
+use crate::{templates_common::{sblink_inner, BaseContext, ContextWithSidebar, Sblink}, AppState};
 
 #[derive(Debug, serde::Serialize)]
 #[allow(dead_code)]
@@ -44,6 +44,13 @@ impl DisplayJob {
             "complete_time" => "Completion time",
             "download_url" => "Download URL",
             _ => column_name
+        }
+    }
+
+    fn get(&self, column_name: &str) -> &str {
+        match column_name {
+            "state" => &self.state,
+            _ => "N/A"
         }
     }
 }
@@ -124,7 +131,20 @@ pub(crate) async fn make_queue_jobs_list(conn: &mut MySqlConn, config: &orm::con
     Ok(jobs)
 }
 
-pub(crate) fn make_jobs_queue_html(jobs: &[DisplayJob], columns: &[&str]) -> Result<String, axum::http::StatusCode> {
+#[derive(Template)]
+#[template(path="queue_table.html")]
+pub(crate) struct QueueTableContext<'a> {
+    jobs: &'a[DisplayJob],
+    columns: &'a[&'a str]
+}
+
+impl<'a> QueueTableContext<'a> {
+    fn colname(&self, column: &'a str) -> &str {
+        DisplayJob::column_head(column)
+    }
+}
+
+/* pub(crate) fn make_jobs_queue_html(jobs: &[DisplayJob], columns: &[&str]) -> Result<String, axum::http::StatusCode> {
     let colnames = columns.iter()
         .map(|n| DisplayJob::column_head(n))
         .collect_vec();
@@ -135,4 +155,139 @@ pub(crate) fn make_jobs_queue_html(jobs: &[DisplayJob], columns: &[&str]) -> Res
 
     // TODO: handle mobile format too (not sure how yet)
     server_error(TEMPLATES.render("queue_table.html", &context))
+} */
+
+fn make_jobs_queue_html(jobs: &[DisplayJob], columns: &[&str]) -> anyhow::Result<String> {
+    let context = QueueTableContext{ jobs, columns };
+    Ok(context.render()?)
+}
+
+#[derive(Debug, Template)]
+#[template(path="job-statuses.html")]
+struct JobStatusContext {
+    root_uri: String
+}
+
+impl JobStatusContext {
+    fn new(root_uri: String) -> Self {
+        Self { root_uri }
+    }
+}
+
+impl BaseContext for JobStatusContext {
+    fn subtitle(&self) -> &str {
+        "Job statuses"
+    }
+
+    fn page_id(&self) -> &str {
+        "job-statuses"
+    }
+
+    fn root_uri(&self) -> &str {
+        &self.root_uri
+    }
+}
+
+impl ContextWithSidebar for JobStatusContext {
+    fn sblink(&self, resource_uri: &str, text: &str, curr_page_id: &str, link_page_id: &str) -> Sblink {
+        sblink_inner(&self.root_uri, resource_uri, text, curr_page_id, link_page_id)
+    }
+}
+
+#[derive(Debug, Template)]
+#[template(path="job-queue.html")]
+struct JobQueueContext {
+    root_uri: String,
+    queue_table: String,
+}
+
+impl JobQueueContext {
+    async fn new_from_db(root_uri: String, state: std::sync::Arc<AppState>, columns: &[&str]) -> anyhow::Result<Self> {
+        let mut conn = state.pool.get_connection().await?;
+        let config = crate::load_automation_config()?;
+        let jobs_list = make_queue_jobs_list(&mut conn, &config).await?;
+        let queue_table = make_jobs_queue_html(&jobs_list, columns)?;
+        Ok(Self { root_uri, queue_table })
+    }
+}
+
+impl BaseContext for JobQueueContext {
+    fn subtitle(&self) -> &str {
+        "Job queue"
+    }
+
+    fn page_id(&self) -> &str {
+        "job-queue"
+    }
+
+    fn root_uri(&self) -> &str {
+        &self.root_uri
+    }
+}
+
+impl ContextWithSidebar for JobQueueContext {
+    fn sblink(&self, resource_uri: &str, text: &str, curr_page_id: &str, link_page_id: &str) -> Sblink {
+        sblink_inner(&self.root_uri, resource_uri, text, curr_page_id, link_page_id)
+    }
+}
+
+#[derive(Debug, Template)]
+#[template(path = "submit-job.html")]
+struct SubmitJobContext {
+    root_uri: String
+}
+
+impl SubmitJobContext {
+    fn new(root_uri: String) -> Self {
+        Self { root_uri }
+    }
+}
+
+impl BaseContext for SubmitJobContext {
+    fn subtitle(&self) -> &str {
+        "Submit job"
+    }
+
+    fn page_id(&self) -> &str {
+        "submit-job"
+    }
+
+    fn root_uri(&self) -> &str {
+        &self.root_uri
+    }
+}
+
+impl ContextWithSidebar for SubmitJobContext {
+    fn sblink(&self, resource_uri: &str, text: &str, curr_page_id: &str, link_page_id: &str) -> Sblink {
+        sblink_inner(&self.root_uri, resource_uri, text, curr_page_id, link_page_id)
+    }
+}
+
+pub(crate) mod get {
+    use askama_axum::IntoResponse;
+    use axum::{extract::State, http::StatusCode};
+
+    use crate::{server_error, AppStateRef};
+
+    use super::{JobQueueContext, JobStatusContext, SubmitJobContext};
+
+    pub(crate) async fn job_statuses(State(state): AppStateRef) -> Result<impl IntoResponse, StatusCode> {
+        let context = JobStatusContext::new(state.root_uri.clone());
+        Ok(context)
+    }
+
+    pub(crate) async fn job_queue(State(state): AppStateRef) -> Result<impl IntoResponse, StatusCode> {
+        let res = JobQueueContext::new_from_db(
+            state.root_uri.clone(),
+            state,
+            &["state", "short_site_locs", "start_date", "end_date", "email", "mod_fmt", "vmr_fmt", "map_fmt"]
+        ).await;
+        let context = server_error(res)?;
+        Ok(context)
+    }
+
+    pub(crate) async fn submit_job(State(state): AppStateRef) -> Result<impl IntoResponse, StatusCode> {
+        let context = SubmitJobContext::new(state.root_uri.clone());
+        Ok(context)
+    }
 }

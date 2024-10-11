@@ -2,7 +2,7 @@
 
 {% block content %}
 <div class="body-text">
-    <h1>{{ subtitle }}</h1>
+    <h1>{{ Self::subtitle(self) }}</h1>
     <p>Please login to access this page.</p>
     <form method="post">
         <fieldset>
@@ -18,8 +18,8 @@
         </fieldset>
         <input type="submit" value="Log in"/>
 
-        {% if has_next %}
-        <input type="hidden" name="next" value="{{next_url}}" />
+        {% if let Some(next) = next_url %}
+        <input type="hidden" name="next" value="{{next}}" />
         {% endif %}
     </form>
 </div>
