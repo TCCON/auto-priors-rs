@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="body-text">
+    <h1>{{ Self::subtitle(self) }}</h1>
+    {% if let Some(user) = user %}
+        <p>Hello {{ user.username }}. You have:</p>
+        <ul>
+            <li>{{ user_jobs.num_pending }} jobs waiting to start,</li>
+            <li>{{ user_jobs.num_running }} jobs currently running, and</li>
+            <li>{{ user_jobs.ready_for_download.len() }} jobs ready to download.</li>
+        </ul>
+
+        {% if !user_jobs.ready_for_download.is_empty() %}
+            <h2>Jobs ready</h2>
+            <table class="job-table">
+                <thead><th>Location(s)</th><th>Dates</th><th>Download</th></thead>
+                {% for job in user_jobs.ready_for_download %}
+                <tr>
+                    <td>{{ job.long_site_locs }}</td>
+                    <td>{{ job.start_date }} to {{ job.end_date }}</td>
+                    {% if let Ok(link) = user_jobs.ftp_link(job) %}
+                        <td><a href="{{ link }}">FTP</a></td>
+                    {% else %}
+                        <td>(not available)</td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </table>
+
+            <p>To download all the jobs listed, save the code below as a script on your computer.
+               Assuming it has the name <code>download.sh</code>, run it as <code>sh download.sh</code></p>
+
+            <pre class="code-box" id="download-links">{{ user_jobs.all_ftp_download_links() }}</pre>
+            <button onclick="copyLinks()">Copy to clipboard</button> <span id="copied">Copied!</span>
+        {% endif %}
+    {% else %}
+        <p>You must be logged in to use this page.</p>
+    {% endif %}
+</div>
+
+<script>
+    document.getElementById("copied").hidden = true;
+
+    function copyLinks() {
+        var copyText = document.getElementById("download-links");
+        navigator.clipboard.writeText(copyText.innerText);
+        document.getElementById("copied").hidden = false;
+        setTimeout(function() {
+            document.getElementById("copied").hidden = true;
+        }, 2000);
+    }
+</script>
+{% endblock content %}

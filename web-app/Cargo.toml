@@ -25,3 +25,4 @@ tower-sessions = {version = "0.12.2", features = ["signed"]}
 orm = {path = "../core-orm", package = "tccon_priors_orm"}
 lazy_static = "1.4.0"
 tower-http = {version = "0.5.0", features = ["fs"]}
+url.workspace = true

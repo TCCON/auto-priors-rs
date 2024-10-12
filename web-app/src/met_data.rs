@@ -1,16 +1,17 @@
 use askama_axum::Template;
 
-use crate::templates_common::{sblink_inner, BaseContext, ContextWithSidebar, Sblink};
+use crate::{auth::User, templates_common::{sblink_inner, BaseContext, ContextWithSidebar, Sblink}};
 
 #[derive(Debug, Template)]
 #[template(path = "met-data.html")]
 struct MetDataContext {
-    root_uri: String
+    root_uri: String,
+    user: Option<User>
 }
 
 impl MetDataContext {
-    fn new(root_uri: String) -> Self {
-        Self { root_uri }
+    fn new(root_uri: String, user: Option<User>) -> Self {
+        Self { root_uri, user }
     }
 }
 
@@ -26,6 +27,12 @@ impl BaseContext for MetDataContext {
     fn root_uri(&self) -> &str {
         &self.root_uri
     }
+    
+    fn username(&self) -> Option<&str> {
+        self.user.as_ref().map(|u| u.username.as_str())
+    }
+
+    
 }
 
 impl ContextWithSidebar for MetDataContext {
@@ -38,12 +45,12 @@ pub(crate) mod get {
     use askama_axum::IntoResponse;
     use axum::{extract::State, http::StatusCode};
 
-    use crate::AppStateRef;
+    use crate::{auth::AuthSession, AppStateRef};
 
     use super::MetDataContext;
 
-    pub(crate) async fn met_data(State(state): AppStateRef) -> Result<impl IntoResponse, StatusCode> {
-        let context = MetDataContext::new(state.root_uri.clone());
+    pub(crate) async fn met_data(State(state): AppStateRef, session: AuthSession) -> Result<impl IntoResponse, StatusCode> {
+        let context = MetDataContext::new(state.root_uri.clone(), session.user);
         Ok(context)
     }
 }

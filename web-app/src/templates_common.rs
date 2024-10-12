@@ -2,6 +2,7 @@ pub(crate) trait BaseContext {
     fn subtitle(&self) -> &str;
     fn page_id(&self) -> &str;
     fn root_uri(&self) -> &str;
+    fn username(&self) -> Option<&str>;
     fn uri(&self, resource: &str) -> String {
         format!("{}/{}", self.root_uri().trim_end_matches("/"), resource.trim_start_matches("/"))
     }

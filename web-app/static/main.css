@@ -46,3 +46,34 @@
     margin-left: 150px;
     font-family: system-ui, sans-serif; 
 }
+
+/* Specific table styles */
+.job-table {
+    border-collapse: collapse;
+}
+
+.job-table th {
+    padding: 4pt 1em;
+    background-color: coral;
+}
+
+.job-table td {
+    padding: 4pt 1em;
+    text-align: left;
+}
+
+.job-table tr:nth-child(odd) {
+    background-color: lightsalmon;
+}
+
+.job-table tr:nth-child(even) {
+    background-color: lightyellow;
+}
+
+/* Code styles */
+
+.code-box {
+    background-color: lightgray;
+    border: 2px solid black;
+    padding: 1em;
+}

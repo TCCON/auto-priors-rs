@@ -1,7 +1,16 @@
 use askama_axum::Template;
 use axum::{Form, extract::Query, http::StatusCode, response::{IntoResponse, Redirect}};
 use serde::Deserialize;
-use crate::{auth::{AuthSession, Credentials}, templates_common::{sblink_inner, BaseContext, ContextWithSidebar, Sblink}};
+use crate::{auth::{AuthSession, Credentials, User}, templates_common::{sblink_inner, BaseContext, ContextWithSidebar, Sblink}};
+
+// TODO: set up a way for users to migrate an FTP login to a web login. Thinking the process should be:
+//  1. Have the user input their FTP email.
+//  2. If it is already associated with a backend user, direct them to log in with that account or to go to the password recovery page
+//  3. If it is not, but it is on the list of FTP-allowed emails, send the user a code to that email.
+//     The code should only be usable once and expire after say 10 minutes. Once entered, create a basic user
+//     for them and direct them to the password reset page.
+//  4. If there are other emails that should be linked to this user, send them a one-time-code and, if entered correctly,
+//     add that user-email relationship in a many-to-many table.
 
 // Following https://github.com/maxcountryman/axum-login/blob/main/examples/sqlite/src/web/auth.rs
 #[derive(Debug, Deserialize)]
@@ -13,12 +22,13 @@ pub(crate) struct NextUrl {
 #[template(path="login.html")]
 struct LoginContext {
     root_uri: String,
+    user: Option<User>,
     next_url: Option<String>,
 }
 
 impl LoginContext {
-    fn new(root_uri: String, next_url: Option<String>) -> Self {
-        Self { root_uri, next_url }
+    fn new(root_uri: String, user: Option<User>, next_url: Option<String>) -> Self {
+        Self { root_uri, user, next_url }
     }
 }
 
@@ -34,6 +44,12 @@ impl BaseContext for LoginContext {
     fn root_uri(&self) -> &str {
         &self.root_uri
     }
+    
+    fn username(&self) -> Option<&str> {
+        self.user.as_ref().map(|u| u.username.as_str())
+    }
+
+    
 }
 
 impl ContextWithSidebar for LoginContext {
@@ -56,7 +72,7 @@ pub(crate) mod get {
         // let page_source = TEMPLATES.render("login.html", &context).unwrap();
         // Ok(Html(page_source))
 
-        let context = LoginContext::new(state.root_uri.clone(), next);
+        let context = LoginContext::new(state.root_uri.clone(), None, next);
         Ok(context)
     }
 

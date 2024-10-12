@@ -3,7 +3,7 @@ use axum_login::{AuthUser, AuthnBackend, UserId};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use orm::PoolWrapper;
+use orm::{MySqlConn, PoolWrapper};
 
 pub(crate) type AuthSession = axum_login::AuthSession<Backend>;
 
@@ -11,7 +11,15 @@ pub(crate) type AuthSession = axum_login::AuthSession<Backend>;
 pub(crate) struct User {
     id: i64,
     pub(crate) username: String,
+    pub(crate) email: String,
     password: String,
+}
+
+impl User {
+    pub(crate) async fn all_associated_emails(&self, conn: &mut MySqlConn) -> anyhow::Result<Vec<String>> {
+        // TODO: this should query the database to find other emails associated with this user
+        Ok(vec![self.email.clone()])
+    }
 }
 
 impl std::fmt::Debug for User {
@@ -21,6 +29,7 @@ impl std::fmt::Debug for User {
         f.debug_struct("User")
             .field("id", &self.id)
             .field("username", &self.username)
+            .field("email", &self.email)
             .field("password", &"[redacted]")
             .finish()
     }
@@ -86,7 +95,7 @@ impl AuthnBackend for Backend {
         let mut conn = self.pool.get_connection().await?;
         let user: Option<Self::User> = sqlx::query_as!(
             User,
-            "SELECT id,username,password FROM v_auth_user WHERE username = ?",
+            "SELECT id,username,email,password FROM v_auth_user WHERE username = ?",
             creds.username
         ).fetch_optional(&mut *conn)
         .await?;
@@ -115,7 +124,7 @@ impl AuthnBackend for Backend {
         let mut conn = self.pool.get_connection().await?;
         let user: Option<Self::User> = sqlx::query_as!(
             User,
-            "SELECT id,username,password FROM v_auth_user WHERE id = ?",
+            "SELECT id,username,email,password FROM v_auth_user WHERE id = ?",
             user_id
         ).fetch_optional(&mut *conn)
         .await?;

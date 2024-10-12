@@ -1,17 +1,17 @@
 use askama_axum::Template;
 
-use crate::templates_common::{sblink_inner, BaseContext, ContextWithSidebar, Sblink};
+use crate::{auth::User, templates_common::{sblink_inner, BaseContext, ContextWithSidebar, Sblink}};
 
 #[derive(Template)]
 #[template(path="home.html")]
 struct HomeContext {
     root_uri: String,
-
+    user: Option<User>
 }
 
 impl HomeContext {
-    pub(crate) fn new(root_uri: String) -> Self {
-        Self { root_uri }
+    pub(crate) fn new(root_uri: String, user: Option<User>) -> Self {
+        Self { root_uri, user }
     }
 }
 
@@ -27,6 +27,12 @@ impl BaseContext for HomeContext {
     fn root_uri(&self) -> &str {
         &self.root_uri
     }
+    
+    fn username(&self) -> Option<&str> {
+        self.user.as_ref().map(|u| u.username.as_str())
+    }
+
+    
 }
 
 impl ContextWithSidebar for HomeContext {
@@ -39,10 +45,10 @@ pub(crate) mod get {
     use askama_axum::IntoResponse;
     use axum::{extract::State, http::StatusCode};
 
-    use crate::{home::HomeContext, AppStateRef};
+    use crate::{auth::AuthSession, home::HomeContext, AppStateRef};
 
-    pub(crate) async fn home(State(state): AppStateRef) -> Result<impl IntoResponse, StatusCode> {
-        let context = HomeContext::new(state.root_uri.clone());
+    pub(crate) async fn home(State(state): AppStateRef, session: AuthSession) -> Result<impl IntoResponse, StatusCode> {
+        let context = HomeContext::new(state.root_uri.clone(), session.user);
         Ok(context)
     }
 }

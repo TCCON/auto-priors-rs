@@ -85,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/job-statuses", get(jobs::get::job_statuses))
         .route("/submit-job", get(jobs::get::submit_job))
         .route("/job-queue", get(jobs::get::job_queue))
+        .route("/job-downloads", get(jobs::get::job_download))
         .route("/std-sites", get(std_sites::get::std_sites))
         .route("/met-data", get(met_data::get::met_data));
 

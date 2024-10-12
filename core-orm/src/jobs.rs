@@ -822,6 +822,20 @@ impl Job {
         Ok(jobs?)
     }
 
+    pub async fn get_jobs_for_user(conn: &mut MySqlConn, user: &str) -> anyhow::Result<Vec<Job>> {
+        let jobs: Result<Vec<Job>, _> = sqlx::query_as!(
+            QJob,
+            "SELECT * FROM Jobs WHERE email = ?",
+            user
+        ).fetch_all(conn)
+        .await?
+        .into_iter()
+        .map(|q| q.try_into())
+        .collect();
+
+        Ok(jobs?)
+    }
+
     pub async fn get_jobs_for_user_submitted_after(conn: &mut MySqlConn, user: &str, submitted_after: NaiveDate) -> anyhow::Result<Vec<Job>> {
         let jobs: Result<Vec<Job>, _> = sqlx::query_as!(
             QJob,
@@ -2134,12 +2148,20 @@ fn get_ftp_path(output: &Path, config: &Config) -> anyhow::Result<url::Url> {
         .strip_prefix(&ftp_root)
         .with_context(|| format!("Could not make output {} relative to FTP root {}", output.display(), ftp_root.display()))?;
 
+    get_ftp_path_from_dirs(output, server, ftp_root)
+}
+
+pub fn get_ftp_path_from_dirs(output: &Path, ftp_download_server: &url::Url, ftp_root: &Path) -> anyhow::Result<url::Url> {
+    let output = output
+        .strip_prefix(&ftp_root)
+        .with_context(|| format!("Could not make output {} relative to FTP root {}", output.display(), ftp_root.display()))?;
+
     let output = if output.is_dir() {
         format!("{}/", output.display())
     } else {
         output.to_string_lossy().to_string()
     };
     
-    server.join(&output)
+    ftp_download_server.join(&output)
         .with_context(|| format!("Could not join FTP url and output relative path {output}"))
 }
