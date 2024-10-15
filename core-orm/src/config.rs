@@ -1106,9 +1106,9 @@ impl crate::jobs::FairShare for FairSharePolicy {
         }
     }
 
-    async fn list_jobs_in_order(&self, conn: &mut crate::MySqlConn, queue: &str, include_running: bool) -> crate::error::JobResult<Vec<crate::jobs::Job>> {
+    async fn list_jobs_in_order(&self, conn: &mut crate::MySqlConn, queue: &str, states: Option<&[crate::jobs::JobState]>) -> crate::error::JobResult<Vec<crate::jobs::Job>> {
         match self {
-            Self::Simple(policy) => policy.list_jobs_in_order(conn, queue, include_running).await
+            Self::Simple(policy) => policy.list_jobs_in_order(conn, queue, states).await
         }
     }
 }

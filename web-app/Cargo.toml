@@ -12,6 +12,7 @@ askama_axum = "0.4.0"
 async-trait.workspace = true
 axum = "0.7.3"
 axum-login = "0.15.3"
+chrono.workspace = true
 djangohashers = "1.7.3"
 env_logger.workspace = true
 itertools.workspace = true

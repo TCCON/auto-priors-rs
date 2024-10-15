@@ -1634,7 +1634,7 @@ impl JobSummary {
 #[async_trait]
 pub trait FairShare {
     async fn next_job_in_queue(&self, conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>>;
-    async fn list_jobs_in_order(&self, conn: &mut MySqlConn, queue: &str, include_running: bool) -> JobResult<Vec<Job>>;
+    async fn list_jobs_in_order(&self, conn: &mut MySqlConn, queue: &str, states: Option<&[JobState]>) -> JobResult<Vec<Job>>;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1656,20 +1656,23 @@ impl FairShare for PrioritySubmitFS {
         Ok(job)
     }
 
-    async fn list_jobs_in_order(&self, conn: &mut MySqlConn, queue: &str, include_running: bool) -> JobResult<Vec<Job>> {
-        let qjobs = if include_running {
-            sqlx::query_as!(
-                QJob,
-                "SELECT * FROM Jobs WHERE (state = ? OR state = ?) AND queue = ? ORDER BY priority desc, submit_time",
-                JobState::Running,
-                JobState::Pending,
-                queue
-            ).fetch_all(conn).await?
+    async fn list_jobs_in_order(&self, conn: &mut MySqlConn, queue: &str, states: Option<&[JobState]>) -> JobResult<Vec<Job>> {
+        let qjobs: Vec<QJob> = if let Some(states) = states {
+            // TODO: establish an integration test for this because it isn't compile-time checked.
+            let mut qb = sqlx::QueryBuilder::<sqlx::MySql>::new(
+                "SELECT * FROM Jobs WHERE state IN "
+            );
+            qb.push_tuples(states, |mut b, s| { b.push_bind(*s); } );
+            qb.push(" AND queue = ");
+            qb.push_bind(queue);
+            qb.push(" ORDER BY priority desc, submit_time");
+            let query = qb.build();
+            let rows = query.fetch_all(conn).await?;
+            rows.into_iter().map(|r| QJob::from_row(&r)).try_collect()?
         } else {
             sqlx::query_as!(
                 QJob,
-                "SELECT * FROM Jobs WHERE state = ? AND queue = ? ORDER BY priority desc, submit_time",
-                JobState::Pending,
+                "SELECT * FROM Jobs WHERE queue = ? ORDER BY priority desc, submit_time",
                 queue
             ).fetch_all(conn).await?
         };
@@ -1703,7 +1706,7 @@ impl FairShare for PsuedoRoundRobinFS {
         todo!()
     }
 
-    async fn list_jobs_in_order(&self, _conn: &mut MySqlConn, _queue: &str, _include_running: bool) -> JobResult<Vec<Job>> {
+    async fn list_jobs_in_order(&self, _conn: &mut MySqlConn, _queue: &str, _states: Option<&[JobState]>) -> JobResult<Vec<Job>> {
         todo!()
     }
 }

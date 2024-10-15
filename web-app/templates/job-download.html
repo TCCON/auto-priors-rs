@@ -6,19 +6,20 @@
     {% if let Some(user) = user %}
         <p>Hello {{ user.username }}. You have:</p>
         <ul>
-            <li>{{ user_jobs.num_pending }} jobs waiting to start,</li>
-            <li>{{ user_jobs.num_running }} jobs currently running, and</li>
+            <li>{{ user_jobs.pending.len() }} jobs waiting to start,</li>
+            <li>{{ user_jobs.running.len() }} jobs currently running, and</li>
             <li>{{ user_jobs.ready_for_download.len() }} jobs ready to download.</li>
         </ul>
 
+        <h2>Jobs ready</h2>
         {% if !user_jobs.ready_for_download.is_empty() %}
-            <h2>Jobs ready</h2>
             <table class="job-table">
-                <thead><th>Location(s)</th><th>Dates</th><th>Download</th></thead>
+                <thead><th>Location(s)</th><th>Dates</th><th>Deletes at (US Pacific time)</th><th>Download</th></thead>
                 {% for job in user_jobs.ready_for_download %}
                 <tr>
                     <td>{{ job.long_site_locs }}</td>
                     <td>{{ job.start_date }} to {{ job.end_date }}</td>
+                    <td>{{ job.delete_time }}</td>
                     {% if let Ok(link) = user_jobs.ftp_link(job) %}
                         <td><a href="{{ link }}">FTP</a></td>
                     {% else %}
@@ -28,12 +29,66 @@
                 {% endfor %}
             </table>
 
-            <p>To download all the jobs listed, save the code below as a script on your computer.
-               Assuming it has the name <code>download.sh</code>, run it as <code>sh download.sh</code></p>
+            <p>To download all the jobs listed, save the links below as a plain text file on your computer.
+               Then, assuming the links are saved as <code>links.txt</code> in your current directory,
+               use <code>wget</code> in your terminal to retrieve it with your FTP-registered email with
+               <code>wget --user=anonymous --password={{ user.email }} --input-file links.txt</code> </p>
 
             <pre class="code-box" id="download-links">{{ user_jobs.all_ftp_download_links() }}</pre>
             <button onclick="copyLinks()">Copy to clipboard</button> <span id="copied">Copied!</span>
+        {% else %}
+            <p>No jobs are ready to download, either they are not yet finished or were already cleaned up.</p>
         {% endif %}
+
+        <h2>Pending and running jobs</h2>
+        {% if user_jobs.pending.is_empty() && user_jobs.running.is_empty() %}
+            <p>No jobs associated with your account are pending or running.</p>
+        {% else %}
+            <table class="job-table">
+                <thead><th>Submitted on (US/Pacific)</th><th>Location(s)</th><th>Dates</th><th>State</th></thead>
+                {% for job in user_jobs.running.iter().chain(user_jobs.pending.iter()) %}
+                <tr>
+                    <td>{{ job.submit_time }}</td>
+                    <td>{{ job.long_site_locs }}</td>
+                    <td>{{ job.start_date }} to {{ job.end_date }}</td>
+                    <td>{{ job.state }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        {% endif %}
+
+        <h2>Errored jobs</h2>
+        {% if user_jobs.errored.is_empty() %}
+            <p>No jobs associated with your account submitted after {{ user_jobs.submitted_after }} have errored</p>
+        {% else %}
+            <table class="job-table">
+                <thead><th>Submitted on (US/Pacific)</th><th>Location(s)</th><th>Dates</th></thead>
+                {% for job in user_jobs.errored %}
+                <tr>
+                    <td>{{ job.submit_time }}</td>
+                    <td>{{ job.long_site_locs }}</td>
+                    <td>{{ job.start_date }} to {{ job.end_date }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        {% endif %}
+
+        <h2>Completed jobs</h2>
+        {% if user_jobs.cleaned.is_empty() %}
+            <p>No jobs associated with your account submitted after {{ user_jobs.submitted_after }} have been cleaned up yet.</p>
+        {% else %}
+            <table class="job-table">
+                <thead><th>Submitted on (US/Pacific)</th><th>Location(s)</th><th>Dates</th></thead>
+                {% for job in user_jobs.cleaned %}
+                <tr>
+                    <td>{{ job.submit_time }}</td>
+                    <td>{{ job.long_site_locs }}</td>
+                    <td>{{ job.start_date }} to {{ job.end_date }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        {% endif %}
+
     {% else %}
         <p>You must be logged in to use this page.</p>
     {% endif %}
