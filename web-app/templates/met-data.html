@@ -3,6 +3,48 @@
 {% block content %}
 <div class="body-text">
     <h1>{{ Self::subtitle(self) }}</h1>
-    <p>This will be where you can check the status of met data downloaded.</p>
+
+    <p>Select the date range to inspect.</p>
+
+    <form method="get">
+        <label for="start_date">Start date</label>
+        <input type="date" id="start_date" name="start_date" value="{{ start_date }}">
+        <label for="end_date">End date</label>
+        <input type="date" id="end_date" name="end_date" value="{{ end_date }}">
+        <input type="submit" value="Update table">
+    </form>
+
+    <h2>Date status</h2>
+    <!-- This will be a table with each date as a row and a simple checkmark for complete, X for missing, maybe something else for partially complete. -->
+    <table class="job-table">
+        <thead><th>Date</th>{% for prod in products %}<th>{{ prod }}</th>{% endfor %}</thead>
+        {% for date in dates %}
+            <tr>
+                <td>{{ date.date }}</td>
+                {% for prod in products %}
+                    <td>{{ date.get_status_str(prod) }}</td>
+                {% endfor %}
+            </tr>
+        {% endfor %}
+    </table>
+
+    <h2>Files</h2>
+    <!-- This will list each file downloaded in the time range. -->
+    {% if files.is_empty() %}
+    <p>No met files found between {{ start_date }} and {{ end_date }}</p>
+    {% else %}
+    <table class="job-table">
+        <thead><th>File datetime</th><th>Product</th><th>Levels</th><th>Type</th><th>File name</th></thead>
+        {% for file in files %}
+            <tr>
+                <td>{{ file.date }}</td>
+                <td>{{ file.product }}</td>
+                <td>{{ file.levels }}</td>
+                <td>{{ file.data_type }}</td>
+                <td>{{ file.name }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
 </div>
 {% endblock content %}

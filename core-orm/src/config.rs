@@ -162,8 +162,43 @@ impl Config {
     /// Returns an `Err` if the given met_key is not present in the config.
     pub fn get_met_configs(&self, met_key: &str) -> anyhow::Result<&[DownloadConfig]> {
         self.data.download.get(met_key)
-        .and_then(|cfgs| Some(cfgs.as_slice()))
+        .map(|cfgs| cfgs.as_slice())
         .ok_or_else(|| anyhow::Error::msg(format!("No meteorology with key '{met_key}' found.")))
+    }
+
+    /// Returns a list of [`met::MetProduct`]s and [`DownloadConfig`] sets that could have data on the given `date`.
+    /// 
+    /// Note: if a set of [`DownloadConfig`]s contains different product values (e.g. a mix of GEOS FP-IT and GEOS-IT)
+    /// this function will always exclude that set. This is because this function assumes it is being called to identify
+    /// the external met products which we want to check the status of, and thus that any set that mixes products is
+    /// mixing products that have their own set of download configs for just that met product. This way, the function
+    /// can be infallible, which is helpful for the web interface.
+    pub fn get_single_product_configs_for_date(&self, date: NaiveDate) -> Vec<(&met::MetProduct, &[DownloadConfig])> {
+        let mut available_products = vec![];
+        for key in self.data.download.keys() {
+            let cfgs = self.get_met_configs(key).expect("should not fail to get met configs when iterating over their keys");
+            let products = cfgs.iter().map(|c| &c.product).unique().collect_vec();
+
+            let all_start_too_late = cfgs.iter().all(|c| c.earliest_date > date);
+            if all_start_too_late {
+                continue;
+            }
+
+            let all_end_too_early = cfgs.iter().all(|c| c.latest_date.map(|d| d <= date).unwrap_or(false));
+            if all_end_too_early {
+                continue;
+            }
+
+            if products.is_empty() {
+                continue;
+            } else if products.len() > 1 {
+                log::info!("skipping met key {key} as it has multiple products listed, assuming this is a special configuration");
+                continue;
+            }
+
+            available_products.push((products[0], cfgs));
+        }
+        available_products
     }
 
     /// Return the span of dates covered by the default meteorologies
@@ -924,6 +959,10 @@ pub struct DownloadConfig {
     /// The earliest date for which this met data is available for download
     pub earliest_date: NaiveDate,
 
+    /// The latest date for which this met data is available for download (exclusive).
+    /// If omitted, the met is assumed to have no end date.
+    pub latest_date: Option<NaiveDate>,
+
     /// The directory to download the data into. For met products intended to be used with ginput v1.y.z,
     /// this must still follow the expected directory structure for GEOS data. Namely:
     /// * Surface, hybrid eta level, and fixed pressure level files must reside in `Nx`, `Nv`, and `Np`
@@ -1434,6 +1473,7 @@ where T: AsRef<Path>
             basename_pattern: Some("(omit to infer from url_pattern)".to_string()),
             file_freq_min: 180,
             earliest_date: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+            latest_date: None,
             download_dir: PathBuf::new(),
             days_latency: 1,
             ginput_met_key: "fpit-eta".to_string(),

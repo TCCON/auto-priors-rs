@@ -1,7 +1,8 @@
-use std::{path::{PathBuf, Path}, str::FromStr, fmt::Display};
+use std::{borrow::Cow, fmt::Display, path::{Path, PathBuf}, str::FromStr};
 
 use anyhow::Context;
 use chrono::{NaiveDateTime, NaiveDate};
+use itertools::Itertools;
 use log::{warn, debug, trace, info};
 use serde::{Deserialize, Serialize};
 use sqlx::{self, Type, FromRow};
@@ -114,7 +115,7 @@ impl MetDayState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(try_from = "String", into = "String")]
 pub enum MetProduct {
     GeosFp,
@@ -157,6 +158,17 @@ impl Display for MetProduct {
             Self::GeosFpit => write!(f, "geosfpit"),
             Self::GeosIt => write!(f, "geosit"),
             Self::Other(v) => write!(f, "other({v})")
+        }
+    }
+}
+
+impl MetProduct {
+    pub fn pretty(&self) -> Cow<str> {
+        match self {
+            MetProduct::GeosFp => "GEOS FP".into(),
+            MetProduct::GeosFpit => "GEOS FP-IT".into(),
+            MetProduct::GeosIt => "GEOS IT".into(),
+            MetProduct::Other(s) => s.into(),
         }
     }
 }
@@ -610,6 +622,20 @@ impl MetFile {
         }
     }
 
+    pub async fn get_products_with_files_for_dates(conn: &mut MySqlConn, start_date: NaiveDate, end_date: NaiveDate) -> anyhow::Result<Vec<MetProduct>> {
+        let products: Vec<MetProduct> = sqlx::query!(
+            "SELECT DISTINCT(product) FROM MetFiles WHERE filedate >= ? AND filedate < ?",
+            start_date,
+            end_date
+        ).fetch_all(conn)
+        .await?
+        .into_iter()
+        .map(|r| MetProduct::from_str(&r.product))
+        .try_collect()?;
+
+        Ok(products)
+    }
+
     /// Get a vector of [`MetFile`] instances representing downloaded met files in the database
     /// 
     /// All met files in the database with file datetimes between `start_date` (inclusive) and `end_date`
@@ -617,7 +643,7 @@ impl MetFile {
     /// all files with file dates between those times are returned.
     /// 
     /// This function will return an error if the database query fails.
-    pub async fn get_files_by_dates(conn: &mut MySqlConn, start_date: NaiveDate, end_date: NaiveDate, met_product: Option<MetProduct>) -> anyhow::Result<Vec<MetFile>> {
+    pub async fn get_files_by_dates(conn: &mut MySqlConn, start_date: NaiveDate, end_date: NaiveDate, met_product: Option<&MetProduct>) -> anyhow::Result<Vec<MetFile>> {
         let files = if let Some(prod) = met_product {
             sqlx::query_as!(
                 MetFile,

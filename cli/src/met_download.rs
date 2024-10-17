@@ -956,7 +956,7 @@ pub async fn remove_dates(
             .context("The met key provided as the redownload argument was not valid for the given config.")?;
     }
 
-    let met_files = MetFile::get_files_by_dates(conn, start_date, end_date, met_product)
+    let met_files = MetFile::get_files_by_dates(conn, start_date, end_date, met_product.as_ref())
         .await
         .context("Error occurred while listing met files to remove")?;
 
