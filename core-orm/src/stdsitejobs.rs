@@ -218,6 +218,11 @@ impl StdSiteJob {
             if !extant_site_dates.contains(&date) {
                 let rid = Self::add_std_site_job_row_from_args(conn, site_id, date, StdSiteJobState::JobNeeded, None).await?;
                 ndates += 1;
+                if ndates % 100 == 0 {
+                    // TODO: add a length hint method to DateIterator and use that to update this message with how many
+                    // there are to go.
+                    log::info!("Adding 'JobNeeded' entries ({ndates} complete so far)")
+                }
 
                 if !crate::met::MetFile::is_date_complete_for_default_mets(conn, config, date).await?.is_complete() {
                     warn!("Missing met data for date {}, setting standard site job table row for site {site_id} to 'MissingMet'", date);
