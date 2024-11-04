@@ -1,4 +1,4 @@
-use std::{sync::{Arc, atomic::AtomicBool}, time::Duration};
+use std::{path::{Path, PathBuf}, sync::{atomic::AtomicBool, Arc}, time::Duration};
 
 use anyhow::Context;
 use clap::Parser;
@@ -53,6 +53,9 @@ async fn driver() -> anyhow::Result<()> {
     //     .filter_module("sqlx", log::LevelFilter::Warn)
     //     .init();
     let clargs = Cli::parse();
+
+    // We'll need the log directory later so get it now to let us still move the logging args into configure_logging
+    let log_dir = clargs.logging_args.log_file.as_deref().map(|s| PathBuf::from(s).parent().map(|p| p.to_path_buf())).flatten();
 
     logging::ServiceLoggingCli::configure_logging(clargs.logging_args);
     let service_version = clap::crate_version!();
@@ -350,6 +353,28 @@ async fn driver() -> anyhow::Result<()> {
         })
     };
 
+    // Record the task IDs so that we can tell which task panicked if a panic occurs.
+    // This should be less necessary with more recent versions of tokio that are supposed
+    // to print a panic message if one occurs, but still might be useful.
+    if let Some(log_dir) = log_dir {
+        let res = record_task_ids(
+            &log_dir.join("automodrust_task_ids.txt"),
+            &[
+                ("met_manager", met_manager_handle.id()),
+                ("job_manager", job_man_handle.id()),
+                ("std_site_manager", std_site_manager_handle.id()),
+                ("reports_manager", reports_manager_handle.id()),
+                ("scheduler", schedule_handle.id()),
+                ("signals", signal_handle.id()),
+            ]
+        );
+        if let Err(e) = res {
+            log::warn!("An error occurred while writing out the task IDs, so the task ID file may be missing, incomplete, or out of date. Error was: {e}");
+        }
+    } else {
+        log::info!("Not recording task IDs because no log file was specified.");
+    }
+
     tokio::try_join!(
         met_manager_handle,
         job_man_handle,
@@ -371,6 +396,15 @@ async fn driver() -> anyhow::Result<()> {
 enum ExitCommand {
     Graceful,
     Rapid
+}
+
+fn record_task_ids(output_file: &Path, task_ids: &[(&'static str, tokio::task::Id)]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut f = std::fs::File::create(output_file)?;
+    for (task_name, task_id) in task_ids {
+        writeln!(f, "{task_name} ID = {task_id}")?;
+    }
+    Ok(())
 }
 
 fn setup_signals() -> std::io::Result<Signals> {
