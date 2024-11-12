@@ -1018,9 +1018,17 @@ impl Job {
     pub fn parse_site_id_str(site_id_str: &str) -> JobResult<Vec<String>> {
         return site_id_str
                 .split(',')
-                .map(|s| s.trim().to_owned())
-                .map(|s| if s.len() == 2 { Ok(s) } else { Err(JobError::CannotParseSiteId(site_id_str.to_string()))})
+                .map(|s| Self::parse_single_site_id_str(s))
                 .try_collect();
+    }
+
+    fn parse_single_site_id_str(site_id_str: &str) -> JobResult<String> {
+        let s = site_id_str.trim();
+        if s.len() == 2 {
+            Ok(s.to_string())
+        } else {
+            Err(JobError::CannotParseSiteId(site_id_str.to_string(), false))
+        }
     }
 
     /// Convert a user-inputted string of latitudes into a proper vector of latitudes
@@ -1082,14 +1090,25 @@ impl Job {
 
         let mut values = vec![];
         for s in coord_str.split(',') {
-            let v = s.parse()?;
-            if v < -limit || v > limit {
-                anyhow::bail!("{varname} must be between -{limit:.1} and +{limit:.1}")
-            }
-            values.push(Some(v))
+            values.push(Self::parse_single_latlon_str(s, limit, varname, false)?);
         }
 
         return Ok(Some(values));
+    }
+
+    fn parse_single_latlon_str(coord_str: &str, limit: f32, varname: &str, allow_empty: bool) -> anyhow::Result<Option<f32>> {
+        if coord_str.is_empty() {
+            if allow_empty {
+                return Ok(None)
+            } else {
+                anyhow::bail!("missing {varname}")
+            }
+        }
+        let v: f32 = coord_str.parse()?;
+        if v < -limit || v > limit {
+            anyhow::bail!("{varname} must be between -{limit:.1} and +{limit:.1}")
+        }
+        Ok(Some(v))
     }
 
     /// Convert vectors of site IDs, latitudes, and longitudes to equal lengths.

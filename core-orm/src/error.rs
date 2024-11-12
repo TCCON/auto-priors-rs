@@ -41,7 +41,7 @@ pub enum JobError {
     InvalidState(i8),
     InvalidStateName(String),
     InvalidTar(i8),
-    CannotParseSiteId(String),
+    CannotParseSiteId(String, bool),
     InvalidModFmt(String),
     InvalidVmrFmt(String),
     InvalidMapFmt(String),
@@ -63,7 +63,13 @@ impl Display for JobError {
             JobError::InvalidState(state) => write!(f, "Unknown state integer: {state}"),
             JobError::InvalidStateName(name) => write!(f, "Unknown state name: '{name}'"),
             JobError::InvalidTar(choice) => write!(f, "Unknown Tar choice integer: {choice}"),
-            JobError::CannotParseSiteId(site_id_str) => write!(f, "Cannot parse '{site_id_str}': must be a single two-character site ID or a comma-separated list of such IDs"),
+            JobError::CannotParseSiteId(site_id_str, multi) => {
+                if *multi {
+                    write!(f, "Cannot parse '{site_id_str}': must be a single two-character site ID or a comma-separated list of such IDs")
+                } else {
+                    write!(f, "Cannot parse '{site_id_str}': must be a two-character site ID")
+                }
+            },
             JobError::InvalidModFmt(fmt) => write!(f, "Unknown ModFmt integer: {fmt}"),
             JobError::InvalidVmrFmt(fmt) => write!(f, "Unknown VmrFmt integer: {fmt}"),
             JobError::InvalidMapFmt(fmt) => write!(f, "Unknown MapFmt integer: {fmt}"),

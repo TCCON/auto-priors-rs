@@ -1,9 +1,10 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use askama_axum::Template;
+use chrono::NaiveDate;
 use itertools::{izip, Itertools};
 
-use orm::{jobs::{FairShare, Job, JobState}, utils, MySqlConn};
+use orm::{input_files::{InputJob, InputJobBuilder}, jobs::{FairShare, Job, JobState, MapFmt, ModFmt, VmrFmt}, utils, MySqlConn};
 
 use crate::{auth::User, templates_common::{sblink_inner, BaseContext, ContextWithSidebar, Sblink}, AppState};
 
@@ -331,12 +332,17 @@ impl ContextWithSidebar for JobDownloadContext {
 #[template(path = "submit-job.html")]
 struct SubmitJobContext {
     root_uri: String,
-    user: Option<User>
+    user: Option<User>,
+    errors: Vec<String>
 }
 
 impl SubmitJobContext {
     fn new(root_uri: String, user: Option<User>) -> Self {
-        Self { root_uri, user }
+        Self { root_uri, user, errors: vec![] }
+    }
+
+    fn new_with_errors(root_uri: String, user: Option<User>, errors: Vec<String> ) -> Self {
+        Self { root_uri, user, errors }
     }
 }
 
@@ -363,6 +369,94 @@ impl BaseContext for SubmitJobContext {
 impl ContextWithSidebar for SubmitJobContext {
     fn sblink(&self, resource_uri: &str, text: &str, curr_page_id: &str, link_page_id: &str) -> Sblink {
         sblink_inner(&self.root_uri, resource_uri, text, curr_page_id, link_page_id)
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct SubmitJobForm {
+    #[serde(alias="start-date")]
+    start_date: NaiveDate,
+    #[serde(alias="end-date")]
+    end_date: NaiveDate,
+    #[serde(alias="mod-fmt")]
+    mod_fmt: ModFmt,
+    #[serde(alias="vmr-fmt")]
+    vmr_fmt: VmrFmt,
+    #[serde(alias="map-fmt")]
+    map_fmt: MapFmt,
+    #[serde(alias="confirmation-email")]
+    confirmation: Option<String>,
+    #[serde(flatten)]
+    locations: HashMap<String, String>
+}
+
+
+impl SubmitJobForm {
+    async fn to_input_job(self, user_email: String, conn: &mut MySqlConn, config: &orm::config::Config) -> Result<InputJob, Vec<String>> {
+        let mut errors = vec![];
+        // First we need to extract the site IDs and coordinates from the hash map.
+        // Because we don't know how many locations there are, their form entries
+        // have to be flattened into the hash map then reconstructed here, rather
+        // than being explicit structure fields. Note that the forms labels start at 1.
+        let mut loc_ind = 1;
+        let mut site_ids = vec![];
+        let mut site_lats = vec![];
+        let mut site_lons = vec![];
+        loop {
+            let this_sid = self.locations.get(&format!("site-id-{loc_ind}"));
+            if this_sid.is_none() {
+                break;
+            }
+
+            let this_sid = this_sid.unwrap().trim().to_string();
+            let this_lat = self.locations.get(&format!("site-lat-{loc_ind}"))
+                .map(|s| if let Ok(v) = s.parse::<f32>() {
+                    Some(v)
+                } else {
+                    errors.push(format!("latitude for site {this_sid} could not be parsed as a number"));
+                    None
+                }).flatten();
+
+            let this_lon = self.locations.get(&format!("site-lon-{loc_ind}"))
+                .map(|s| if let Ok(v) = s.parse::<f32>() {
+                    Some(v)
+                } else {
+                    errors.push(format!("latitude for site {this_sid} could not be parsed as a number"));
+                    None
+                }).flatten();
+
+            site_ids.push(this_sid);
+            site_lats.push(this_lat);
+            site_lons.push(this_lon);
+            loc_ind += 1;
+        }
+
+        let mut builder = InputJobBuilder::default();
+        builder.with_site_id(site_ids);
+        builder.with_lats(site_lats);
+        builder.with_lons(site_lons);
+        builder.with_start_date(self.start_date);
+        builder.with_end_date(self.end_date);
+        builder.with_email(user_email);
+        builder.with_mod_fmt(self.mod_fmt);
+        builder.with_vmr_fmt(self.vmr_fmt);
+        builder.with_map_fmt(self.map_fmt);
+        builder.with_confirmation(self.confirmation.is_some()); // checkboxes are dumb are just aren't included in the form if not checked
+
+        let job = match builder.finalize(conn, config).await {
+            Ok(j) => j,
+            Err(problems) => {
+                errors.extend(problems);
+                return Err(errors);
+            }
+        };
+        
+        if !errors.is_empty() {
+            Err(errors)
+        } else {
+            Ok(job)
+        }
+
     }
 }
 
@@ -405,5 +499,47 @@ pub(crate) mod get {
     pub(crate) async fn submit_job(State(state): AppStateRef, session: AuthSession) -> Result<impl IntoResponse, StatusCode> {
         let context = SubmitJobContext::new(state.root_uri.clone(), session.user);
         Ok(context)
+    }
+}
+
+pub(crate) mod post {
+    use askama_axum::IntoResponse;
+    use axum::{extract::State, http::StatusCode, Form};
+
+    use crate::{auth::AuthSession, load_automation_config, server_error, AppStateRef};
+
+    use super::{SubmitJobContext, SubmitJobForm};
+
+    pub(crate) async fn submit_job(State(state): AppStateRef, session: AuthSession, Form(job_req): Form<SubmitJobForm>)
+    -> Result<impl IntoResponse, StatusCode>
+    {
+        let user_email = if let Some(user) = &session.user {
+            user.email.clone()
+        } else {
+            return Err(StatusCode::UNAUTHORIZED)
+        };
+
+        let mut conn = server_error(state.pool.get_connection().await)?;
+        let config = server_error(load_automation_config())?;
+
+        let res = job_req.to_input_job(
+            user_email,
+            &mut conn,
+            &config
+        ).await;
+
+        match res {
+            // need to decouple blacklist and other final conversion logic from
+            // orm::input_files::add_job_from_input_files
+            Ok(job) => todo!(),
+            Err(problems) => {
+                let context = SubmitJobContext::new_with_errors(
+                    state.root_uri.clone(),
+                    session.user,
+                    problems
+                );
+                Ok(context)
+            }
+        }
     }
 }

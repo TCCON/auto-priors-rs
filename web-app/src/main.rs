@@ -82,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
     let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
     let protected_routes = Router::new()
+        .route("/submit-job", post(jobs::post::submit_job))
         .route("/submit-job", get(jobs::get::submit_job))
         .route("/job-queue", get(jobs::get::job_queue))
         .route("/job-downloads", get(jobs::get::job_download))

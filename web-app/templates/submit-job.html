@@ -3,6 +3,98 @@
 {% block content %}
 <div class="body-text">
     <h1>{{ Self::subtitle(self) }}</h1>
-    <p>This will where users can submit jobs.</p>
+    <form method="post">
+        <div>
+            <p>Site location(s):</p>
+            <div id="loc-1">
+                <!-- TODO: add JS to clone this div and update the IDs, https://stackoverflow.com/a/921316 -->
+                <label for="site-id-1">Site ID</label>
+                <input name="site-id-1" id="site-id-1" type="text" pattern="[a-zA-Z]{2,2}" size="2" title="Site IDs must be two letters">
+                <label for="site-lat-1">Latitude</label>
+                <input name="site-lat-1" id="site-lat-1" type="number" min="-90.000" max="90.000" step="0.001" title="Site latitude (must be -90 to +90, south is negative)">
+                <label for="site-lon-1">Longitude</label>
+                <input name="site-lon-1" id="site-lon-1" type="number" min="-180.000" max="180.000" step="0.001" title="Site longtitude (must be -180 to +180, west is negative)">
+            </div>
+
+            <button type="button" onclick="addNewLocation()">Add location</button>
+            <button id="remove-loc-button" type="button" onclick="removeLastLocation()" style="visibility: hidden;">Remove location</button>
+        </div>
+
+        <div>
+            <p>Time span:</p>
+            <label for="start-date">Start date</label>
+            <input name="start-date" id="start-date" type="date">
+            <label for="end-date">End date (exclusive)</label>
+            <input name="end-date" id="end-date" type="date">
+        </div>
+
+        <div>
+            <p>File formats:</p>
+            <label for="mod-fmt">.mod file format</label>
+            <select name="mod-fmt" id="mod-fmt">
+                <option value="Text" selected>Text</option>
+                <option value="None">None</option>
+            </select>
+
+            <label for="vmr-fmt">.vmr file format</label>
+            <select name="vmr-fmt" id="vmr-fmt">
+                <option value="Text" selected>Text</option>
+                <option value="None">None</option>
+            </select>
+
+            <label for="map-fmt">.map file format</label>
+            <select name="map-fmt" id="map-fmt">
+                <option value="Text" selected>Text</option>
+                <option value="NetCDF">netCDF</option>
+                <option value="TextAndNetCDF">Text and netCDF</option>
+                <option value="None">None</option>
+            </select>
+        </div>
+
+        <div>
+            <p>Other options:</p>
+            <label for="confirmation-email">Send confirmation email</label>
+            <input type="checkbox" id="confirmation-email" name="confirmation-email" checked>
+        </div>
+
+        <input type="submit" value="Submit">
+    </form>
 </div>
+
+<script>
+    var nlocs = 1
+    function addNewLocation() {
+        let loc_div = document.getElementById(`loc-${nlocs}`);
+        let new_div = loc_div.cloneNode(true);
+        loc_div.after(new_div);
+        let new_num = nlocs + 1;
+        new_div.id = `loc-${new_num}`
+        for (let i = 0; i < new_div.children.length; i++) {
+            let child = new_div.children[i];
+            if (child.nodeName == "LABEL") {
+                let curr_for = child.getAttribute("for");
+                child.setAttribute("for", curr_for.replace(nlocs, new_num));
+            } else {
+                let new_name = child.getAttribute("name").replace(nlocs, new_num);
+                child.setAttribute("name", new_name);
+                let new_id = child.id.replace(nlocs, new_num);
+                child.id = new_id;
+            }
+        }
+        nlocs = new_num;
+        document.getElementById('remove-loc-button').style.visibility = "visible";
+    }
+    function removeLastLocation() {
+        if (nlocs == 1) {
+            return;
+        }
+
+        let loc_div = document.getElementById(`loc-${nlocs}`);
+        loc_div.remove();
+        nlocs -= 1;
+        if (nlocs == 1) {
+            document.getElementById('remove-loc-button').style.visibility = "hidden";
+        }
+    }
+</script>
 {% endblock content %}

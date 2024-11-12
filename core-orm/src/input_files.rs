@@ -5,7 +5,7 @@ use chrono::{NaiveDate, DateTime, Local, Duration};
 use itertools::Itertools;
 use log::{debug, info, warn, error};
 
-use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::{Config, BlacklistIdentifier, BlacklistEntry}, utils, met::CheckMetAvailableError};
+use crate::{config::{BlacklistEntry, BlacklistIdentifier, Config}, jobs::{MapFmt, ModFmt, VmrFmt}, met::CheckMetAvailableError, utils};
 
 struct FailedParsingError {
     reasons: Vec<String>,
@@ -92,7 +92,7 @@ impl Display for MissingMetError {
 }
 
 #[derive(Debug)]
-struct InputJob {
+pub struct InputJob {
     site_id: Vec<String>,
     start_date: NaiveDate,
     end_date: NaiveDate,
@@ -137,29 +137,11 @@ impl InputJob {
             }
         }
 
-        if let (Some(start), Some(end)) = (builder.start_date, builder.end_date) {
-            // Check that the user's job isn't too long, unless missing start/end dates was one of the problems
-            // encountered in the input file
-            if let Some(max_days) = config.execution.job_max_days {
-                let job_ndays = (end - start).num_days();
-                if job_ndays > max_days as i64 {
-                    info!("Rejecting job from {} because it requests too many days: {job_ndays} requested vs. {max_days} allowed", input_file.display());
-                    problems.push(format!("Too many days requested: {job_ndays} requested but the maximum allowed is {max_days}"));
-                }
-            }
-            // Confirm that the required met files are available, unless missing start/end dates
-            // was one of the problems encountered in the input file
-            if let Err(e) = check_met_available(conn, config, start, end).await {
-                error!("Error occurred while checking met file availability for input file '{}': {e:?}", input_file.display());
-                problems.push(e.to_problem());
-            }
-        }
-
         // Store the email if we found it, we may need it later for an error message.
         let email = builder.email.clone();
 
         // Go ahead and try to make the final job - that way any error returned includes all of the problems.
-        match builder.finalize(config) {
+        match builder.finalize(conn, config).await {
             Ok(input_job) => {
                 if problems.len() == 0 {
                     return Ok(input_job);
@@ -229,7 +211,7 @@ impl Display for InputJob {
 }
 
 #[derive(Default)]
-struct InputJobBuilder {
+pub struct InputJobBuilder {
     site_id: Option<Vec<String>>,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
@@ -245,7 +227,7 @@ struct InputJobBuilder {
 }
 
 impl InputJobBuilder {
-    fn finalize(self, config: &Config) -> Result<InputJob, Vec<String>> {
+    pub async fn finalize(self, conn: &mut crate::MySqlConn, config: &Config) -> Result<InputJob, Vec<String>> {
         let mut errors = vec![];
         let mut site_id_missing = false;
 
@@ -257,11 +239,17 @@ impl InputJobBuilder {
             },
         };
 
+        // Validate the site IDs - this field must be present and all site IDs must be two characters
+        // We allow for the lat & lon to be omitted in some cases; this is checked by expand_site_lat_lon.
         let site_ids = self.site_id.unwrap_or_else(|| {
             errors.push("missing field site_id".to_owned());
             site_id_missing = true;
             return vec![]
         });
+
+        if site_ids.iter().any(|sid| sid.len() != 2) {
+            errors.push("site IDs be all be two characters".to_string());
+        }
 
         let (site_ids, lats, lons) = if site_id_missing{
             (vec![], self.lat.unwrap_or_default(), self.lon.unwrap_or_default())
@@ -276,13 +264,75 @@ impl InputJobBuilder {
             }
         };
 
+        // Verify that the lats and lons are in the valid ranges.
+        for (sid, lat) in site_ids.iter().zip(lats.iter()) {
+            if lat.is_some_and(|v| v < -90.0 || v > 90.0) {
+                errors.push(format!("Latitude for site {sid} is outside the allowed range of -90 to +90"));
+            }
+        }
+
+        for (sid, lon) in site_ids.iter().zip(lons.iter()) {
+            if lon.is_some_and(|v| v < -180.0 || v > 180.0) {
+                errors.push(format!("Longitude for site {sid} is outside the allowed range of -180 to +180"));
+            }
+        }
+
+        // An email is required.
+        let email = self.email.unwrap_or_else(|| {
+            errors.push("missing field email".to_owned());
+            String::new()
+        });
+
+        let user = if email.is_empty() { "UNKNOWN USER" } else { &email };
+
+        let (start_date, end_date) = if let (Some(start), Some(end)) = (self.start_date, self.end_date) {
+            // Check that the request asks for at least one day
+            if start >= end {
+                errors.push(format!("End date ({end}) must be at least one day after the start date ({start})"));
+            }
+
+            // Check that the user's job isn't too long, unless missing start/end dates was one of the problems
+            // encountered in the input file
+            if let Some(max_days) = config.execution.job_max_days {
+                let job_ndays = (end - start).num_days();
+                if job_ndays > max_days as i64 {
+                    info!("Rejecting job from {user} because it requests too many days: {job_ndays} requested vs. {max_days} allowed");
+                    errors.push(format!("Too many days requested: {job_ndays} requested but the maximum allowed is {max_days}"));
+                }
+            }
+            // Confirm that the required met files are available, unless missing start/end dates
+            // was one of the problems encountered in the input file
+            if let Err(e) = check_met_available(conn, config, start, end).await {
+                error!("Error occurred while checking met file availability for request by '{user}': {e:?}");
+                errors.push(e.to_problem());
+            }
+
+            (start, end)
+        } else {
+            let sd = self.start_date.unwrap_or_else(|| {
+                errors.push("missing field start_date".to_owned()); 
+                NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
+            });
+
+            let ed = self.end_date.unwrap_or_else(|| {
+                errors.push("missing field end_date".to_owned());
+                NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
+            });
+
+            (sd, ed)
+        };
+
+        if !errors.is_empty() {
+            return Err(errors)
+        }
+
         let input_job = InputJob {
             site_id: site_ids,
-            start_date: self.start_date.unwrap_or_else(|| {errors.push("missing field start_date".to_owned()); NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()}),
-            end_date: self.end_date.unwrap_or_else(|| {errors.push("missing field end_date".to_owned()); NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()}),
+            start_date,
+            end_date,
             lat: lats,
             lon: lons,
-            email: self.email.unwrap_or_else(|| {errors.push("missing field email".to_owned()); String::new()}),
+            email,
             mod_fmt: self.mod_fmt.unwrap_or_default(),
             vmr_fmt: self.vmr_fmt.unwrap_or_default(),
             map_fmt: self.map_fmt.unwrap_or_default(),
@@ -293,11 +343,7 @@ impl InputJobBuilder {
             ginput_key: ginput_key
         };
 
-        if errors.len() > 0 {
-            return Err(errors)
-        }else{
-            return Ok(input_job)
-        }
+        Ok(input_job)
     }
 
     fn get_met_and_ginput_keys(&self, config: &Config) -> Result<(Option<String>, Option<String>), String> {
@@ -337,44 +383,41 @@ impl InputJobBuilder {
         Ok(())
     }
 
+    pub fn with_site_id(&mut self, sid: Vec<String>) {
+        self.site_id = Some(sid);
+        ()
+    }
+
     fn start_date(&mut self, datestr: &str) -> Result<(), String> {
         match NaiveDate::parse_from_str(datestr, "%Y%m%d") {
             Ok(start_date) => {
-                self.start_date = Some(start_date);
-
-                // We'll do this check in both the start_date and end_date setters; that way
-                // whichever one is set second will catch it.
-                if let Some(end_date) = self.end_date {
-                    if end_date <= start_date {
-                        return Err(format!("start_date {start_date} must be at least one day before the end_date {end_date}"));
-                    }
-                }
-                return Ok(())
+                self.with_start_date(start_date);
+                Ok(())
             },
             Err(e) => {
-                return Err(format!("{e}"))
+                Err(format!("{e}"))
             }
         }
+    }
+
+    pub fn with_start_date(&mut self, start_date: NaiveDate) {
+        self.start_date = Some(start_date);
     }
 
     fn end_date(&mut self, datestr: &str) -> Result<(), String> {
         match NaiveDate::parse_from_str(datestr, "%Y%m%d") {
             Ok(end_date) => {
-                self.end_date = Some(end_date);
-
-                // We'll do this check in both the start_date and end_date setters; that way
-                // whichever one is set second will catch it.
-                if let Some(start_date) = self.start_date {
-                    if end_date <= start_date {
-                        return Err(format!("end_date {end_date} must be at least 1 day after the start date {start_date}"));
-                    }
-                }
-                return Ok(())
+                self.with_end_date(end_date);
+                Ok(())
             },
             Err(e) => {
-                return Err(format!("{e}"))
+                Err(format!("{e}"))
             }
         }
+    }
+
+    pub fn with_end_date(&mut self, end_date: NaiveDate) {
+        self.end_date = Some(end_date);
     }
 
     fn lat(&mut self, valstr: &str) -> Result<(), String> {
@@ -386,6 +429,10 @@ impl InputJobBuilder {
         Ok(())
     }
 
+    pub fn with_lats(&mut self, lats: Vec<Option<f32>>) {
+        self.lat = Some(lats);
+    }
+
     fn lon(&mut self, valstr: &str) -> Result<(), String> {
         debug!("Parsing lon string: {valstr}");
         self.lon = match crate::jobs::Job::parse_lon_str(valstr) {
@@ -395,9 +442,17 @@ impl InputJobBuilder {
         Ok(())
     }
 
+    pub fn with_lons(&mut self, lons: Vec<Option<f32>>) {
+        self.lon = Some(lons);
+    }
+
     fn email(&mut self, valstr: &str) -> Result<(), String> {
         self.email = Some(valstr.to_owned());
         return Ok(())
+    }
+
+    pub fn with_email(&mut self, email: String) {
+        self.email = Some(email);
     }
 
     fn mod_fmt(&mut self, valstr: &str) -> Result<(), String> {
@@ -409,6 +464,10 @@ impl InputJobBuilder {
         Ok(())
     }
 
+    pub fn with_mod_fmt(&mut self, mod_fmt: ModFmt) {
+        self.mod_fmt = Some(mod_fmt);
+    }
+
     fn vmr_fmt(&mut self, valstr: &str) -> Result<(), String> {
         let the_fmt = match VmrFmt::from_str(valstr) {
             Ok(v) => v,
@@ -416,6 +475,10 @@ impl InputJobBuilder {
         };
         self.vmr_fmt = Some(the_fmt);
         Ok(())
+    }
+
+    pub fn with_vmr_fmt(&mut self, vmr_fmt: VmrFmt) {
+        self.vmr_fmt = Some(vmr_fmt);
     }
 
     fn map_fmt(&mut self, valstr: &str) -> Result<(), String> {
@@ -427,6 +490,10 @@ impl InputJobBuilder {
         Ok(())
     }
 
+    pub fn with_map_fmt(&mut self, map_fmt: MapFmt) {
+        self.map_fmt = Some(map_fmt);
+    }
+
     fn is_egi(&mut self, valstr: &str) -> Result<(), String> {
         let egi = match crate::utils::parse_bool_str(valstr) {
             Ok(v) => v,
@@ -434,6 +501,10 @@ impl InputJobBuilder {
         };
         self.is_egi = Some(egi);
         Ok(())
+    }
+
+    pub fn with_is_egi(&mut self, is_egi: bool) {
+        self.is_egi = Some(is_egi);
     }
 
     fn confirmation(&mut self, valstr: &str) -> Result<(), String> {
@@ -445,10 +516,18 @@ impl InputJobBuilder {
         Ok(())
     }
 
+    pub fn with_confirmation(&mut self, confirmation: bool) {
+        self.confirmation = Some(confirmation);
+    }
+
     fn reanalysis(&mut self, valstr: &str) -> Result<(), String> {
         // Checking for date and value validity happens in finalize
         self.reanalysis = Some(valstr.to_string());
         Ok(())
+    }
+
+    pub fn with_reanalysis(&mut self, reanalysis: String) {
+        self.reanalysis = Some(reanalysis);
     }
 
     fn set_field_in_place(&mut self, field: &str, value: &str) -> Result<(), String> {
