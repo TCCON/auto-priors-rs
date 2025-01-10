@@ -14,7 +14,7 @@ use sqlx::{self, FromRow, Type, Acquire};
 use tabled::Tabled;
 use tokio::task::JoinHandle;
 
-use crate::{MySqlConn, siteinfo, error::{JobError, JobResult, JobPriorityError}, config::{Config, EmailConfig}, utils, PoolWrapper};
+use crate::{config::{Config, EmailConfig}, error::{JobAddError, JobError, JobPriorityError, JobResult}, siteinfo, utils, MySqlConn, PoolWrapper};
 
 // TODO: change times from Naive to Local (needs changing SQL to timestamp?)
 
@@ -122,7 +122,7 @@ impl TryFrom<i8> for JobState {
 
 
 /// An enum representing the possible options for creating a tarball of job output
-#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TarChoice {
     /// Do not make a tarball of the job output. `i8` value = `0`.
     No = 0,
@@ -182,7 +182,7 @@ impl TryFrom<i8> for TarChoice {
 }
 
 /// An enum representing the possible output file types for the model (`.mod`) files.
-#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub enum ModFmt {
     /// Do not create `.mod` files. String representation = `"None"`.
     None,
@@ -228,7 +228,7 @@ impl FromStr for ModFmt {
 
 
 /// An enum representing the possible output file types for the `.vmr` files.
-#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub enum VmrFmt {
     /// Do not create `.vmr` files. String representation = `"None"`.
     None,
@@ -275,7 +275,7 @@ impl FromStr for VmrFmt {
 
 
 /// An enum representing the possible output file types for the model a priori (`.map`) files.
-#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub enum MapFmt {
     /// Do not create `.map` files. String representation = `"None"`.
     None,
@@ -1005,7 +1005,13 @@ impl Job {
         return site_id_str
                 .split(',')
                 .map(|s| s.trim().to_owned())
-                .map(|s| if s.len() == 2 { Ok(s) } else { Err(JobError::CannotParseSiteId(site_id_str.to_string()))})
+                .map(|s| if s.len() == 2 { 
+                    Ok(s)
+                } else { 
+                    Err(JobError::CannotParseSiteId(format!(
+                        "Cannot parse '{site_id_str}': must be a single two-character site ID or a comma-separated list of such IDs"
+                    )))
+                })
                 .try_collect();
     }
 
@@ -1208,12 +1214,11 @@ impl Job {
         priority: Option<i32>,
         delete_time: Option<NaiveDateTime>,
         save_tarball: Option<TarChoice>
-    ) -> anyhow::Result<i32> {
+    ) -> Result<i32, JobAddError> {
 
         // Verify that we have matching site_id, lat, lon vectors. Any expansion needs to be done outside of this function.
         if site_id.len() != lat.len() || site_id.len() != lon.len() {
-            anyhow::bail!("site_id, lat, and lon must all be the same length (got {}, {}, {})",
-                site_id.len(), lat.len(), lon.len());
+            return Err(JobAddError::DifferentNumSidLatLon { n_sid: site_id.len(), n_lat: lat.len(), n_lon: lon.len() });
         }
 
         // Originally, I thought we needed to confirm that the job's date range does not cover multiple locations 
@@ -1230,7 +1235,7 @@ impl Job {
         let mut unknown_sids = vec![];
         for (sid, x, y) in itertools::izip!(site_id.iter(), lat.iter(), lon.iter()) {
             if x.is_none() != y.is_none() {
-                anyhow::bail!("At least one lat/lon pair has a value for one coordinate but not the other");
+                return Err(JobAddError::HalfNullCoord);
             }
 
             if x.is_none() {
@@ -1241,8 +1246,8 @@ impl Job {
         }
 
         if unknown_sids.len() > 0 {
-            let unknown_ids = unknown_sids.join(", ");
-            anyhow::bail!("The site IDs {unknown_ids} do not have standard lat/lons associated with them");
+            let unknown_ids = unknown_sids.into_iter().map(|sid| sid.to_string()).collect();
+            return Err(JobAddError::UnknownStdSid(unknown_ids));
         }
 
 
@@ -1267,7 +1272,7 @@ impl Job {
             queue,
             delete_time, // delete_time
             priority.unwrap_or(0), // priority
-            save_dir.to_str().ok_or(anyhow::anyhow!("Could not convert save_dir to UTF string"))?, // save_dir
+            save_dir.to_str().ok_or(JobAddError::InvalidUtf("save_dir"))?, // save_dir
             save_tarball, // save_tarball
             mod_fmt,
             vmr_fmt,
@@ -1303,7 +1308,7 @@ impl Job {
         save_tarball: Option<TarChoice>,
         met_key: Option<&str>,
         ginput_key: Option<&str>
-    ) -> anyhow::Result<i32> {
+    ) -> Result<i32, JobAddError> {
         let mut transaction = conn.begin().await?;
         let job_id = Self::add_job_from_args(&mut transaction, site_id, start_date, end_date, save_dir, email, lat, lon, queue, mod_fmt, vmr_fmt, map_fmt, priority, delete_time, save_tarball).await?;
 

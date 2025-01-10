@@ -1,8 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use orm::{MySqlPC, jobs::{Job, JobState}, error::JobError};
-use serial_test::serial;
+use orm::{error::JobError, jobs::{Job, JobState}, test_utils::open_test_database, MySqlPC};
 use sqlx::{Connection, MySqlConnection};
 
 mod common;
@@ -60,14 +59,13 @@ async fn mock_run_job_with_delay_transaction(mut conn: MySqlPC, delay_seconds: f
     anyhow::bail!("Could not get next job after 5 tries")
 }
 
-// Any tests that rely on database access should be marked as #[serial] to prevent
-// them from conflicting. Even tests that use different tables should all be run
-// in serial because the default reset migration drops ALL tables.
-#[tokio::test]
-#[serial]
+// Because the tests use a database, if we're not using testcontainers to give each test its
+// own database, we have to call the tests as `$ cargo test -- --test-threads=1` to ensure only
+// one test runs at a time.
+#[test_log::test(tokio::test)]
 async fn test_next_job_no_transaction() {
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let pool = common::open_test_database(true).await
+    let (pool, _test_db) = open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -85,10 +83,9 @@ async fn test_next_job_no_transaction() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_next_job_with_transaction() {
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let pool = common::open_test_database(true).await
+    let (pool, _test_db) = open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -113,13 +110,12 @@ async fn test_next_job_with_transaction() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_claim_job() {
     // The difference between this and test_next_job_with_transaction is this tests the library
     // capability to claim a job with a transaction and deadlock checking
 
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let pool = common::open_test_database(true).await
+    let (pool, _test_db) = open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -148,9 +144,8 @@ async fn test_claim_job() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_set_job_state() {
-    let mut conn = multiline_sql_init!("sql/two_test_jobs.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/two_test_jobs.sql");
     let mut job = Job::get_job_with_id(&mut conn, 1)
         .await
         .expect("Could not get job with ID = 1");

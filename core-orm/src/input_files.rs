@@ -5,7 +5,7 @@ use chrono::{NaiveDate, DateTime, Local, Duration};
 use itertools::Itertools;
 use log::{debug, info, warn, error};
 
-use crate::{jobs::{ModFmt, VmrFmt, MapFmt}, config::{Config, BlacklistIdentifier, BlacklistEntry}, utils, met::CheckMetAvailableError};
+use crate::{config::{BlacklistEntry, BlacklistIdentifier, Config}, error::JobAddError, jobs::{MapFmt, ModFmt, VmrFmt}, met::CheckMetAvailableError, utils};
 
 struct FailedParsingError {
     reasons: Vec<String>,
@@ -230,7 +230,7 @@ impl Display for InputJob {
 
 #[derive(Default)]
 struct InputJobBuilder {
-    site_id: Option<Vec<String>>,
+    site_id: utils::BuilderValue<Vec<String>>,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
     lat: Option<Vec<Option<f32>>>,
@@ -257,11 +257,19 @@ impl InputJobBuilder {
             },
         };
 
-        let site_ids = self.site_id.unwrap_or_else(|| {
-            errors.push("missing field site_id".to_owned());
-            site_id_missing = true;
-            return vec![]
-        });
+        let site_ids = match self.site_id {
+            utils::BuilderValue::Unset => {
+                errors.push("missing field site_id".to_string());
+                site_id_missing = true;
+                vec![]
+            },
+            utils::BuilderValue::Invalid => {
+                errors.push("site ID was not valid".to_string());
+                site_id_missing = true;
+                vec![]
+            },
+            utils::BuilderValue::Set(sids) => sids,
+        };
 
         let (site_ids, lats, lons) = if site_id_missing{
             (vec![], self.lat.unwrap_or_default(), self.lon.unwrap_or_default())
@@ -315,7 +323,7 @@ impl InputJobBuilder {
 
     fn is_field_set(&self, field: &str) -> bool {
         match field {
-            "site_id" => return self.site_id.is_some(),
+            "site_id" => return !self.site_id.is_unset(),
             "start_date" => return self.start_date.is_some(),
             "end_date" => return self.end_date.is_some(),
             "lat" => return self.lat.is_some(),
@@ -331,10 +339,19 @@ impl InputJobBuilder {
     }
 
     fn site_id(&mut self, sid: &str) -> Result<(), String> {
-        let site_ids = crate::jobs::Job::parse_site_id_str(sid)
-            .map_err(|e| e.to_string())?;
-        self.site_id = Some(site_ids);
-        Ok(())
+        match crate::jobs::Job::parse_site_id_str(sid) {
+            Ok(sids) => {
+                self.site_id = utils::BuilderValue::Set(sids);
+                Ok(())
+            }
+            Err(crate::error::JobError::CannotParseSiteId(reason)) => {
+                self.site_id = utils::BuilderValue::Invalid;
+                Err(reason)
+            }
+            Err(e) => {
+                Err(e.to_string())
+            }
+        }
     }
 
     fn start_date(&mut self, datestr: &str) -> Result<(), String> {
@@ -576,7 +593,9 @@ pub async fn add_jobs_from_input_files(
 
             let njobs = results.len();
             let mut job_ids = vec![];
+            let mut parsing_error_reasons = vec![];
             let mut errored = false;
+            let mut added_unknown_sid_error = false;
             for res in results {
                 match res {
                     Ok(new_id) => {
@@ -586,6 +605,22 @@ pub async fn add_jobs_from_input_files(
                         job_ids.push(new_id);
                         
                     },
+                    Err(JobAddError::UnknownStdSid(site_ids)) => {
+                        if !added_unknown_sid_error {
+                            // If the file was split into multiple jobs, this error would
+                            // occur for all of them, but we only want to include it in the
+                            // email once (hence the extra boolean).
+                            let this_reason = format!(
+                                "Site ID{} '{}' {}, you must provide latitude and longitude",
+                                if site_ids.len() == 1 { "" } else { "s" },
+                                site_ids.join("', '"),
+                                if site_ids.len() == 1 { "is not a known standard site" } else { "are not known standard sites" },
+                            );
+                            parsing_error_reasons.push(this_reason);
+                            added_unknown_sid_error = true;
+                        }
+                        errored = true;
+                    }
                     Err(e) => {
                         warn!("Error adding job from input file {} to database: {e:?}", infile.display());
                         errored = true;
@@ -615,9 +650,21 @@ pub async fn add_jobs_from_input_files(
                 } else {
                     debug!("Confirmation email declined for input file {}", infile.display());
                 }
+            } else if !parsing_error_reasons.is_empty() {
+                let parsing_err = FailedParsingError {
+                    reasons: parsing_error_reasons,
+                    input_file: infile.to_path_buf(),
+                    email: Some(job.email),
+                };
+                email_user_for_failed_parsing(parsing_err, config);
             } else {
                 let nfailures = njobs - job_ids.len();
-                let parsing_err = FailedParsingError::new_for_database_error(infile.to_path_buf(), job.email, nfailures, njobs);
+                let parsing_err = FailedParsingError::new_for_database_error(
+                    infile.to_path_buf(), 
+                    job.email, 
+                    nfailures,
+                    njobs
+                );
                 email_user_for_failed_parsing(parsing_err, config);
             }
         }
@@ -705,9 +752,9 @@ fn handle_blacklisted_input(blacklist_entry: &BlacklistEntry, submitter_email: &
 
     let subj = "GGG priors request rejected";
     let body = if let Some(reason) = &blacklist_entry.reason {
-        format!("Your priors request input file {file_name} has been rejected; further requests will NOT be accepted. Reason: {reason}.")
+        format!("Your priors request input file '{file_name}' has been rejected; further requests will NOT be accepted. Reason: {reason}.")
     } else {
-        format!("Your priors request input file {file_name} has been rejected; further requests will NOT be accepted.")
+        format!("Your priors request input file '{file_name}' has been rejected; further requests will NOT be accepted.")
     };
 
     config.email.send_mail(&[submitter_email], None, None, subj, &body)
@@ -807,12 +854,22 @@ async fn check_met_available(conn: &mut crate::MySqlConn, config: &Config, start
 #[derive(Debug)]
 pub struct InputFileCleanupHandler {
     last_clear_time: DateTime<Local>,
-    errored_files: HashSet<PathBuf>
+    errored_files: HashSet<PathBuf>,
+    delete_original: bool,
 }
 
 impl InputFileCleanupHandler {
     pub fn new() -> Self {
-        Self { last_clear_time: Local::now(), errored_files: HashSet::new() }
+        Self { last_clear_time: Local::now(), errored_files: HashSet::new(), delete_original: true }
+    }
+
+    /// Create a new handler that will not delete the original input files.
+    /// This is mean for integration tests where you want to leave the original
+    /// file for future tests.
+    pub fn new_for_testing() -> Self {
+        let mut me = Self::new();
+        me.delete_original = false;
+        me
     }
 
     /// Returns `true` if we tried to delete `file` recently and doing so failed
@@ -839,7 +896,7 @@ impl InputFileCleanupHandler {
             self.last_clear_time = now;
         }
 
-        let res = Self::move_file_inner(from_file, to_file);
+        let res = Self::move_file_inner(from_file, to_file, self.delete_original);
         if res.is_err() && self.errored_files.contains(from_file) {
             // We've seen this file recently, so don't treat the move error as an actual error
             Ok(false)
@@ -854,13 +911,18 @@ impl InputFileCleanupHandler {
         }
     }
 
-    fn move_file_inner<'p>(from_file: &'p Path, to_file: Option<&Path>) -> InputFileMoveError<'p> {
+    fn move_file_inner<'p>(from_file: &'p Path, to_file: Option<&Path>, delete_original: bool) -> InputFileMoveError<'p> {
         let res_copy = if let Some(to) = to_file {
             std::fs::copy(from_file, to)
         } else {
             Ok(0)
         };
-        let res_rm = std::fs::remove_file(from_file);
+
+        let res_rm = if delete_original { 
+            std::fs::remove_file(from_file)
+        } else {
+            Ok(())
+        };
 
         if let (Err(e_cp), Err(e_rm)) = (&res_copy, &res_rm) {
             // anyhow::bail!("URGENT: could not copy or remove original input file {}. Errors were\nCopying: {e_cp}\nRemoving: {e_rm}", from_file.display())
@@ -898,7 +960,7 @@ impl<'p> Display for InputFileMoveError<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InputFileMoveError::Ok(p) => write!(f, "{} moved successfully", p.display()),
-            InputFileMoveError::CopyFail(p, e) => write!(f, "Could not copy original input file {}, file was deleted. Error was: {e}", p.display()),
+            InputFileMoveError::CopyFail(p, e) => write!(f, "Could not copy original input file {}. Error was: {e}", p.display()),
             InputFileMoveError::RemoveFail(p, e) => write!(f, "URGENT: Could not remove original input file {}. Error was: {e}", p.display()),
             InputFileMoveError::CopyAndRemoveFail(p, e_cp, e_rm) => write!(f, "URGENT: could not copy or remove original input file {}. Errors were\nCopying: {e_cp}\nRemoving: {e_rm}", p.display()),
         }

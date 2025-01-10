@@ -8,7 +8,7 @@
 //! 
 //! A default (mostly blank) configuration file can be created by calling [`generate_config_file`].
 //! 
-use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, collections::HashMap, fmt::Display, str::FromStr};
+use std::{collections::HashMap, fmt::{Debug, Display}, fs::File, io::{Read, Write}, path::{Path, PathBuf}, str::FromStr};
 use anyhow::{self, Context};
 use chrono::{NaiveDate, NaiveDateTime, Duration, NaiveTime};
 use hostname;
@@ -1231,7 +1231,7 @@ pub struct EmailConfig {
     pub std_site_req_emails: Option<Mailboxes>,
 
     /// Which email backend to use to send the emails.
-    backend: EmailBackend,
+    pub backend: EmailBackend,
 
     /// Additional emails to send to when sending an email to all past submitters
     pub extra_submitters: Mailboxes,
@@ -1267,6 +1267,9 @@ impl EmailConfig {
                 backend.send_mail(to, &from, cc, bcc, subject, message)
             },
             EmailBackend::Mock(backend) => {
+                backend.send_mail(to, &from, cc, bcc, subject, message)
+            },
+            EmailBackend::Testing(backend) => {
                 backend.send_mail(to, &from, cc, bcc, subject, message)
             }
         }
@@ -1324,8 +1327,13 @@ pub enum EmailBackend {
     /// emails.
     Mailx(crate::email::Mailx),
 
-    /// Prints the email to the terminal (intended for testing)
+    /// Prints the email to the terminal (intended for development)
     Mock(crate::email::MockEmail),
+
+    /// Store the emails [`lettre::Message`], or a the string version of an
+    /// error from constructing the message, in a queue. Useful for unit/integration
+    /// tests to inspect the emails.
+    Testing(crate::email::TestingEmail),
 }
 
 impl Default for EmailBackend {
@@ -1533,7 +1541,7 @@ pub fn load_env_config_file(validate: bool) -> anyhow::Result<Config> {
 /// use tccon_priors_orm::config::{Config, load_config_file};
 /// use log::warn;
 /// let path = "does_not_exist.toml";
-/// let config = load_config_file(path).unwrap_or_else(|_| {
+/// let config = load_config_file(path, true).unwrap_or_else(|_| {
 ///     warn!("Using default configuration due to error reading {path}");
 ///     Config::default()
 /// });

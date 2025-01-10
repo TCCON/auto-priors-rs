@@ -24,10 +24,13 @@ orm = {path = "../core-orm", package = "tccon_priors_orm"}
 walkdir = "2.4.0"
 
 [dev-dependencies]
+float-cmp = "0.9.0"
 hex-literal = "0.4"
+lettre.workspace = true
 md-5 = "0.10"
-serial_test = "1.0.0"
 tempdir = "0.3"
+testcontainers-modules.workspace = true
+test-log.workspace = true
 tokio-test = "0.4.2"
 toml = "0.5"
 

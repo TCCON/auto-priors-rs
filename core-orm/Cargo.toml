@@ -13,7 +13,7 @@ futures = "0.3"
 glob.workspace = true
 hostname = "0.3"
 itertools.workspace = true
-lettre = {version = "0.10", features = ["serde"]}
+lettre.workspace = true
 log.workspace = true
 netrc-rs = "0.1"
 # pyo3 = "0.16.5"
@@ -27,3 +27,9 @@ tokio.workspace = true
 whoami = "1.5.1"
 tar = "0.4.40"
 flate2 = "1.0.26"
+
+# Dependencies for shared testing utils
+testcontainers-modules = {workspace = true, optional = true}
+
+[features]
+container-tests = ["dep:testcontainers-modules"]

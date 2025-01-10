@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
 use chrono::{NaiveDate, Duration};
-use serial_test::serial;
-use orm::met::{MetDayState, MetLevels, MetDataType, MetFile};
+use orm::{met::{MetDataType, MetDayState, MetFile, MetLevels}, test_utils::open_test_database};
 use tccon_priors_cli::{met_download::{check_one_config_set_files_for_dates, self}, utils::{WgetDownloader, Downloader}};
 mod common;
 
@@ -153,14 +152,13 @@ static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 48] = [
     "./Nx/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T2100.V01.nc4",
 ];
 
-// Any tests that rely on database access should be marked as #[serial] to prevent
-// them from conflicting. Even tests that use different tables should all be run
-// in serial because the default reset migration drops ALL tables.
+// Because the tests use a database, if we're not using testcontainers to give each test its
+// own database, we have to call the tests as `$ cargo test -- --test-threads=1` to ensure only
+// one test runs at a time.
 
 #[tokio::test]
-#[serial]
 async fn test_check_met() {
-    let mut conn = common::multiline_sql_init!("sql/check_met.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_met.sql");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let stat_map = check_one_config_set_files_for_dates(
@@ -224,10 +222,9 @@ async fn test_check_met() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_geosfpit_download_by_dates() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let pool = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
 
     // 2018 should be GEOS FP-IT in the default configuration
@@ -251,10 +248,9 @@ async fn test_geosfpit_download_by_dates() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_geosit_download_by_dates() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let pool = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
 
     // 2023 after June should be GEOS IT in the default configuration
@@ -278,10 +274,9 @@ async fn test_geosit_download_by_dates() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_geosfpit_to_geos_it_download_by_dates() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let pool = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
 
     // 2023 after June should be GEOS IT in the default configuration
@@ -306,9 +301,8 @@ async fn test_geosfpit_to_geos_it_download_by_dates() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_download_default_geosfpit_missing() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
     let (config, tmp_dir) = common::make_dummy_config_with_temp_dirs("missing_fpit").expect("Failed to set up test config and temp directories");
     let downloader = common::TestDownloader::new();
 
@@ -341,9 +335,8 @@ async fn test_download_default_geosfpit_missing() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_download_default_geosit_missing() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_it_next_date.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_it_next_date.sql");
     let (config, tmp_dir) = common::make_dummy_config_with_temp_dirs("missing_it").expect("Failed to set up test config and temp directories");
     let downloader = common::TestDownloader::new();
 
@@ -376,9 +369,8 @@ async fn test_download_default_geosit_missing() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_download_default_geosfpit_to_geosit_missing() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_to_it_transition_next_date.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_to_it_transition_next_date.sql");
     let (config, tmp_dir) = common::make_dummy_config_with_temp_dirs("missing_fpit_and_it").expect("Failed to set up test config and temp directories");
     let downloader = common::TestDownloader::new();
 
@@ -411,9 +403,8 @@ async fn test_download_default_geosfpit_to_geosit_missing() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_download_partial_day_from_start() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_next_partial.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_next_partial.sql");
     let (config, tmp_dir) = common::make_dummy_config_with_temp_dirs("missing_fpit_partial").expect("Failed to set up test config and temp directories");
     let downloader = common::TestDownloader::new();
 
@@ -448,9 +439,8 @@ async fn test_download_partial_day_from_start() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_download_partial_day_scattered() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_next_partial_scattered.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_next_partial_scattered.sql");
     let (config, tmp_dir) = common::make_dummy_config_with_temp_dirs("missing_fpit_partial_scattered").expect("Failed to set up test config and temp directories");
     let downloader = common::TestDownloader::new();
 
@@ -485,10 +475,9 @@ async fn test_download_partial_day_scattered() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_met_rescanning() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let pool = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("met_rescan").expect("Failed to set up test config and temp directories");
 
@@ -519,10 +508,9 @@ async fn test_met_rescanning() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_met_dates_defaults_empty_db() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let pool = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -539,10 +527,9 @@ async fn test_met_dates_defaults_empty_db() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_met_dates_user_empty_db() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let pool = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -562,9 +549,8 @@ async fn test_met_dates_user_empty_db() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_met_dates_default_fpit_in_db() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let mut date_iter = met_download::get_date_iter(
@@ -581,9 +567,8 @@ async fn test_met_dates_default_fpit_in_db() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_met_dates_user_override_fpit_in_db() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let start = Some(NaiveDate::from_ymd_opt(2005, 6, 1).unwrap());
@@ -601,9 +586,8 @@ async fn test_met_dates_user_override_fpit_in_db() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_met_dates_default_it_in_db() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_it_next_date.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_it_next_date.sql");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let mut date_iter = met_download::get_date_iter(
@@ -620,9 +604,8 @@ async fn test_met_dates_default_it_in_db() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_met_dates_default_fpit_plus_partial_it_in_db() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_plus_it_next_date.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_plus_it_next_date.sql");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let mut date_iter = met_download::get_date_iter(
@@ -640,9 +623,8 @@ async fn test_met_dates_default_fpit_plus_partial_it_in_db() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_single_met_dates_user_override() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let start = NaiveDate::from_ymd_opt(2014, 5, 1).unwrap();
@@ -662,9 +644,8 @@ async fn test_single_met_dates_user_override() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_single_met_dates_start_from_db() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let mut date_iter = met_download::get_date_iter(
@@ -681,10 +662,9 @@ async fn test_single_met_dates_start_from_db() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_single_met_start_from_dl_config() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let pool = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let mut config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -720,10 +700,9 @@ async fn test_single_met_start_from_dl_config() {
 
 
 #[tokio::test]
-#[serial]
 async fn test_single_met_start_from_defaults() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let pool = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let mut config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -751,10 +730,9 @@ async fn test_single_met_start_from_defaults() {
 
 
 #[tokio::test]
-#[serial]
 async fn test_single_met_no_valid_start_err() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let pool = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let mut config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -776,9 +754,8 @@ async fn test_single_met_no_valid_start_err() {
 
 
 #[tokio::test]
-#[serial]
 async fn test_single_met_cross_boundary_with_defaults() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let start = NaiveDate::from_ymd_opt(2023, 5, 20).unwrap();
@@ -798,9 +775,8 @@ async fn test_single_met_cross_boundary_with_defaults() {
 
 
 #[tokio::test]
-#[serial]
 async fn test_single_met_cross_boundary_ignoring_defaults() {
-    let mut conn = common::multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let start = NaiveDate::from_ymd_opt(2023, 5, 20).unwrap();
@@ -819,9 +795,8 @@ async fn test_single_met_cross_boundary_ignoring_defaults() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_find_met_file_by_name() {
-    let mut conn = common::multiline_sql_init!("sql/check_finding_met_file.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_finding_met_file.sql");
     let check_some = MetFile::get_file_by_name(&mut conn, "geos_surf_test_20200101_0000.nc")
         .await
         .expect("Database query failed or returned >1 file");
@@ -837,10 +812,9 @@ async fn test_find_met_file_by_name() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_find_met_file_by_path() {
     let test_path = PathBuf::from("/data/met/Nx/geos_surf_test_20200101_0000.nc");
-    let mut conn = common::multiline_sql_init!("sql/check_finding_met_file.sql");
+    let (mut conn, _test_db) = common::multiline_sql_init!("sql/check_finding_met_file.sql");
     let check_some = MetFile::get_file_by_full_path(&mut conn, &test_path)
         .await
         .expect("Database query for full path failed or returned >1 file");

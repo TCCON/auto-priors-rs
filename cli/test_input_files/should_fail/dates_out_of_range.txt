@@ -1,0 +1,6 @@
+site_id=ka
+start_date=20190701
+end_date=20190702
+lat=0
+lon=0
+email=test@test.com
