@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use orm::{MySqlPC, jobs::{Job, JobState}, error::JobError};
+use orm::{error::JobError, jobs::{Job, JobState}, test_utils::open_test_database, MySqlPC};
 use sqlx::{Connection, MySqlConnection};
 
 mod common;
@@ -65,7 +65,7 @@ async fn mock_run_job_with_delay_transaction(mut conn: MySqlPC, delay_seconds: f
 #[test_log::test(tokio::test)]
 async fn test_next_job_no_transaction() {
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let (pool, _test_db) = common::open_test_database(true).await
+    let (pool, _test_db) = open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -85,7 +85,7 @@ async fn test_next_job_no_transaction() {
 #[tokio::test]
 async fn test_next_job_with_transaction() {
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let (pool, _test_db) = common::open_test_database(true).await
+    let (pool, _test_db) = open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -115,7 +115,7 @@ async fn test_claim_job() {
     // capability to claim a job with a transaction and deadlock checking
 
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let (pool, _test_db) = common::open_test_database(true).await
+    let (pool, _test_db) = open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");

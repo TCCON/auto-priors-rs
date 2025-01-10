@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use chrono::{NaiveDate, Duration};
-use orm::met::{MetDayState, MetLevels, MetDataType, MetFile};
+use orm::{met::{MetDataType, MetDayState, MetFile, MetLevels}, test_utils::open_test_database};
 use tccon_priors_cli::{met_download::{check_one_config_set_files_for_dates, self}, utils::{WgetDownloader, Downloader}};
 mod common;
 
@@ -224,7 +224,7 @@ async fn test_check_met() {
 #[tokio::test]
 async fn test_geosfpit_download_by_dates() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
 
     // 2018 should be GEOS FP-IT in the default configuration
@@ -250,7 +250,7 @@ async fn test_geosfpit_download_by_dates() {
 #[tokio::test]
 async fn test_geosit_download_by_dates() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
 
     // 2023 after June should be GEOS IT in the default configuration
@@ -276,7 +276,7 @@ async fn test_geosit_download_by_dates() {
 #[tokio::test]
 async fn test_geosfpit_to_geos_it_download_by_dates() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
 
     // 2023 after June should be GEOS IT in the default configuration
@@ -477,7 +477,7 @@ async fn test_download_partial_day_scattered() {
 #[tokio::test]
 async fn test_met_rescanning() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("met_rescan").expect("Failed to set up test config and temp directories");
 
@@ -510,7 +510,7 @@ async fn test_met_rescanning() {
 #[tokio::test]
 async fn test_met_dates_defaults_empty_db() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -529,7 +529,7 @@ async fn test_met_dates_defaults_empty_db() {
 #[tokio::test]
 async fn test_met_dates_user_empty_db() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -664,7 +664,7 @@ async fn test_single_met_dates_start_from_db() {
 #[tokio::test]
 async fn test_single_met_start_from_dl_config() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let mut config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -702,7 +702,7 @@ async fn test_single_met_start_from_dl_config() {
 #[tokio::test]
 async fn test_single_met_start_from_defaults() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let mut config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -732,7 +732,7 @@ async fn test_single_met_start_from_defaults() {
 #[tokio::test]
 async fn test_single_met_no_valid_start_err() {
     // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = common::open_test_database(true).await.expect("Failed to open test database");
+    let (pool, _test_db) = open_test_database(true).await.expect("Failed to open test database");
     let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
     let mut config = common::make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 

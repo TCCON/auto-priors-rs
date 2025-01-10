@@ -3134,6 +3134,7 @@ dependencies = [
  "sqlx",
  "tabled",
  "tar",
+ "testcontainers-modules",
  "tokio",
  "toml 0.8.13",
  "url",
