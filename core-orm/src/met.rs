@@ -290,7 +290,7 @@ impl MetFile {
     /// 
     /// Will error if the frequency specified in the configuration does not divide evenly
     /// into a day (e.g. if the files are provided every 300 minutes)
-    fn num_expected_daily_files(cfg: &config::DownloadConfig) -> anyhow::Result<i64> {
+    fn num_expected_daily_files(cfg: &config::MetDownloadConfig) -> anyhow::Result<i64> {
         if 1440 % cfg.file_freq_min != 0 {
             let remainder = 1440 % cfg.file_freq_min;
             let msg = format!("A met configuration has a file frequency that does not evenly divide per day, remaining minutes were {remainder} ({cfg})");
@@ -300,7 +300,7 @@ impl MetFile {
         Ok(1440 / cfg.file_freq_min)
     }
 
-    pub async fn get_first_complete_date_for_config(conn: &mut MySqlConn, cfg: &config::DownloadConfig) -> anyhow::Result<Option<NaiveDate>> {
+    pub async fn get_first_complete_date_for_config(conn: &mut MySqlConn, cfg: &config::MetDownloadConfig) -> anyhow::Result<Option<NaiveDate>> {
         let n_expected = Self::num_expected_daily_files(cfg)?;
 
         trace!("Querying first complete date ({n_expected} files) for {}, {}, {}", cfg.levels, cfg.data_type, cfg.product);
@@ -333,7 +333,7 @@ impl MetFile {
     /// # Returns
     /// The last date for which that data was downloaded. Returns `None` if that data has never been downloaded.
     /// Returns an `Err` if querying the database fails.
-    pub async fn get_last_complete_date_for_config(conn: &mut MySqlConn, cfg: &config::DownloadConfig) -> anyhow::Result<Option<NaiveDate>> {
+    pub async fn get_last_complete_date_for_config(conn: &mut MySqlConn, cfg: &config::MetDownloadConfig) -> anyhow::Result<Option<NaiveDate>> {
         let n_expected = Self::num_expected_daily_files(cfg)?;
 
         trace!("Querying most recent complete date ({n_expected} files) for {}, {}, {}", cfg.levels, cfg.data_type, cfg.product);
@@ -372,7 +372,7 @@ impl MetFile {
     /// 4. If all those datasets have same start or end date, return that date.
     /// 
     /// This will return an `Err` if the database query fails.
-    pub async fn get_first_or_last_complete_date_for_config_set(conn: &mut MySqlConn, cfgs: &[config::DownloadConfig], first: bool) -> anyhow::Result<Option<NaiveDate>> {
+    pub async fn get_first_or_last_complete_date_for_config_set(conn: &mut MySqlConn, cfgs: &[config::MetDownloadConfig], first: bool) -> anyhow::Result<Option<NaiveDate>> {
         let mut dates = vec![];
         for cfg in cfgs {
             let (descr, opt_date) = if first {
@@ -490,7 +490,7 @@ impl MetFile {
     /// 2D assimilated met, 3D assimilated met, and 3D chemistry files. To check that, use [`MetFile::is_date_complete_for_config_set`].
     /// 
     /// Will return an `Err` if the database query fails.
-    pub async fn is_date_complete_for_config(conn: &mut MySqlConn, date: NaiveDate, cfg: &config::DownloadConfig) -> anyhow::Result<MetDayState> {
+    pub async fn is_date_complete_for_config(conn: &mut MySqlConn, date: NaiveDate, cfg: &config::MetDownloadConfig) -> anyhow::Result<MetDayState> {
         let n_expected = Self::num_expected_daily_files(cfg)?;
         let n_found = sqlx::query!(
             r#"SELECT COUNT(filedate) as count FROM MetFiles
@@ -527,7 +527,7 @@ impl MetFile {
     /// If there is an error connecting to the database, this returns an `Err`. Otherwise, this returns `MetDayState::Complete` if 
     /// all the necessary met files are in the database, `MetDayState::Missing` if none of the met files are present, and 
     /// `MetDayState::Incomplete` otherwise (even if only one of several file sets is incomplete).
-    pub async fn is_date_complete_for_config_set(conn: &mut MySqlConn, date: NaiveDate, cfgs: &[config::DownloadConfig]) -> anyhow::Result<MetDayState> {
+    pub async fn is_date_complete_for_config_set(conn: &mut MySqlConn, date: NaiveDate, cfgs: &[config::MetDownloadConfig]) -> anyhow::Result<MetDayState> {
         let mut states = vec![];
         let mut num_expected = vec![];
         for cfg in cfgs {
@@ -660,7 +660,7 @@ impl MetFile {
     /// 
     /// # See also
     /// [`MetFile::add_met_file_infer_date`] if the file date must be retrieved from the file name.
-    pub async fn add_met_file(conn: &mut MySqlConn, file: &Path, datetime: NaiveDateTime, download_cfg: &config::DownloadConfig) -> Result<(), AddMetFileError> {
+    pub async fn add_met_file(conn: &mut MySqlConn, file: &Path, datetime: NaiveDateTime, download_cfg: &config::MetDownloadConfig) -> Result<(), AddMetFileError> {
         if !file.exists() {
             return Err(AddMetFileError::FileDoesNotExist(file.to_path_buf()));
         }else if !file.is_absolute() {
@@ -716,7 +716,7 @@ impl MetFile {
     /// 
     /// Returns the file datetime, or an `Err` if it could not get the chrono format for the file names
     /// or if the parsing of the file name fails.
-    fn date_from_filename(file: &Path, download_cfg: &config::DownloadConfig) -> anyhow::Result<NaiveDateTime> {
+    fn date_from_filename(file: &Path, download_cfg: &config::MetDownloadConfig) -> anyhow::Result<NaiveDateTime> {
         let basename = file.file_name()
             .ok_or_else(|| anyhow::Error::msg(format!("No base name for file {}", file.display())))?
             .to_string_lossy();
@@ -734,7 +734,7 @@ impl MetFile {
     /// Note that the file's basename must match the time format pattern in the download config, and
     /// must contain time components at least up to minutes. All other behavior follows
     /// [`MetFile::add_met_file`] including panics - `file` must be an absolute path.
-    pub async fn add_met_file_infer_date(conn: &mut MySqlConn, file: &Path, download_cfg: &config::DownloadConfig) -> Result<(), AddMetFileError> {
+    pub async fn add_met_file_infer_date(conn: &mut MySqlConn, file: &Path, download_cfg: &config::MetDownloadConfig) -> Result<(), AddMetFileError> {
         let datetime = Self::date_from_filename(file, download_cfg)?;
         Self::add_met_file(conn, file, datetime, download_cfg).await
     }
@@ -751,7 +751,7 @@ impl MetFile {
     /// couldn't be inferred from the file name (either because the file name and time format pattern didn't
     /// match or the file name/pattern didn't have all the needed time components) or if the database query 
     /// fails.
-    pub async fn file_exists_by_type(conn: &mut MySqlConn, file: &Path, file_cfg: &config::DownloadConfig) -> anyhow::Result<bool> {
+    pub async fn file_exists_by_type(conn: &mut MySqlConn, file: &Path, file_cfg: &config::MetDownloadConfig) -> anyhow::Result<bool> {
         let datetime = Self::date_from_filename(file, file_cfg)?;
 
         let n = sqlx::query!(

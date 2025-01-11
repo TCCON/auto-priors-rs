@@ -8,18 +8,29 @@
 //! 
 //! A default (mostly blank) configuration file can be created by calling [`generate_config_file`].
 //! 
-use std::{collections::HashMap, fmt::{Debug, Display}, fs::File, io::{Read, Write}, path::{Path, PathBuf}, str::FromStr};
+use std::{collections::HashMap, fmt::{Debug, Display}, fs::File, io::{Read, Write}, path::{Path, PathBuf}};
 use anyhow::{self, Context};
-use chrono::{NaiveDate, NaiveDateTime, Duration, NaiveTime};
-use hostname;
+use chrono::{NaiveDate, NaiveTime};
 use itertools::Itertools;
 use lettre::message::{Mailbox, Mailboxes};
 use log::{debug, info};
 use serde::{Serialize, Deserialize};
 use toml;
-use url::Url;
 
 use crate::{met::{self, MetDataType}, error::{DefaultOptsQueryError, EmailError}, email::SendMail};
+
+mod helpers;
+pub use helpers::YesOrNo;
+
+mod execution;
+pub use execution::{ExecutionConfig, GinputConfig, ErrorHandlerChoice, JobQueueOptions, FairSharePolicy};
+
+mod met_download;
+pub use met_download::MetDownloadConfig;
+
+mod processing_config;
+pub use processing_config::ProcessingConfig;
+
 
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
@@ -671,139 +682,6 @@ impl Config {
     }
 }
 
-/// Configuration section dealing with how jobs are run
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ExecutionConfig {
-    /// Maximum number of threads to let numpy use
-    pub max_numpy_threads: u32,
-
-    /// Full glob pattern (including directory) to use to find input files
-    pub input_file_pattern: String,
-
-    /// Full glob pattern (including directory) to use to find status request files
-    pub status_request_file_pattern: String,
-
-    /// Directory to which successfully parsed input files go
-    pub success_input_file_dir: PathBuf,
-
-    /// Directory to which input files that fail parsing go
-    pub failure_input_file_dir: PathBuf,
-
-    /// Hours to retain requested jobs before deleting
-    pub hours_to_keep: u32,
-
-    /// The base URL of the the FTP server from which users download jobs
-    pub ftp_download_server: Url,
-
-    /// The root path for the FTP server, i.e. where users start when they log in.
-    /// Used to map file paths to FTP URLs.
-    pub ftp_download_root: PathBuf,
-
-    /// The path to write requested job output files to, must be somewhere that users
-    /// can download them from.
-    pub output_path: PathBuf,
-
-    /// Path where standard sites' output tarballs shall be stored. This will have subdirectories
-    /// named by site ID
-    pub std_sites_tar_output: PathBuf,
-
-    /// Run directory for standard site jobs.
-    pub std_sites_output_base: PathBuf,
-
-    /// Maximum number of days allowed in a single job request. If omitted, no limit is imposed.
-    #[serde(default)]
-    pub job_max_days: Option<u32>,
-
-    /// If included, requests submitted by users will be split into jobs of this many days.
-    #[serde(default)]
-    pub job_split_into_days: Option<u32>,
-
-    /// Run a simulation, do not execute ginput, but generate mock output files for testing
-    #[serde(default)]
-    pub simulate: bool,
-
-    #[serde(default = "default_sim_delay")]
-    pub simulation_delay: u32,
-
-    /// The queue that submitted jobs go into
-    pub submitted_job_queue: String,
-
-    /// The queue that standard site jobs go into
-    pub std_site_job_queue: String,
-
-    /// When adding jobs for standard sites, jobs covering dates from today - N days on
-    /// will have extra priority. If this is not specified, then these "current" jobs
-    /// get no extra priority.
-    pub std_site_priority_days: Option<i64>,
-
-    /// Which error handler to use. Note that this cannot be changed by a config reload.
-    pub error_handler: ErrorHandlerChoice,
-
-    /// If given, where to write the flat version of the standard site JSON file for users to download.
-    /// If omitted, the service will not write the flat JSON file.
-    #[serde(default)]
-    pub flat_stdsite_json_file: Option<PathBuf>,
-
-    /// If given, where to write the grouped version of the standard site JSON file for users to download.
-    /// If omitted, the service will not write the grouped JSON file.
-    #[serde(default)]
-    pub grouped_stdsite_json_file: Option<PathBuf>,
-
-    /// Determines maximum number of jobs allowed to run simultaneously for different work sets
-    #[serde(default)]
-    pub queues: HashMap<String, JobQueueOptions>,
-
-    /// Map of available ginput versions to use.
-    pub ginput: HashMap<String, GinputConfig>,
-}
-
-impl Default for ExecutionConfig {
-    fn default() -> Self {
-        let host = hostname::get()
-            .unwrap_or("localhost".into());
-        let host = host.to_string_lossy();
-
-        Self { 
-            error_handler: Default::default(),
-            queues: Default::default(), 
-            max_numpy_threads: 2, 
-            hours_to_keep: 168,
-            input_file_pattern: "input_file_2020*.txt".to_owned(),
-            status_request_file_pattern: "ginput_status*.txt".to_owned(),
-            success_input_file_dir: PathBuf::from("."),
-            failure_input_file_dir: PathBuf::from("."),
-            ftp_download_server: Url::parse(&format!("ftp://{host}/")).unwrap_or_else(|_| Url::parse("ftp://localhost/").unwrap()), 
-            ftp_download_root: Default::default(), 
-            output_path: Default::default(), 
-            std_sites_tar_output: Default::default(), 
-            std_sites_output_base: Default::default(),
-            flat_stdsite_json_file: Default::default(),
-            grouped_stdsite_json_file: Default::default(),
-            ginput: Default::default(),
-            job_max_days: None,
-            job_split_into_days: None,
-            simulate: false,
-            simulation_delay: default_sim_delay(),
-            submitted_job_queue: "submitted".to_string(),
-            std_site_job_queue: "std-sites".to_string(),
-            std_site_priority_days: Default::default(),
-        }
-    }
-}
-
-fn default_sim_delay() -> u32 {
-    60
-}
-
-/// Configuration describing an available version of ginput that the automation can call.
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(tag = "type")]
-pub enum GinputConfig {
-    /// A ginput installation to be called via its `run_ginput.py` entry point. Requires
-    /// one option, `entry_point_path`, which is the path to the `run_ginput.py` file.
-    Script{entry_point_path: PathBuf}
-}
-
 /// Configuration section dealing with allowed options for user-requested jobs
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct UserRequestConfig {
@@ -885,136 +763,8 @@ pub struct DataConfig {
     /// to run. The keys to the map must be strings that will be passed as arguments to
     /// the downloader to specify which file type to download. See [`DownloadConfig`] for 
     /// details on the array elements.
-    pub download: HashMap<String, Vec<DownloadConfig>>,
-}
-
-/// Configuration for how to download input reanalysis files for ginput
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DownloadConfig {
-    /// What stream this is from (FP or FP-IT, currently)
-    pub product: met::MetProduct,
-
-    /// Whether this set of files is meteorology or chemistry
-    pub data_type: met::MetDataType,
-
-    /// What set of vertical levels these files represent.
-    pub levels: met::MetLevels,
-
-    /// A URL pattern that can be passed to wget to download the desired file.
-    /// Use [Chrono format strings](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
-    /// (e.g. "%Y", "%d") to insert date/time elements into the URL.
-    pub url_pattern: String,
-
-    /// The expected pattern for the downloaded file names.
-    /// Use [Chrono format strings](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
-    /// (e.g. "%Y", "%d") to insert date/time elements into the name. The default is to assume that 
-    /// the last part of the URL in `url_pattern` will become the basename, use this to override that
-    /// if that assumption is not true.
-    /// 
-    /// NOTE: in order for this program to properly parse the date & time from the filename for the database,
-    /// the pattern MUST include year, month, day, hour, and minute.
-    pub basename_pattern: Option<String>,
-
-    /// The number of minutes between subsequent reanalysis files, e.g. for files every three hours,
-    /// set this to 180. Note that the current implementation assumes that there will always be a
-    /// file for midnight, so values greater than 24 * 60 = 1440 are not supported.
-    pub file_freq_min: i64,
-
-    /// The earliest date for which this met data is available for download
-    pub earliest_date: NaiveDate,
-
-    /// The directory to download the data into. For met products intended to be used with ginput v1.y.z,
-    /// this must still follow the expected directory structure for GEOS data. Namely:
-    /// * Surface, hybrid eta level, and fixed pressure level files must reside in `Nx`, `Nv`, and `Np`
-    ///   subdirectories, respectively.
-    /// * Met data for a given met data source must be in subdirectories of the same path; that is, if
-    ///   the eta level files are in `/data/met/Nv`, the surface/2D files must be in `/data/met/Nx`.
-    ///   Chemistry data can be in the same directory or separate, e.g. in this example, the eta-level
-    ///   chem files could go in `/data/met/Nv` or a separate directory such as `/data/chm/Nv`. The
-    ///   latter is recommended.
-    pub download_dir: PathBuf,
-
-    /// How many days to allow before failing to download files is an error
-    pub days_latency: u32,
-
-    /// The string that ginput's `mod` subcommand's `mode` argument takes to tell it to produce files
-    /// from this meteorology.
-    pub ginput_met_key: String,
-
-    /// The top-level subdirectory that `ginput` places output for this met type, e.g. "fpit" for GEOS FP-IT.
-    /// If the `ginput_met_key` value is "XXX-eta", then this is usually "XXX".
-    pub ginput_output_subdir: String,
-}
-
-impl Display for DownloadConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "product = {}, type = {}, levels = {}", self.product, self.data_type, self.levels)
-    }
-}
-
-impl DownloadConfig {
-    pub fn to_short_string(&self) -> String {
-        format!("{}, {}, {}", self.product, self.data_type, self.levels)
-    }
-    
-    /// Get the pattern for file names of this type of file, with no leading path.
-    /// 
-    /// If the configuration has a value for the `basename_pattern` specified, that is
-    /// returned. Otherwise, the URL pattern is split on the last "/" and everything after
-    /// that slash is used as the pattern.
-    /// 
-    /// Can return an `Err` if it could not identify a part after the final slash in the URL.
-    pub fn get_basename_pattern(&self) -> anyhow::Result<&str> {
-        if let Some(pat) = &self.basename_pattern {
-            return Ok(&pat)
-        }else{
-            // let full_url = url::Url::parse(&self.url_pattern)?
-            //     .path_segments()
-            //     .ok_or_else(|| anyhow::Error::msg(format!("Could not find the file base name from URL pattern {}", self.url_pattern)))?
-            //     .last()
-            //     .ok_or_else(|| anyhow::Error::msg(format!("Could not find the file base name from URL pattern {}", self.url_pattern)))?;
-            // Ok(full_url)
-
-            // Preferring this over the URL library because the latter makes it difficult to
-            // return a &str.
-            self.url_pattern
-                .split('/')
-                .last()
-                .ok_or_else(|| anyhow::Error::msg(format!("Could not find the file base name from URL pattern {}", self.url_pattern)))
-        }
-    }
-
-    /// Provide a vector of datetimes when this file type is expected to exist on a given date
-    pub fn times_on_day(&self, date: NaiveDate) -> Vec<NaiveDateTime> {
-        let end = date.and_hms_opt(0, 0, 0).unwrap() + Duration::days(1);
-        let mut file_time = date.and_hms_opt(0, 0, 0).unwrap();
-        let file_time_del = Duration::minutes(self.file_freq_min);
-        
-        let mut times = vec![];
-        while file_time < end {
-            times.push(file_time);
-            file_time += file_time_del;
-        }
-        
-        times
-    }
-
-    /// Provide a vector of the files of this type expected to exist on a given date.
-    /// 
-    /// The returned paths point to files for the times given by [`DownloadConfig::times_on_day`]
-    /// in the path gievn by [`DownloadConfig::get_save_dir`].
-    /// 
-    /// Returns an `Err` if it cannot get the save directory or the filename pattern.
-    pub fn expected_files_on_day(&self, date: NaiveDate) -> anyhow::Result<Vec<PathBuf>> {
-        let save_dir = &self.download_dir;
-        let basename_pat = self.get_basename_pattern()?;
-        let mut files = vec![];
-        for time in self.times_on_day(date) {
-            let file_name = time.format(basename_pat).to_string();
-            files.push(save_dir.join(file_name));
-        }
-        Ok(files)
-    }
+    #[serde(with = "met_download")]
+    pub met_download: HashMap<String, MetDownloadConfig>,
 }
 
 
@@ -1035,8 +785,7 @@ impl DownloadConfig {
 pub struct DefaultOptions {
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
-    pub ginput: String,
-    pub met: String,
+    pub processing_config: String
 }
 
 
@@ -1054,55 +803,11 @@ impl DefaultOptions {
 
 impl Display for DefaultOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{} to {}: ginput = {}, met = {}]", 
+        write!(f, "[{} to {}: processing config = {}]", 
             self.start_date.map(|d| d.to_string()).unwrap_or_else(|| "None".to_owned()),
             self.end_date.map(|d| d.to_string()).unwrap_or_else(|| "None".to_owned()),
-            self.ginput,
-            self.met
+            self.processing_config
         )
-    }
-}
-
-
-/// A structure describing configuration of a job queue.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JobQueueOptions {
-    /// The maximum number of processors that this queue can use (default = 1)
-    pub max_num_procs: usize,
-
-    /// The fair share policy to use for this queue
-    #[serde(default)]
-    pub fair_share_policy: FairSharePolicy
-}
-
-impl Default for JobQueueOptions {
-    fn default() -> Self {
-        Self { 
-            max_num_procs: 1,
-            fair_share_policy: Default::default()
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-
-#[serde(tag = "type")]
-pub enum FairSharePolicy {
-    Simple(crate::jobs::PrioritySubmitFS)
-}
-
-impl Default for FairSharePolicy {
-    fn default() -> Self {
-        Self::Simple(crate::jobs::PrioritySubmitFS{})
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::jobs::FairShare for FairSharePolicy {
-    async fn next_job_in_queue(&self, conn: &mut crate::MySqlConn, queue: &str) -> crate::error::JobResult<Option<crate::jobs::Job>> {
-        match self {
-            Self::Simple(policy) => policy.next_job_in_queue(conn, queue).await
-        }
     }
 }
 
@@ -1342,39 +1047,6 @@ impl Default for EmailBackend {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ErrorHandlerChoice {
-    Logging,
-    EmailAdmins
-}
-
-impl Default for ErrorHandlerChoice {
-    fn default() -> Self {
-        Self::EmailAdmins
-    }
-}
-
-impl Display for ErrorHandlerChoice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ErrorHandlerChoice::Logging => write!(f, "Logging"),
-            ErrorHandlerChoice::EmailAdmins => write!(f, "EmailAdmins"),
-        }
-    }
-}
-
-impl FromStr for ErrorHandlerChoice {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "logging" => Ok(Self::Logging),
-            "emailadmins" => Ok(Self::EmailAdmins),
-            _ => anyhow::bail!("Unknown error handler choice: {s}")
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlacklistEntry {
@@ -1427,7 +1099,7 @@ where T: AsRef<Path>
     default_cfg.data.base_vmr_file = Some(PathBuf::new());
     default_cfg.data.zgrid_file = Some(PathBuf::new());
     default_cfg.data.download.insert("geosfpit".to_string(), vec![
-        DownloadConfig{ 
+        MetDownloadConfig{ 
             product: met::MetProduct::GeosFpit,
             data_type: MetDataType::Met,
             levels: met::MetLevels::Eta,
@@ -1435,10 +1107,9 @@ where T: AsRef<Path>
             basename_pattern: Some("(omit to infer from url_pattern)".to_string()),
             file_freq_min: 180,
             earliest_date: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+            latest_date: None,
             download_dir: PathBuf::new(),
             days_latency: 1,
-            ginput_met_key: "fpit-eta".to_string(),
-            ginput_output_subdir: "fpit".to_string(),
         }
     ]);
 
@@ -1446,8 +1117,7 @@ where T: AsRef<Path>
         DefaultOptions { 
             start_date: NaiveDate::from_ymd_opt(2000, 1, 1),
             end_date: NaiveDate::from_ymd_opt(2038, 1, 1),
-            ginput: "".to_string(),
-            met: "".to_string()
+            processing_config: "".to_string(),
         }
     ];
 
