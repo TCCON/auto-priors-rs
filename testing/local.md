@@ -16,11 +16,28 @@ not a summarization of the database.)
 
 ## Running tests with Podman
 
+Start podman with `podman machine start`.
+It should provide a `DOCKER_HOST` variable to use - copy or export that, as it's difficult to get after the fact.
+
+
 Ensure that podman is running by confirming that `podman info` produces output.
 If not, `podman machine start` should handle that.
-Podman Desktop may configure it to start automatically.
-
 Although the test code should default to using the test containers, running local tests without mariadb running is safest.
+
+```
+SQLX_OFFLINE=true cargo test -- --test-threads=1
+```
+
+If you haven't exported `DOCKER_HOST` as given in the `podman machine start` output, include it as a one-off environmental variable here just like `SQLX_OFFLINE`.
+`SQLX_OFFLINE=true` is needed to tell SQLx to ignore the `DATABASE_URL` variable in a `.env` file in the workspace root, and use the prepared queries from step 1.
+The `--test-threads=1` option after the `--` seems to be necessary to avoid tests failing because containers failed to start quickly enough.
+It's likely that this value can be greater than one; for a set of 3 tests, they ran successfully without the thread limit while a set of 26 did not.
+However, the more threads the longer it seems to take for Podman to start the containers, so there may not be much advantage to increasing that above 1.
+
+This will take time, so likely it is best to run all tests once to find the failing ones, then try individual tests after trying to fix them.
+
+### Alternate approach
+
 Rust's `testcontainers` package is meant to work with docker, not podman, so to get it to use podman requires a workaround described [here](https://medium.com/twodigits/testcontainers-on-podman-a090c348b9d8).
 The first step is to get connection information with `podman system connection list`.
 This should print a table like:
