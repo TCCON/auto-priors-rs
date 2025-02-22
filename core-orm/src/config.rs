@@ -1088,7 +1088,8 @@ impl Default for JobQueueOptions {
 
 #[serde(tag = "type")]
 pub enum FairSharePolicy {
-    Simple(crate::jobs::PrioritySubmitFS)
+    Simple(crate::jobs::PrioritySubmitFS),
+    RoundRobin(crate::jobs::PsuedoRoundRobinFS)
 }
 
 impl Default for FairSharePolicy {
@@ -1101,7 +1102,8 @@ impl Default for FairSharePolicy {
 impl crate::jobs::FairShare for FairSharePolicy {
     async fn next_job_in_queue(&self, conn: &mut crate::MySqlConn, queue: &str) -> crate::error::JobResult<Option<crate::jobs::Job>> {
         match self {
-            Self::Simple(policy) => policy.next_job_in_queue(conn, queue).await
+            Self::Simple(policy) => policy.next_job_in_queue(conn, queue).await,
+            Self::RoundRobin(policy) => policy.next_job_in_queue(conn, queue).await
         }
     }
 }

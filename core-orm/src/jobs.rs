@@ -1649,7 +1649,13 @@ impl FairShare for PrioritySubmitFS {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PsuedoRoundRobinFS {
-    time_period_days: u64
+    time_period_days: u32
+}
+
+impl PsuedoRoundRobinFS {
+    pub fn new(time_period_days: u32) -> Self {
+        Self { time_period_days }
+    }
 }
 
 impl Default for PsuedoRoundRobinFS {
@@ -1660,11 +1666,42 @@ impl Default for PsuedoRoundRobinFS {
 
 #[async_trait]
 impl FairShare for PsuedoRoundRobinFS {
-    async fn next_job_in_queue(&self, _conn: &mut MySqlConn, _queue: &str) -> JobResult<Option<Job>> {
-        // My idea for this one is to order the jobs by (1) priority, (2) number of jobs run in the last TIME_PERIOD_DAYS,
-        // then (3) submit time. The idea here is to rotate through users if a bunch of people have requests at the same
-        // time
-        todo!()
+    async fn next_job_in_queue(&self, conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>> {
+        // This will count all running, completed, or cleaned jobs submitted in the last N days for each
+        // unique email and join those counts with all jobs waiting to start. It will then order the pending
+        // jobs first by priority less the number of jobs from the last N days, then by submission time.
+        // Note that the COALESCE in the ORDER BY statement is necessary so that any users with no recent jobs
+        // correctly get 0 penalty - otherwise priority + NULL seems to produce NULL, which is ordered last!
+        let cutoff_time = chrono::Local::now().naive_local() - chrono::TimeDelta::days(self.time_period_days as i64);
+        let job: Option<Job> = sqlx::query_as!(
+            QJob,
+            r#"
+            SELECT j.* FROM (
+                SELECT * FROM Jobs WHERE state = ? AND queue = ?
+            ) as j
+            LEFT JOIN (
+                SELECT COUNT(*) as fs_penalty,email as fs_email
+                FROM Jobs
+                WHERE (state = ? OR state = ? OR state = ?) AND queue = ? AND submit_time > ?
+                GROUP BY email
+            ) as fs
+            ON j.email = fs.fs_email
+            ORDER BY (priority - COALESCE(fs_penalty, 0)) desc,submit_time
+            LIMIT 1
+            "#,
+            JobState::Pending, // state in first subquery
+            queue, // queue in first subquery
+            JobState::Running, // state 1/3 in second subquery
+            JobState::Complete, // state 2/3 in second subquery
+            JobState::Cleaned, // state 3/3 in second subquery
+            queue, // queue in second subquery
+            cutoff_time // submit_time comparison in second subquery
+        ).fetch_optional(conn)
+        .await?
+        .map(|q| q.try_into())
+        .transpose()?;
+        
+        Ok(job)
     }
 }
 
