@@ -1106,6 +1106,14 @@ impl crate::jobs::FairShare for FairSharePolicy {
             Self::RoundRobin(policy) => policy.next_job_in_queue(conn, queue).await
         }
     }
+
+    async fn order_jobs_for_display(&self, conn: &mut crate::MySqlConn, queue: &str, jobs: Vec<crate::jobs::Job>)
+    -> crate::error::JobResult<Vec<(crate::jobs::Job, HashMap<&'static str, String>)>> {
+        match self {
+            Self::Simple(policy) => policy.order_jobs_for_display(conn, queue, jobs).await,
+            Self::RoundRobin(policy) => policy.order_jobs_for_display(conn, queue, jobs).await
+        }
+    }
 }
 
 

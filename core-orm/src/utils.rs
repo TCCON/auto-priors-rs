@@ -391,11 +391,14 @@ where
     I: IntoIterator<Item = T>,
     T: tabled::Tabled
 {
-    let table_config = tabled::settings::Settings::default()
-        .with(tabled::settings::Style::markdown());
     tabled::Table::new(iter)
-        .with(table_config)
+        .with(std_table_options())
         .to_string()
+}
+
+pub fn std_table_options() -> tabled::settings::Settings<tabled::settings::Settings, tabled::settings::Style<(), (), tabled::settings::style::On, tabled::settings::style::On, (), tabled::settings::style::On, [tabled::settings::style::HorizontalLine; 1]>> {
+    tabled::settings::Settings::default()
+        .with(tabled::settings::Style::markdown())
 }
 
 pub fn is_valid_email(email: &str) -> bool {

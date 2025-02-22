@@ -1,11 +1,12 @@
-use std::{fmt::Display, path::PathBuf, str::FromStr};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, path::PathBuf, str::FromStr};
 
 use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use clap::{self, Args, Subcommand};
 use itertools::Itertools;
 use log::{debug, info};
-use orm::{config::Config, error::JobError, jobs::{Job, JobState, MapFmt, ModFmt, TarChoice, VmrFmt}, MySqlConn};
+use orm::{config::Config, error::JobError, jobs::{FairShare, Job, JobState, MapFmt, ModFmt, TarChoice, VmrFmt}, MySqlConn};
+use tabled::Tabled;
 
 
 /// Manage ginput jobs
@@ -428,7 +429,7 @@ pub struct PrintJobsCli {
     submitter_email: Option<String>
 }
 
-pub async fn print_jobs_table_cli(conn: &mut MySqlConn, args: PrintJobsCli) -> anyhow::Result<()> {
+pub async fn print_jobs_table_cli(conn: &mut MySqlConn, config: &Config, args: PrintJobsCli) -> anyhow::Result<()> {
     let states = if args.all {
         JobStateFilter::Any
     } else {
@@ -436,7 +437,8 @@ pub async fn print_jobs_table_cli(conn: &mut MySqlConn, args: PrintJobsCli) -> a
     };
 
     print_jobs_table(
-        conn, 
+        conn,
+        config,
         args.details,
         states,
         args.job_id.as_slice(),
@@ -447,6 +449,7 @@ pub async fn print_jobs_table_cli(conn: &mut MySqlConn, args: PrintJobsCli) -> a
 
 pub async fn print_jobs_table(
     conn: &mut MySqlConn,
+    config: &Config,
     detailed: bool,
     state_filter: JobStateFilter,
     job_ids: &[i32],
@@ -501,6 +504,9 @@ pub async fn print_jobs_table(
     if detailed {
         let mut at_least_one = false;
         for job in jobs {
+            // We could still have the fair share policies add their extra information,
+            // but since those have to do with order, right now it doesn't seem as useful
+            // for the detail view.
             println!("{}", job.verbose_display());
             at_least_one = true;
         }
@@ -508,11 +514,102 @@ pub async fn print_jobs_table(
             println!("No jobs matching given criteria.");
         }
     } else {
-        let table = orm::utils::to_std_table(jobs);
+        let jobs = jobs.collect_vec();
+        let mut table = make_jobs_table(conn, config, jobs).await?;
+        let table = table.with(orm::utils::std_table_options());
         println!("{table}");
     }
 
     Ok(())
+}
+
+async fn make_jobs_table(conn: &mut MySqlConn, config: &Config, jobs: Vec<Job>) -> anyhow::Result<tabled::Table> {
+    // This gets a little complicated, because we want to group the jobs by queue, and have each queue's fair share 
+    // object get all the jobs at once. That way it can order them correctly, and avoid having to query the database
+    // for each job. (For example, the pseudo-round robin policy can get the penalties from the database once, and just
+    // apply them to each job.) We'll probably want to return a CliTableJob or something that has (1) the order of that
+    // job in its queue as an i64 (finished jobs first with i64::MIN, then running with 0, then pending with >0 - or maybe
+    // this should be an enum?), the job itself, and any extra fields as a hashmap. This will need to use tabled::Builder
+    // to allow for arbitrary numbers of records from the hashmap.
+    //
+    // Then to interleave the queues; we implement a custom orderer that does all of one "category" (finished, running, pending)
+    // for each queue in a block. For example, print all the "std-sites" finished first, then all the "submitted" finished,
+    // then "std-sites" running, "submitted" running, "std-sites" pending, and "submitted" pending. 
+    let mut builder = tabled::builder::Builder::with_capacity(jobs.len());
+    let mut header = Job::headers();
+    let mut grouped_jobs = group_jobs_by_queue_and_state(jobs);
+
+    for (queue, queue_jobs) in grouped_jobs.iter_mut() {
+        let these_jobs = std::mem::take(&mut queue_jobs.finished);
+        make_jobs_table_helper(conn, config, queue, these_jobs, &mut header, &mut builder).await?;
+    }
+    for (queue, queue_jobs) in grouped_jobs.iter_mut() {
+        let these_jobs = std::mem::take(&mut queue_jobs.running);
+        make_jobs_table_helper(conn, config, queue, these_jobs, &mut header, &mut builder).await?;
+    }
+    for (queue, queue_jobs) in grouped_jobs.iter_mut() {
+        let these_jobs = std::mem::take(&mut queue_jobs.pending);
+        make_jobs_table_helper(conn, config, queue, these_jobs, &mut header, &mut builder).await?;
+    }
+    builder.insert_record(0, header);
+    Ok(builder.build())
+}
+
+async fn make_jobs_table_helper(
+    conn: &mut MySqlConn, config: &Config, queue: &str, these_jobs: Vec<Job>,
+    header: &mut Vec<Cow<'static, str>>, builder: &mut tabled::builder::Builder
+) -> anyhow::Result<()> {
+    let fs_policy = config.get_queue(queue)
+        .map(|q| q.fair_share_policy)
+        .unwrap_or(orm::config::FairSharePolicy::default());
+    let display_jobs = fs_policy.order_jobs_for_display(conn, queue, these_jobs).await?;
+
+    // This is ugly by necessity: `row` starts with the job fields, then we make sure it is long
+    // enough to handle all the known fields. Only then do we extend the header and row if there
+    // are new fields we haven't seen yet. We do it this way to avoid iterating through the jobs
+    // twice: when `header` is initialized, we don't know what extra fields the different queues'
+    // fair share policies might want to add.
+    for (job, extra_fields) in display_jobs {
+        let mut row = job.fields();
+        row.resize_with(header.len(), || Cow::from("".to_string()));
+        for (col, val) in extra_fields {
+            if let Some(idx) = header.iter().position(|el| el == col) {
+                row[idx] = Cow::from(val);
+            } else {
+                header.push(Cow::from(col));
+                row.push(Cow::from(val));
+            }
+        }
+        builder.push_record(row);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Default)]
+struct JobStateGroups {
+    finished: Vec<Job>,
+    running: Vec<Job>,
+    pending: Vec<Job>,
+}
+
+fn group_jobs_by_queue_and_state(jobs: Vec<Job>) -> HashMap<String, JobStateGroups> {
+    let mut grouped_jobs: HashMap<String, JobStateGroups> = HashMap::new();
+    for job in jobs {
+        let this_queue = &job.queue;
+        if !grouped_jobs.contains_key(this_queue) {
+            grouped_jobs.insert(this_queue.to_string(), JobStateGroups::default());
+        }
+
+        let state_groups = grouped_jobs.get_mut(this_queue)
+            .expect("Any queue must have its groups inserted in the hash map");
+
+        match job.state {
+            JobState::Pending => state_groups.pending.push(job),
+            JobState::Running => state_groups.running.push(job),
+            JobState::Complete | JobState::Errored | JobState::Cleaned => state_groups.finished.push(job),
+        }
+    }
+    grouped_jobs
 }
 
 

@@ -1,7 +1,7 @@
 //! The main ORM interface to the jobs queue.
 //! 
 //! 
-use std::{path::{PathBuf, Path}, str::FromStr, fmt::{Display, Debug}, process::Stdio, collections::HashSet};
+use std::{collections::{HashMap, HashSet}, fmt::{Debug, Display}, hash::RandomState, path::{Path, PathBuf}, process::Stdio, str::FromStr};
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -1625,6 +1625,7 @@ impl JobSummary {
 #[async_trait]
 pub trait FairShare {
     async fn next_job_in_queue(&self, conn: &mut MySqlConn, queue: &str) -> JobResult<Option<Job>>;
+    async fn order_jobs_for_display(&self, conn: &mut MySqlConn, queue: &str, mut jobs: Vec<Job>) -> JobResult<Vec<(Job, HashMap<&'static str, String>)>>;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1645,6 +1646,14 @@ impl FairShare for PrioritySubmitFS {
 
         Ok(job)
     }
+
+    async fn order_jobs_for_display(&self, _conn: &mut MySqlConn, _queue: &str, mut jobs: Vec<Job>) -> JobResult<Vec<(Job, HashMap<&'static str, String>)>> {
+        jobs.sort_by_key(|j| (-j.priority, j.submit_time));
+        let out: Vec<(Job, HashMap<&'static str, String>)> = jobs.into_iter()
+            .map(|j| (j, HashMap::new()))
+            .collect();
+        Ok(out)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1655,6 +1664,10 @@ pub struct PsuedoRoundRobinFS {
 impl PsuedoRoundRobinFS {
     pub fn new(time_period_days: u32) -> Self {
         Self { time_period_days }
+    }
+
+    fn cutoff_time(&self) -> NaiveDateTime {
+        chrono::Local::now().naive_local() - chrono::TimeDelta::days(self.time_period_days as i64)
     }
 }
 
@@ -1672,7 +1685,6 @@ impl FairShare for PsuedoRoundRobinFS {
         // jobs first by priority less the number of jobs from the last N days, then by submission time.
         // Note that the COALESCE in the ORDER BY statement is necessary so that any users with no recent jobs
         // correctly get 0 penalty - otherwise priority + NULL seems to produce NULL, which is ordered last!
-        let cutoff_time = chrono::Local::now().naive_local() - chrono::TimeDelta::days(self.time_period_days as i64);
         let job: Option<Job> = sqlx::query_as!(
             QJob,
             r#"
@@ -1695,7 +1707,7 @@ impl FairShare for PsuedoRoundRobinFS {
             JobState::Complete, // state 2/3 in second subquery
             JobState::Cleaned, // state 3/3 in second subquery
             queue, // queue in second subquery
-            cutoff_time // submit_time comparison in second subquery
+            self.cutoff_time() // submit_time comparison in second subquery
         ).fetch_optional(conn)
         .await?
         .map(|q| q.try_into())
@@ -1703,6 +1715,71 @@ impl FairShare for PsuedoRoundRobinFS {
         
         Ok(job)
     }
+
+    async fn order_jobs_for_display(&self, conn: &mut MySqlConn, queue: &str, mut jobs: Vec<Job>) -> JobResult<Vec<(Job, HashMap<&'static str, String>)>> {
+        let penalties = sqlx::query_as!(
+            QPseudoRRPenalty,
+            r#"
+            SELECT COUNT(*) AS fs_penalty,email FROM Jobs
+            WHERE (state = ? OR state = ? OR state = ?) AND queue = ? AND submit_time > ?
+            GROUP BY email
+            "#,
+            JobState::Running,
+            JobState::Complete,
+            JobState::Cleaned,
+            queue,
+            self.cutoff_time()
+        ).fetch_all(conn)
+        .await?;
+
+        let penalites: HashMap<String, i64, RandomState> = HashMap::from_iter(
+            penalties.into_iter()
+            .filter_map(|p| {
+                if let Some(e) = p.email {
+                    Some((e, p.fs_penalty))
+                } else {
+                    None
+                }
+            })
+        );
+
+        jobs.sort_by_cached_key(|j| {
+            let fs_pen = if let Some(ref e) = j.email {
+                penalites.get(e).map(|i| *i as i32).unwrap_or(0)
+            } else {
+                0
+            };
+
+            (-(j.priority - fs_pen), j.submit_time)
+        });
+
+        let out: Vec<(Job, HashMap<&'static str, String>)> = jobs.into_iter()
+            .map(|j| {
+                let fs_pen = if let Some(ref e) = j.email {
+                    penalites.get(e).map(|i| -*i).unwrap_or(0)
+                } else {
+                    0
+                };
+
+                let fs_pen_str = match j.state {
+                    JobState::Cleaned | JobState::Errored | JobState::Complete | JobState::Running => "n/a".to_string(),
+                    JobState::Pending => fs_pen.to_string()
+                };
+
+                let extra_fields = HashMap::from_iter([
+                    ("FS adjustment", fs_pen_str)
+                ]);
+
+                (j, extra_fields)
+            }).collect();
+
+        Ok(out)
+    }
+}
+
+struct QPseudoRRPenalty {
+    email: Option<String>,
+    fs_penalty: i64
 }
 
 pub async fn cleanup_cancelled_ginput_job(conn: &mut MySqlConn, job: &mut Job) -> JobResult<()> {
