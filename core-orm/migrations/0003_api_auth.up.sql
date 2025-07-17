@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS `auth_api_user` (
     `user_id` int(11) NOT NULL,
     `api_key` char(44) NOT NULL,
     `expires` datetime NOT NULL,
+    `nickname` text NOT NULL,
     PRIMARY KEY (`id`),
     KEY `user_id` (`user_id`),
     FOREIGN KEY (user_id) REFERENCES djopstat.auth_user (id) ON DELETE CASCADE

@@ -59,7 +59,6 @@ impl RefreshClaims {
     fn new(user_email: String) -> Self {
         let exp = chrono::Utc::now() + chrono::Days::new(365);
         // TODO: decide if I want the issuer to be set in the config
-        // TODO: generate a cryptographically random ID to serve as the API token
         Self {
             iss: "ggg2020-priors".to_string(),
             sub: user_email,
@@ -67,30 +66,63 @@ impl RefreshClaims {
             jti: generate_api_key(),
         }
     }
+
+    fn new_expire_after(user_email: String, expire_after: chrono::Duration) -> Self {
+        let exp = chrono::Utc::now() + expire_after;
+        // TODO: decide if I want the issuer to be set in the config
+        Self {
+            iss: "ggg2020-priors".to_string(),
+            sub: user_email,
+            exp: exp.timestamp(),
+            jti: generate_api_key(),
+        }
+    }
+
+    fn sql_exp(&self) -> chrono::NaiveDateTime {
+        let exp = chrono::DateTime::from_timestamp_nanos(self.exp * 1_000_000_000);
+        exp.naive_utc()
+    }
 }
 
-pub(crate) async fn generate_refresh_token(
+pub async fn generate_refresh_token(
     conn: &mut MySqlConn,
     user: User,
     nickname: &str,
     key: &EncodingKey,
+    expire_after: Option<chrono::Duration>,
 ) -> anyhow::Result<String> {
     let header = Header::default();
-    let claims = RefreshClaims::new(user.email);
+    let claims = if let Some(after) = expire_after {
+        RefreshClaims::new_expire_after(user.email, after)
+    } else {
+        RefreshClaims::new(user.email)
+    };
 
     // Insert an entry for this token into the database, then encode and return it.
     // Insert the entry in a transaction so that we only finalize the database entry
     // if the token encoding succeeds.
     let mut trans = conn.begin().await?;
-    let x = sqlx::query!(
-        "INSERT INTO auth_api_user(user_id, api_key, expires) VALUES (?,?,?)",
+    sqlx::query!(
+        "INSERT INTO auth_api_user(user_id, api_key, expires, nickname) VALUES (?,?,?,?)",
         user.id,
         claims.jti,
-        claims.exp
-    );
+        claims.sql_exp(),
+        nickname
+    )
+    .execute(&mut *trans)
+    .await
+    .with_context(|| {
+        format!("An error occurred while adding the API key '{nickname}' to the database")
+    })?;
+
     let jwt = jsonwebtoken::encode(&header, &claims, key)
         .with_context(|| "An error occurred while encoding the JWT")?;
-    todo!()
+
+    trans.commit().await.with_context(|| {
+        format!("An error occurred while committing the transaction to add API key '{nickname}'")
+    })?;
+
+    Ok(jwt)
 }
 
 pub(crate) async fn authenticate_refresh_token(token: String) -> anyhow::Result<()> {

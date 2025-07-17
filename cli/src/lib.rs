@@ -1,12 +1,13 @@
-pub mod utils;
+pub mod api;
 pub mod config;
-pub mod met_download;
+pub mod dbexport;
+pub mod email;
 pub mod input_files;
 pub mod jobs;
-pub mod email;
+pub mod met_download;
 pub mod siteinfo;
 pub mod stdsites;
-pub mod dbexport;
+pub mod utils;
 
 pub fn get_user_input(prompt: &str) -> std::io::Result<String> {
     use std::io::Write;

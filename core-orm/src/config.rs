@@ -213,6 +213,7 @@ pub struct Config {
     pub email: EmailConfig,
     #[serde(default)]
     pub timing: ServiceTimingOptions,
+    pub auth: AuthConfig,
 }
 
 impl Config {
@@ -1612,6 +1613,20 @@ impl Display for BlacklistIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::SubmitterEmail { submitter } => write!(f, "submitter email = {submitter}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    /// A path to a binary file containing a 256 bit key for use with HMAC signing
+    pub hmac_secret_file: PathBuf,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            hmac_secret_file: PathBuf::from("./hmac_secret.dat"),
         }
     }
 }

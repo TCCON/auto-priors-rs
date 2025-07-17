@@ -1,18 +1,19 @@
-use clap::{self, Parser, Subcommand, CommandFactory, Args};
+use clap::{self, Args, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
-use clap_verbosity_flag::{Verbosity,InfoLevel};
+use clap_verbosity_flag::{InfoLevel, Verbosity};
 use dotenv;
 use env_logger;
 use log::{self, debug};
 use orm;
+use tccon_priors_cli::api::{self, ApiActions, ApiCli};
 use tccon_priors_cli::config::{self, ConfigActions, ConfigCli};
+use tccon_priors_cli::dbexport::{self, DbActions, DbCli};
 use tccon_priors_cli::email::{self, EmailActions, EmailCli};
 use tccon_priors_cli::input_files::{self, InputFilesActions, InputFilesCli};
-use tccon_priors_cli::met_download::{self, MetActions, MetCli};
 use tccon_priors_cli::jobs::{self, JobActions, JobCli};
+use tccon_priors_cli::met_download::{self, MetActions, MetCli};
 use tccon_priors_cli::siteinfo::{self, StdSiteActions, StdSiteCli};
 use tccon_priors_cli::stdsites::{self, StdSiteJobActions, StdSiteJobCli};
-use tccon_priors_cli::dbexport::{self, DbActions, DbCli};
 use tokio;
 
 use tccon_priors_cli::utils;
@@ -24,7 +25,7 @@ struct Cli {
     command: Commands,
 
     #[clap(flatten)]
-    verbose: Verbosity<InfoLevel>
+    verbose: Verbosity<InfoLevel>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -38,7 +39,7 @@ enum Commands {
     Config(ConfigCli),
     Db(DbCli),
     Completions(CompletionsCli),
-
+    Api(ApiCli),
 }
 
 // Had to change rust-analyzer settings as described in https://github.com/rust-lang/rust-analyzer/issues/12450
@@ -67,246 +68,345 @@ async fn main() -> anyhow::Result<()> {
     let wget_dl = utils::WgetDownloader::new();
 
     match args.command {
-        Commands::Met(MetCli{ command: MetActions::Check(subargs) }) => {
+        Commands::Met(MetCli {
+            command: MetActions::Check(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
-            met_download::check_files_for_dates_cli(&mut conn, subargs, &loaded_config).await?;    
-        },
+            met_download::check_files_for_dates_cli(&mut conn, subargs, &loaded_config).await?;
+        }
 
-        Commands::Met(MetCli{ command: MetActions::DownloadDates(subargs) }) => {
+        Commands::Met(MetCli {
+            command: MetActions::DownloadDates(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
-            met_download::download_files_for_dates_cli(&mut conn, subargs, &loaded_config, wget_dl).await?;
-        },
+            met_download::download_files_for_dates_cli(&mut conn, subargs, &loaded_config, wget_dl)
+                .await?;
+        }
 
-        Commands::Met(MetCli{ command: MetActions::DownloadMissing(subargs) }) => {
+        Commands::Met(MetCli {
+            command: MetActions::DownloadMissing(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
-            met_download::download_missing_files_cli(&mut conn, subargs, &loaded_config, wget_dl).await?;
-        },
+            met_download::download_missing_files_cli(&mut conn, subargs, &loaded_config, wget_dl)
+                .await?;
+        }
 
-        Commands::Met(MetCli { command: MetActions::RemoveDates(subargs) }) => {
+        Commands::Met(MetCli {
+            command: MetActions::RemoveDates(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             met_download::remove_dates_cli(&mut conn, &loaded_config, subargs, wget_dl).await?;
-        },
+        }
 
-        Commands::Met(MetCli{ command: MetActions::Rescan(subargs) }) => {
+        Commands::Met(MetCli {
+            command: MetActions::Rescan(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             met_download::rescan_met_files_cli(&mut conn, subargs, &loaded_config).await?;
-        },
+        }
 
-        Commands::Met(MetCli{ command: MetActions::Report(subargs) }) => {
+        Commands::Met(MetCli {
+            command: MetActions::Report(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             met_download::report_default_met_status_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::Met(MetCli{ command: MetActions::Table(subargs) }) => {
+        Commands::Met(MetCli {
+            command: MetActions::Table(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
-            met_download::print_met_availability_table_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+            met_download::print_met_availability_table_cli(&mut conn, &loaded_config, subargs)
+                .await?;
+        }
 
-        Commands::Jobs(JobCli { commands: JobActions::Add(subargs) }) => {
+        Commands::Jobs(JobCli {
+            commands: JobActions::Add(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             jobs::add_job(&mut conn, subargs, &loaded_config).await?;
-        },
+        }
 
-        Commands::Jobs(JobCli { commands: JobActions::Delete(subargs) }) => {
+        Commands::Jobs(JobCli {
+            commands: JobActions::Delete(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             jobs::delete_job(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::Jobs(JobCli { commands: JobActions::CleanExpired(subargs) }) => {
+        Commands::Jobs(JobCli {
+            commands: JobActions::CleanExpired(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             jobs::clean_expired_jobs_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::Jobs(JobCli { commands: JobActions::CleanErrored(subargs) }) => {
+        Commands::Jobs(JobCli {
+            commands: JobActions::CleanErrored(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             jobs::clean_errored_jobs_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::Jobs(JobCli { commands: JobActions::ChangeDeleteTime(subargs) }) => {
+        Commands::Jobs(JobCli {
+            commands: JobActions::ChangeDeleteTime(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             jobs::change_jobs_delete_time_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::Jobs(JobCli { commands: JobActions::Print(subargs) }) => {
+        Commands::Jobs(JobCli {
+            commands: JobActions::Print(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             jobs::print_jobs_table_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::Jobs(JobCli { commands: JobActions::Reset(subargs) }) => {
+        Commands::Jobs(JobCli {
+            commands: JobActions::Reset(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             jobs::reset_job(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::Jobs(JobCli { commands: JobActions::SetPriority(subargs) }) => {
+        Commands::Jobs(JobCli {
+            commands: JobActions::SetPriority(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             jobs::set_job_priority_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::Jobs(JobCli { commands: JobActions::Status(subargs) }) => {
+        Commands::Jobs(JobCli {
+            commands: JobActions::Status(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             jobs::print_job_status_cli(&mut conn, subargs).await?;
         }
 
-        Commands::InputFiles(InputFilesCli { commands: InputFilesActions::Parse(subargs) }) => {
+        Commands::InputFiles(InputFilesCli {
+            commands: InputFilesActions::Parse(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
-            input_files::add_jobs_from_input_files_cli(&mut conn, subargs, &loaded_config).await?; 
-        },
+            input_files::add_jobs_from_input_files_cli(&mut conn, subargs, &loaded_config).await?;
+        }
 
-        Commands::Email( EmailCli { commands: EmailActions::Submitters(subargs) }) => {
+        Commands::Email(EmailCli {
+            commands: EmailActions::Submitters(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             email::email_past_job_submitters_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::Email( EmailCli { commands: EmailActions::PrintSubs(subargs) }) => {
+        Commands::Email(EmailCli {
+            commands: EmailActions::PrintSubs(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             email::print_submitters_emails_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::Email( EmailCli { commands: EmailActions::CurrentJobs(subargs) }) => {
+        Commands::Email(EmailCli {
+            commands: EmailActions::CurrentJobs(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             email::email_current_jobs_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::Email( EmailCli { commands: EmailActions::PastJobs(subargs) }) => {
+        Commands::Email(EmailCli {
+            commands: EmailActions::PastJobs(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             email::email_completed_jobs_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::Email( EmailCli { commands: EmailActions::StdSiteReq(subargs) }) => {
+        Commands::Email(EmailCli {
+            commands: EmailActions::StdSiteReq(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             email::email_std_site_request_info_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::Email( EmailCli { commands: EmailActions::TestEmail(subargs) }) => {
+        Commands::Email(EmailCli {
+            commands: EmailActions::TestEmail(subargs),
+        }) => {
             let loaded_config = load_config()?;
             email::send_test_email_cli(&loaded_config, subargs)?;
-        },
+        }
 
-        Commands::SiteInfo(StdSiteCli { command: StdSiteActions::AddSite(subargs) }) => {
+        Commands::SiteInfo(StdSiteCli {
+            command: StdSiteActions::AddSite(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::add_new_std_site_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::SiteInfo(StdSiteCli { command: StdSiteActions::Edit(subargs) }) => {
+        Commands::SiteInfo(StdSiteCli {
+            command: StdSiteActions::Edit(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::edit_std_site_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::SiteInfo(StdSiteCli { command: StdSiteActions::Print(subargs) }) => {
+        Commands::SiteInfo(StdSiteCli {
+            command: StdSiteActions::Print(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::print_sites_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::SiteInfo(StdSiteCli { command: StdSiteActions::AddInfo(subargs) }) => {
+        Commands::SiteInfo(StdSiteCli {
+            command: StdSiteActions::AddInfo(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             siteinfo::add_std_site_info_range_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::SiteInfo(StdSiteCli { command: StdSiteActions::SetNonop(subargs) }) => {
+        Commands::SiteInfo(StdSiteCli {
+            command: StdSiteActions::SetNonop(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             siteinfo::clear_site_info_range_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::SiteInfo(StdSiteCli { command: StdSiteActions::DeleteInfo(subargs) }) => {
+        Commands::SiteInfo(StdSiteCli {
+            command: StdSiteActions::DeleteInfo(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::delete_info_row_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::SiteInfo(StdSiteCli { command: StdSiteActions::PrintInfo(subargs) }) => {
+        Commands::SiteInfo(StdSiteCli {
+            command: StdSiteActions::PrintInfo(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::print_locations_for_site_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::UpdateTable(subargs) } ) => {
+        Commands::SiteJobs(StdSiteJobCli {
+            command: StdSiteJobActions::UpdateTable(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             stdsites::update_std_site_job_table_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::AddJobs } ) => {
+        Commands::SiteJobs(StdSiteJobCli {
+            command: StdSiteJobActions::AddJobs,
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             stdsites::add_jobs_for_pending_rows(&mut conn, &loaded_config).await?;
-        },
+        }
 
-        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::TarFiles } ) => {
+        Commands::SiteJobs(StdSiteJobCli {
+            command: StdSiteJobActions::TarFiles,
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             stdsites::make_std_site_tarballs(&mut conn, &loaded_config).await?;
-        },
+        }
 
-        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::FlagForRegen(subargs) }) => {
+        Commands::SiteJobs(StdSiteJobCli {
+            command: StdSiteJobActions::FlagForRegen(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             stdsites::flag_for_regen_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::Print(subargs) }) => {
+        Commands::SiteJobs(StdSiteJobCli {
+            command: StdSiteJobActions::Print(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             stdsites::print_std_jobs_summary_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::SubmitSpecialRun(subargs) }) => {
+        Commands::SiteJobs(StdSiteJobCli {
+            command: StdSiteJobActions::SubmitSpecialRun(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             stdsites::special_std_site_run_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::TarSpecialRun(subargs) }) => {
+        Commands::SiteJobs(StdSiteJobCli {
+            command: StdSiteJobActions::TarSpecialRun(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             stdsites::tar_special_jobs_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::SiteJobs( StdSiteJobCli { command: StdSiteJobActions::UseExistingTars(subargs) }) => {
+        Commands::SiteJobs(StdSiteJobCli {
+            command: StdSiteJobActions::UseExistingTars(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             let loaded_config = load_config()?;
             stdsites::use_existing_tars_cli(&mut conn, &loaded_config, subargs).await?;
-        },
+        }
 
-        Commands::SiteInfo( StdSiteCli { command: StdSiteActions::Json(subargs) }) => {
+        Commands::SiteInfo(StdSiteCli {
+            command: StdSiteActions::Json(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             siteinfo::site_info_json(&mut conn, &subargs).await?;
-        },
+        }
 
-        Commands::Config(ConfigCli { command: ConfigActions::Generate(subargs)}) => {
+        Commands::Config(ConfigCli {
+            command: ConfigActions::Generate(subargs),
+        }) => {
             config::generate_config_file(subargs)?;
-        },
+        }
 
-        Commands::Config(ConfigCli { command: ConfigActions::Debug }) => {
+        Commands::Config(ConfigCli {
+            command: ConfigActions::Debug,
+        }) => {
             let loaded_config = load_config()?;
             config::debug_config(loaded_config);
-        },
+        }
 
-        Commands::Db(DbCli { command: DbActions::Export(subargs)}) => {
+        Commands::Db(DbCli {
+            command: DbActions::Export(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             dbexport::export_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::Db(DbCli { command: DbActions::Import(subargs)}) => {
+        Commands::Db(DbCli {
+            command: DbActions::Import(subargs),
+        }) => {
             let mut conn = db.get_connection().await?;
             dbexport::import_cli(&mut conn, subargs).await?;
-        },
+        }
 
-        Commands::Completions(CompletionsCli { commands: CompletionsActions::Generate(subargs) }) => {
+        Commands::Completions(CompletionsCli {
+            commands: CompletionsActions::Generate(subargs),
+        }) => {
             generate_shell_completions(subargs.shell);
+        }
+
+        Commands::Api(ApiCli {
+            command: ApiActions::CreateToken(subargs),
+        }) => {
+            let loaded_config = load_config()?;
+            let mut conn = db.get_connection().await?;
+            api::generate_api_key_cli(&mut conn, &loaded_config, subargs).await?;
         }
     };
 
@@ -326,12 +426,12 @@ fn load_config() -> anyhow::Result<orm::config::Config> {
 #[derive(Debug, Args)]
 struct CompletionsCli {
     #[clap(subcommand)]
-    commands: CompletionsActions
+    commands: CompletionsActions,
 }
 
 #[derive(Debug, Subcommand)]
 enum CompletionsActions {
-    Generate(GenCompletionsCli)
+    Generate(GenCompletionsCli),
 }
 
 #[derive(Debug, Args)]
@@ -339,7 +439,7 @@ enum CompletionsActions {
 struct GenCompletionsCli {
     /// Which shell to generate for, options are "bash", "elvish", "fish",
     /// "powershell", and "zsh"
-    shell: Shell
+    shell: Shell,
 }
 
 fn generate_shell_completions(shell: Shell) {

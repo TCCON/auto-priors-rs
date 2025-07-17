@@ -1,5 +1,9 @@
+use std::{io::Read, path::Path};
+
+use anyhow::Context;
 use async_trait::async_trait;
 use axum_login::{AuthUser, AuthnBackend, UserId};
+use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -18,6 +22,20 @@ pub struct User {
 }
 
 impl User {
+    pub async fn load_from_db(
+        conn: &mut MySqlConn,
+        username: &str,
+    ) -> Result<Option<Self>, AuthError> {
+        let opt_user = sqlx::query_as!(
+            Self,
+            "SELECT id,username,email,password FROM v_auth_user WHERE username = ?",
+            username
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        Ok(opt_user)
+    }
+
     pub async fn all_associated_emails(
         &self,
         _conn: &mut MySqlConn,
@@ -100,13 +118,7 @@ impl AuthnBackend for Backend {
         creds: Self::Credentials,
     ) -> Result<Option<Self::User>, Self::Error> {
         let mut conn = self.pool.get_connection().await?;
-        let user: Option<Self::User> = sqlx::query_as!(
-            User,
-            "SELECT id,username,email,password FROM v_auth_user WHERE username = ?",
-            creds.username
-        )
-        .fetch_optional(&mut *conn)
-        .await?;
+        let user = User::load_from_db(&mut conn, &creds.username).await?;
 
         if user.is_none() {
             return Ok(None);
@@ -141,4 +153,24 @@ impl AuthnBackend for Backend {
 
         Ok(user)
     }
+}
+
+pub fn load_jwt_hmac_secret(file: &Path) -> anyhow::Result<(EncodingKey, DecodingKey)> {
+    let mut f = std::fs::File::open(file).with_context(|| {
+        format!(
+            "An error occurred opening the HMAC secrets file, {}",
+            file.display()
+        )
+    })?;
+    let mut buf = Vec::with_capacity(256 / 8);
+    f.read_to_end(&mut buf).with_context(|| {
+        format!(
+            "An error occurred reading the HMAC secrets file, {}",
+            file.display()
+        )
+    })?;
+
+    let encoding = EncodingKey::from_secret(&buf);
+    let decoding = DecodingKey::from_secret(&buf);
+    Ok((encoding, decoding))
 }
