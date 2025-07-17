@@ -1,21 +1,52 @@
 [execution]
 max_numpy_threads = 2
 hours_to_keep = 168 
-download_server = 'ftp://example/'
-download_root = ''
-output_path = ''
-std_sites_tar_output = ''
-std_sites_output_base = ''
+ftp_download_server = 'ftp://example/'
+ftp_download_root = '.'
+output_path = '.'
+std_sites_tar_output = '.'
+std_sites_output_base = '.'
+job_max_days = 30
 start_jobs_freq = 5.0
 simulation = true
-input_file_pattern = ""
+input_file_pattern = "input_file_*.txt"
+status_request_file_pattern = "ginput_status.txt"
+success_input_file_dir = "."
+failure_input_file_dir = "."
+submitted_job_queue = "submitted"
+std_site_job_queue = "standard"
+error_handler = {type = "Logging"}
 
-[execution.ginput.v1p0p6]
-entry_point_path = "./run_ginput.py"
+[execution.ginput."v1.0.6"]
+entry_point_path = "./cli/tests/common/config_target_dummy"
+type = "Script"
+
+[execution.ginput."v1.2.0"]
+entry_point_path = "./cli/tests/common/config_target_dummy"
+type = "Script"
+
+[[blacklist]]
+identifier = {type = "SubmitterEmail", submitter = "dummy@oops.com"}
+silent = false
+
+[[blacklist]]
+identifier = {type = "SubmitterEmail", submitter = "spammer@spammy.com"}
+silent = true
+
+[[blacklist]]
+identifier = {type = "SubmitterEmail", submitter = "rtfm@rtfm.edu"}
+silent = false
+reason = "don't request a grid of priors"
+
+[requests.allowed_mets.co_reprocessing]
+met_key = 'geosit'
+ginput_key = 'v1.2.0'
+start_date = "2018-01-01"
+end_date = "2018-01-08"
 
 [data]
-zgrid_file = ''
-base_vmr_file = ''
+zgrid_file = './cli/tests/common/config_target_dummy'
+base_vmr_file = './cli/tests/common/config_target_dummy'
 
 [[data.download.geosfpit]]
 product = "geosfpit"
@@ -24,7 +55,10 @@ levels = "eta"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NVASM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180 
 earliest_date = "2000-01-01"
-download_dir = ''
+download_dir = './cli/tests/common/config_met_dl_dummy/Nv'
+days_latency = 1
+ginput_met_key = 'fpit-eta'
+ginput_output_subdir = 'fpit'
 
 [[data.download.geosfpit]]
 product = "geosfpit"
@@ -33,7 +67,10 @@ levels = "surf"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NXASM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180 
 earliest_date = "2000-01-01"
-download_dir = ''
+download_dir = './cli/tests/common/config_met_dl_dummy/Nx'
+days_latency = 1
+ginput_met_key = 'fpit-eta'
+ginput_output_subdir = 'fpit'
 
 [[data.download.geosfpit]]
 product = "geosfpit"
@@ -42,7 +79,10 @@ levels = "eta"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NVCHM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180 
 earliest_date = "2000-01-01"
-download_dir = ''
+download_dir = './cli/tests/common/config_met_dl_dummy/Nv'
+days_latency = 1
+ginput_met_key = 'fpit-eta'
+ginput_output_subdir = 'fpit'
 
 
 [[data.download.geosit]]
@@ -52,7 +92,10 @@ levels = "eta"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_ASM_I3_L_V72.5.29.4/%Y/%j/.hidden/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
 file_freq_min = 180 
 earliest_date = "2000-01-01"
-download_dir = ''
+download_dir = './cli/tests/common/config_met_dl_dummy/Nv'
+days_latency = 1
+ginput_met_key = 'it-eta'
+ginput_output_subdir = 'it'
 
 [[data.download.geosit]]
 product = "geosit"
@@ -61,7 +104,10 @@ levels = "surf"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_ASM_I1_L_SLV.5.29.4/%T/%j/.hidden/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
 file_freq_min = 180 
 earliest_date = "2000-01-01"
-download_dir = ''
+download_dir = './cli/tests/common/config_met_dl_dummy/Nx'
+days_latency = 1
+ginput_met_key = 'it-eta'
+ginput_output_subdir = 'it'
 
 [[data.download.geosit]]
 product = "geosit"
@@ -70,8 +116,23 @@ levels = "eta"
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_CHM_I3_L_V72.5.29.4/%Y/%j/.hidden/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
 file_freq_min = 180 
 earliest_date = "2000-01-01"
-download_dir = ''
+download_dir = './cli/tests/common/config_met_dl_dummy/Nv'
+days_latency = 1
+ginput_met_key = 'it-eta'
+ginput_output_subdir = 'it'
 
+
+[[data.download.geosfp]]
+product = "geosfp"
+data_type = "met"
+levels = "eta"
+url_pattern = "https://portal.nccs.nasa.gov/datashare/gmao_ops/pub/fp/das/Y%Y/M%m/D%d/GEOS.fp.asm.inst3_3d_asm_Nv.%Y%m%d_%H%M.V01.nc4"
+file_freq_min = 180 
+earliest_date = "2000-01-01"
+download_dir = './cli/tests/common/config_met_dl_dummy/Nv'
+days_latency = 1
+ginput_met_key = 'fp-eta'
+ginput_output_subdir = 'fp'
 
 [[data.download.geosfp]]
 product = "geosfp"
@@ -80,7 +141,22 @@ levels = "surf"
 url_pattern = "https://portal.nccs.nasa.gov/datashare/gmao_ops/pub/fp/das/Y%Y/M%m/D%d/GEOS.fp.asm.inst3_2d_asm_Nx.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180 
 earliest_date = "2000-01-01"
-download_dir = ''
+download_dir = './cli/tests/common/config_met_dl_dummy/Nx'
+days_latency = 1
+ginput_met_key = 'fp-eta'
+ginput_output_subdir = 'fp'
+
+[[data.download.geosfp]]
+product = "geosfp"
+data_type = "chm"
+levels = "eta"
+url_pattern = "https://portal.nccs.nasa.gov/datashare/gmao_ops/pub/fp/das/Y%Y/M%m/D%d/GEOS.fp.asm.inst3_3d_chm_Nv.%Y%m%d_%H%M.V01.nc4"
+file_freq_min = 180 
+earliest_date = "2000-01-01"
+download_dir = './cli/tests/common/config_met_dl_dummy/Nv'
+days_latency = 1
+ginput_met_key = 'fp-eta'
+ginput_output_subdir = 'fp'
 
 
 [[default_options]]
@@ -90,10 +166,26 @@ met = "geosfpit"
 
 [[default_options]]
 start_date = "2023-06-01"
+end_date = "2100-01-01"
 ginput = "v1.0.6"
 met = "geosit"
 
-[admin]
-soft_job_limit = 100 
-hard_job_limit = 100 
-acknowledgement_message = 'Hi there!'
+[email]
+from_address = "jobs@test.net"
+admin_emails = ["admin@test.net"]
+backend = {type = "Testing"}
+extra_submitters = []
+
+[timing]
+disable_met_download = true
+met_download_hours = 6
+disable_job = true
+job_start_seconds = 60
+status_report_seconds = 15
+lut_regen_days = 1
+delete_expired_jobs_hours = 24
+disable_std_site_gen = true
+std_site_gen_hours = 12
+std_site_tar_minutes = 30
+disable_reports = true
+std_site_json_hours = 1

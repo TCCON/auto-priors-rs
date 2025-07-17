@@ -4,32 +4,33 @@ use std::fs::File;
 use std::io::{Write, Read};
 use std::path::{PathBuf, Path};
 use anyhow::Context;
-use orm::{self, MySqlConn, PoolWrapper};
+use orm::{self, MySqlConn};
 use orm::met::MetFile;
 use tccon_priors_cli::utils::Downloader;
 
-static TEST_DB_ENV_VARS: [&'static str; 2] = ["PRIORS_TEST_DATABASE_URL", "TEST_DATABASE_URL"];
 static TEST_FILE_DIR_VAR: &'static str = "PRIORS_TEST_FILE_ROOT";
 pub const TEST_MET_KEY: &'static str = "geosfpit";
 
-pub(crate) fn make_dummy_config(download_root: PathBuf) -> anyhow::Result<orm::config::Config> {
+pub(crate) fn make_dummy_config(scratch_root: PathBuf) -> anyhow::Result<orm::config::Config> {
     let s = include_str!("test_config.toml");
     let mut cfg: orm::config::Config = toml::from_slice(s.as_bytes())?;
 
-    cfg.execution.ftp_download_root = download_root.clone();
+    cfg.execution.ftp_download_root = scratch_root.clone();
     for (_, dl_cfgs) in cfg.data.download.iter_mut() {
         for dl_cfg in dl_cfgs.iter_mut() {
-            dl_cfg.download_dir = download_root.join(dl_cfg.levels.standard_subdir());
+            dl_cfg.download_dir = scratch_root.join(dl_cfg.levels.standard_subdir());
         }
     }
 
+    cfg.execution.success_input_file_dir = scratch_root.join("input_success");
+    cfg.execution.failure_input_file_dir = scratch_root.join("input_failure");
+    
     Ok(cfg)
 }
 
 pub(crate) fn make_dummy_config_with_temp_dirs(prefix: &str) -> anyhow::Result<(orm::config::Config, TestRootDir)> {
     let test_dir = TestRootDir::new(prefix)
         .with_context(|| "Failed to make parent temporary directory")?;
-    dbg!(&test_dir);
     let cfg = make_dummy_config(test_dir.path().to_owned())?;
     for (_, dl_cfgs) in cfg.data.download.iter() {
         for dl_cfg in dl_cfgs.iter() {
@@ -37,45 +38,13 @@ pub(crate) fn make_dummy_config_with_temp_dirs(prefix: &str) -> anyhow::Result<(
                 .with_context(|| "Failed to create a subdirectory for one of the file sets to download")?;
         }
     }
+
+    std::fs::create_dir_all(&cfg.execution.success_input_file_dir)
+        .with_context(|| "Failed to create the subdirectory for successful input files to be moved to")?;
+    std::fs::create_dir_all(&cfg.execution.failure_input_file_dir)
+        .with_context(|| "Failed to create the subdirectory for failed input files to be moved to")?;
     
     Ok((cfg, test_dir))
-}
-
-pub(crate) fn get_test_db_url() -> anyhow::Result<String> {
-    // First, try the regular environmental variables
-    for key in TEST_DB_ENV_VARS {
-        if let Ok(val) = env::var(key) {
-            log::debug!("Using database URL {val} from the environmental variable {key}");
-            return Ok(val)
-        }
-    }
-
-    // If we can't find the URL in existing environmental variables, try using dotenv.
-    let env_path = dotenv::dotenv().context("No database URL defined in existing environmental variables, and no .env file found.")?;
-    for key in TEST_DB_ENV_VARS {
-        if let Ok(val) = dotenv::var(key) {
-            let epd = env_path.display();
-            log::debug!("Using database URL {val} from the variable {key} in {epd}");
-            return Ok(val)
-        }
-    }
-
-    return Err(anyhow::anyhow!("Unable to find database URL."))
-}
-
-pub(crate) async fn open_test_database(reset_db: bool) -> anyhow::Result<PoolWrapper> {
-    
-    let db_url = get_test_db_url()?;
-    println!("db_url = {db_url}");
-    let pool = orm::get_database_pool(Some(db_url)).await?;
-
-    if reset_db {
-        let mut conn = pool.get_connection().await?;
-        orm::unapply_migrations(&mut conn, 0).await?;
-        orm::apply_migrations(&mut conn).await?;
-    }
-
-    Ok(pool)
 }
 
 /// Execute a multi-statement SQL file on the database behind a connections.
@@ -119,15 +88,22 @@ macro_rules! multiline_sql {
 /// the database. If you need control over how the connection to the database is
 /// 
 /// # Panics
-/// In addition to the 
+/// In addition to the panics that occur for [`multiline_sql!`], this will panic if
+/// it could not open or connect to the test database.
+///
+/// # Returns
+/// Returns a connection to the database which can be used to run further queries
+/// and a [`TestDb`] instance. **Note:** it is intended that this [`TestDb`] value
+/// be kept alive through the duration of the test. Because it holds the test container
+/// instance, when it is dropped, the container should be cleaned up.
 #[macro_export]
 macro_rules! multiline_sql_init {
     ($path:literal) => {
         {
-            let pool = common::open_test_database(true).await.expect("Failed to open test database");
+            let (pool, test_db) = orm::test_utils::open_test_database(true).await.expect("Failed to open test database");
             let mut conn = pool.get_connection().await.expect("Failed to acquire connection to database");
             multiline_sql!($path, conn);
-            conn
+            (conn, test_db)
         }
     };
 }

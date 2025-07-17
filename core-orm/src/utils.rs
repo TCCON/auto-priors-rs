@@ -185,11 +185,12 @@ impl DateIterator {
     /// # Example
     /// ```
     /// use chrono::NaiveDate;
+    /// use tccon_priors_orm::utils::DateIterator;
     /// 
     /// let ranges = vec![
-    ///     (NaiveDate::from_ymd_opt(2010,1,1).unwrap(), NaiveDate::from_ymd_opt(2010,1,3)),
-    ///     (NaiveDate::from_ymd_opt(2010,1,30).unwrap(), NaiveDate::from_ymd_opt(2010,2,2)),
-    /// ]
+    ///     (NaiveDate::from_ymd_opt(2010,1,1).unwrap(), NaiveDate::from_ymd_opt(2010,1,3).unwrap()),
+    ///     (NaiveDate::from_ymd_opt(2010,1,30).unwrap(), NaiveDate::from_ymd_opt(2010,2,2).unwrap()),
+    /// ];
     /// 
     /// let iter_dates: Vec<_> = DateIterator::new(ranges).collect();
     /// let expected_dates = vec![
@@ -335,6 +336,32 @@ pub fn softwrap<R: std::io::BufRead>(reader: R, buf: &mut String) -> std::io::Re
     Ok(())
 }
 
+pub enum BuilderValue<T> {
+    Unset,
+    Invalid,
+    Set(T)
+}
+
+impl<T> BuilderValue<T> {
+    pub fn is_unset(&self) -> bool {
+        if let Self::Unset = self { true } else { false }
+    }
+
+    pub fn is_invalid(&self) -> bool {
+        if let Self::Invalid = self { true } else { false }
+    }
+
+    pub fn is_set(&self) -> bool {
+        if let Self::Set(_) = self { true } else { false }
+    }
+}
+
+impl<T> Default for BuilderValue<T> {
+    fn default() -> Self {
+        Self::Unset
+    }
+}
+
 #[derive(Debug)]
 pub struct ParseInputBoolError(String);
 
@@ -364,11 +391,14 @@ where
     I: IntoIterator<Item = T>,
     T: tabled::Tabled
 {
-    let table_config = tabled::settings::Settings::default()
-        .with(tabled::settings::Style::markdown());
     tabled::Table::new(iter)
-        .with(table_config)
+        .with(std_table_options())
         .to_string()
+}
+
+pub fn std_table_options() -> tabled::settings::Settings<tabled::settings::Settings, tabled::settings::Style<(), (), tabled::settings::style::On, tabled::settings::style::On, (), tabled::settings::style::On, [tabled::settings::style::HorizontalLine; 1]>> {
+    tabled::settings::Settings::default()
+        .with(tabled::settings::Style::markdown())
 }
 
 pub fn is_valid_email(email: &str) -> bool {

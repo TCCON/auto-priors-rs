@@ -1,35 +1,62 @@
-use std::{path::{PathBuf, Path}, ffi::OsStr, io::{BufRead, Read}, str::FromStr, collections::HashSet, fmt::Display};
+use std::{
+    collections::HashSet,
+    ffi::OsStr,
+    fmt::Display,
+    io::{BufRead, Read},
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use anyhow::Context;
-use chrono::{NaiveDate, DateTime, Local, Duration};
+use chrono::{DateTime, Duration, Local, NaiveDate};
 use itertools::Itertools;
-use log::{debug, info, warn, error};
+use log::{debug, error, info, warn};
 
-use crate::{config::{BlacklistEntry, BlacklistIdentifier, Config}, jobs::{MapFmt, ModFmt, VmrFmt}, met::CheckMetAvailableError, utils};
+use crate::{
+    config::{BlacklistEntry, BlacklistIdentifier, Config},
+    error::JobAddError,
+    jobs::{MapFmt, ModFmt, VmrFmt},
+    met::CheckMetAvailableError,
+    utils::{self, BuilderValue},
+};
 
 struct FailedParsingError {
     reasons: Vec<String>,
     input_file: PathBuf,
-    email: Option<String>
+    email: Option<String>,
 }
 
 impl FailedParsingError {
     fn email_body(&self) -> String {
-        let file_basename = self.input_file.file_name().unwrap_or(OsStr::new("?")).to_string_lossy();
+        let file_basename = self
+            .input_file
+            .file_name()
+            .unwrap_or(OsStr::new("?"))
+            .to_string_lossy();
         let problems_list = self.problems_list("  * ", "\n");
-        return format!("Error parsing input file {file_basename}. Problem(s) were:\n\n{problems_list}");
-
+        return format!(
+            "Error parsing input file {file_basename}. Problem(s) were:\n\n{problems_list}"
+        );
     }
 
     fn problems_list(&self, prefix: &str, join: &str) -> String {
         let full_join = String::from_iter([join, prefix]);
         let problems = self.reasons.join(&full_join);
-        return format!("{prefix}{problems}")
+        return format!("{prefix}{problems}");
     }
 
-    fn new_for_database_error(input_file: PathBuf, email: String, nfailures: usize, njobs: usize) -> Self {
+    fn new_for_database_error(
+        input_file: PathBuf,
+        email: String,
+        nfailures: usize,
+        njobs: usize,
+    ) -> Self {
         let reasons = vec![format!("There was an error while adding this request to the database ({nfailures} of {njobs} component jobs failed). You may try submitting this job again; if it continues to fail, please report this problem")];
-        Self { reasons: reasons, input_file, email: Some(email) }
+        Self {
+            reasons: reasons,
+            input_file,
+            email: Some(email),
+        }
     }
 }
 
@@ -38,8 +65,8 @@ impl From<std::io::Error> for FailedParsingError {
         Self {
             reasons: vec![format!("Could not open file due to: {e}")],
             input_file: PathBuf::new(),
-            email: None
-         }
+            email: None,
+        }
     }
 }
 
@@ -47,7 +74,7 @@ impl From<std::io::Error> for FailedParsingError {
 enum MissingMetError {
     CouldNotCheck(anyhow::Error),
     MissingDates(Vec<NaiveDate>),
-    UnsupportedDate(Vec<NaiveDate>)
+    UnsupportedDate(Vec<NaiveDate>),
 }
 
 impl MissingMetError {
@@ -56,10 +83,10 @@ impl MissingMetError {
             MissingMetError::CouldNotCheck(_) => {
                 // don't use Display impl here; don't want to expose inner errors to an email
                 "There was an error while verifying that the met data required for your request. Please try resubmitting. If the error persists, contact the adminstrators of the GGG priors automation.".to_string()
-            },
+            }
             MissingMetError::MissingDates(_) => {
                 format!("Your request could not be fulfilled: {self}. If you believe this should not be the case, contact the GGG priors automation administrators.")
-            },
+            }
             MissingMetError::UnsupportedDate(_) => {
                 format!("Your request could not be fulfilled: {self}. Please review the TCCON wiki (https://tccon-wiki.caltech.edu/Main/ObtainingGinputData) for supported date ranges.")
             }
@@ -76,12 +103,18 @@ impl From<anyhow::Error> for MissingMetError {
 impl Display for MissingMetError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MissingMetError::CouldNotCheck(e) => write!(f, "error occurred while checking met availability for job request: {e}"),
+            MissingMetError::CouldNotCheck(e) => write!(
+                f,
+                "error occurred while checking met availability for job request: {e}"
+            ),
             MissingMetError::MissingDates(dates) => {
                 let n = dates.len();
                 let date_str = dates.iter().map(|d| d.to_string()).join(", ");
-                write!(f, "met data was unavailable for {n} of the dates requested: {date_str}")
-            },
+                write!(
+                    f,
+                    "met data was unavailable for {n} of the dates requested: {date_str}"
+                )
+            }
             MissingMetError::UnsupportedDate(dates) => {
                 let n = dates.len();
                 let date_str = dates.iter().map(|d| d.to_string()).join(", ");
@@ -113,7 +146,11 @@ pub struct InputJob {
 }
 
 impl InputJob {
-    async fn from_file(input_file: &Path, conn: &mut crate::MySqlConn, config: &Config) -> Result<Self, FailedParsingError> {
+    async fn from_file(
+        input_file: &Path,
+        conn: &mut crate::MySqlConn,
+        config: &Config,
+    ) -> Result<Self, FailedParsingError> {
         let f = std::fs::File::open(input_file)?;
 
         let mut builder = InputJobBuilder::default();
@@ -126,10 +163,10 @@ impl InputJob {
             if let Ok(line) = line {
                 let res = if let Some((key, value)) = line.split_once('=') {
                     builder.set_field_in_place(key, value.trim())
-                }else{
+                } else {
                     builder.set_field_in_place(field, line.trim())
                 };
-                
+
                 if let Err(cause) = res {
                     let i = line_idx + 1;
                     problems.push(format!("Line {i}: {cause}"))
@@ -146,7 +183,7 @@ impl InputJob {
                 if problems.len() == 0 {
                     return Ok(input_job);
                 }
-            },
+            }
             Err(errors) => {
                 for field in errors {
                     problems.push(field);
@@ -154,11 +191,11 @@ impl InputJob {
             }
         }
 
-        return Err(FailedParsingError{
+        return Err(FailedParsingError {
             reasons: problems,
             input_file: input_file.to_owned(),
-            email: email
-        })
+            email: email,
+        });
     }
 
     fn field_order() -> Vec<&'static str> {
@@ -174,8 +211,8 @@ impl InputJob {
             "map_fmt",
             "is_egi",
             "reanalysis",
-            "confirmation"
-        ]
+            "confirmation",
+        ];
     }
 
     fn get_field_as_string(&self, field: &str) -> Option<String> {
@@ -183,16 +220,34 @@ impl InputJob {
             "site_id" => self.site_id.join(", "),
             "start_date" => self.start_date.to_string(),
             "end_date" => self.end_date.to_string(),
-            "lat" => self.lat.iter().map(|v| v.map(|x| format!("{x:.3}")).unwrap_or_else(|| "(default)".to_string())).join(", "),
-            "lon" => self.lon.iter().map(|v| v.map(|x| format!("{x:.3}")).unwrap_or_else(|| "(default)".to_string())).join(", "),
+            "lat" => self
+                .lat
+                .iter()
+                .map(|v| {
+                    v.map(|x| format!("{x:.3}"))
+                        .unwrap_or_else(|| "(default)".to_string())
+                })
+                .join(", "),
+            "lon" => self
+                .lon
+                .iter()
+                .map(|v| {
+                    v.map(|x| format!("{x:.3}"))
+                        .unwrap_or_else(|| "(default)".to_string())
+                })
+                .join(", "),
             "email" => self.email.clone(),
             "mod_fmt" => self.mod_fmt.to_string(),
             "vmr_fmt" => self.vmr_fmt.to_string(),
             "map_fmt" => self.map_fmt.to_string(),
             "is_egi" => self.is_egi.to_string(),
-            "reanalysis" => self.reanalysis.as_deref().map(|s| s.to_string()).unwrap_or_else(|| "(default)".to_string()),
+            "reanalysis" => self
+                .reanalysis
+                .as_deref()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "(default)".to_string()),
             "confirmation" => self.confirmation.to_string(),
-            _ => return None
+            _ => return None,
         };
 
         Some(s)
@@ -202,8 +257,12 @@ impl InputJob {
 impl Display for InputJob {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i, field) in Self::field_order().iter().enumerate() {
-            let val = self.get_field_as_string(field).unwrap_or_else(|| "?".to_string());
-            if i > 0 { writeln!(f, "")?; }
+            let val = self
+                .get_field_as_string(field)
+                .unwrap_or_else(|| "?".to_string());
+            if i > 0 {
+                writeln!(f, "")?;
+            }
             write!(f, "{field} = {val}")?;
         }
         Ok(())
@@ -212,7 +271,7 @@ impl Display for InputJob {
 
 #[derive(Default)]
 pub struct InputJobBuilder {
-    site_id: Option<Vec<String>>,
+    site_id: utils::BuilderValue<Vec<String>>,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
     lat: Option<Vec<Option<f32>>>,
@@ -227,7 +286,11 @@ pub struct InputJobBuilder {
 }
 
 impl InputJobBuilder {
-    pub async fn finalize(self, conn: &mut crate::MySqlConn, config: &Config) -> Result<InputJob, Vec<String>> {
+    pub async fn finalize(
+        self,
+        conn: &mut crate::MySqlConn,
+        config: &Config,
+    ) -> Result<InputJob, Vec<String>> {
         let mut errors = vec![];
         let mut site_id_missing = false;
 
@@ -236,24 +299,34 @@ impl InputJobBuilder {
             Err(msg) => {
                 errors.push(msg);
                 (None, None)
-            },
+            }
         };
 
-        // Validate the site IDs - this field must be present and all site IDs must be two characters
-        // We allow for the lat & lon to be omitted in some cases; this is checked by expand_site_lat_lon.
-        let site_ids = self.site_id.unwrap_or_else(|| {
-            errors.push("missing field site_id".to_owned());
-            site_id_missing = true;
-            return vec![]
-        });
+        let site_ids = match self.site_id {
+            utils::BuilderValue::Unset => {
+                errors.push("missing field site_id".to_string());
+                site_id_missing = true;
+                vec![]
+            }
+            utils::BuilderValue::Invalid => {
+                errors.push("site ID was not valid".to_string());
+                site_id_missing = true;
+                vec![]
+            }
+            utils::BuilderValue::Set(sids) => sids,
+        };
 
         if site_ids.iter().any(|sid| sid.len() != 2) {
             errors.push("site IDs be all be two characters".to_string());
         }
 
-        let (site_ids, lats, lons) = if site_id_missing{
-            (vec![], self.lat.unwrap_or_default(), self.lon.unwrap_or_default())
-        }else{
+        let (site_ids, lats, lons) = if site_id_missing {
+            (
+                vec![],
+                self.lat.unwrap_or_default(),
+                self.lon.unwrap_or_default(),
+            )
+        } else {
             let tmp = crate::jobs::Job::expand_site_lat_lon(site_ids, self.lat, self.lon);
             match tmp {
                 Ok(t) => t,
@@ -267,13 +340,17 @@ impl InputJobBuilder {
         // Verify that the lats and lons are in the valid ranges.
         for (sid, lat) in site_ids.iter().zip(lats.iter()) {
             if lat.is_some_and(|v| v < -90.0 || v > 90.0) {
-                errors.push(format!("Latitude for site {sid} is outside the allowed range of -90 to +90"));
+                errors.push(format!(
+                    "Latitude for site {sid} is outside the allowed range of -90 to +90"
+                ));
             }
         }
 
         for (sid, lon) in site_ids.iter().zip(lons.iter()) {
             if lon.is_some_and(|v| v < -180.0 || v > 180.0) {
-                errors.push(format!("Longitude for site {sid} is outside the allowed range of -180 to +180"));
+                errors.push(format!(
+                    "Longitude for site {sid} is outside the allowed range of -180 to +180"
+                ));
             }
         }
 
@@ -283,12 +360,20 @@ impl InputJobBuilder {
             String::new()
         });
 
-        let user = if email.is_empty() { "UNKNOWN USER" } else { &email };
+        let user = if email.is_empty() {
+            "UNKNOWN USER"
+        } else {
+            &email
+        };
 
-        let (start_date, end_date) = if let (Some(start), Some(end)) = (self.start_date, self.end_date) {
+        let (start_date, end_date) = if let (Some(start), Some(end)) =
+            (self.start_date, self.end_date)
+        {
             // Check that the request asks for at least one day
             if start >= end {
-                errors.push(format!("End date ({end}) must be at least one day after the start date ({start})"));
+                errors.push(format!(
+                    "End date ({end}) must be at least one day after the start date ({start})"
+                ));
             }
 
             // Check that the user's job isn't too long, unless missing start/end dates was one of the problems
@@ -310,7 +395,7 @@ impl InputJobBuilder {
             (start, end)
         } else {
             let sd = self.start_date.unwrap_or_else(|| {
-                errors.push("missing field start_date".to_owned()); 
+                errors.push("missing field start_date".to_owned());
                 NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
             });
 
@@ -323,7 +408,7 @@ impl InputJobBuilder {
         };
 
         if !errors.is_empty() {
-            return Err(errors)
+            return Err(errors);
         }
 
         let input_job = InputJob {
@@ -340,19 +425,28 @@ impl InputJobBuilder {
             confirmation: self.confirmation.unwrap_or(true),
             reanalysis: self.reanalysis,
             met_key: met_key,
-            ginput_key: ginput_key
+            ginput_key: ginput_key,
         };
 
         Ok(input_job)
     }
 
-    fn get_met_and_ginput_keys(&self, config: &Config) -> Result<(Option<String>, Option<String>), String> {
+    fn get_met_and_ginput_keys(
+        &self,
+        config: &Config,
+    ) -> Result<(Option<String>, Option<String>), String> {
         // Check if the user requested a met other than the default and, if so, whether
         // it is a valid key and if the dates are okay.
         if let Some(key) = self.reanalysis.as_deref() {
-            match config.requests.check_met_request(key, self.start_date, self.end_date) {
-                Ok(met) => Ok((Some(met.met_key.to_string()), Some(met.ginput_key.to_string()))),
-                Err(msg) => Err(msg)
+            match config
+                .requests
+                .check_met_request(key, self.start_date, self.end_date)
+            {
+                Ok(met) => Ok((
+                    Some(met.met_key.to_string()),
+                    Some(met.ginput_key.to_string()),
+                )),
+                Err(msg) => Err(msg),
             }
         } else {
             Ok((None, None))
@@ -361,7 +455,7 @@ impl InputJobBuilder {
 
     fn is_field_set(&self, field: &str) -> bool {
         match field {
-            "site_id" => return self.site_id.is_some(),
+            "site_id" => return !self.site_id.is_unset(),
             "start_date" => return self.start_date.is_some(),
             "end_date" => return self.end_date.is_some(),
             "lat" => return self.lat.is_some(),
@@ -372,19 +466,26 @@ impl InputJobBuilder {
             "map_fmt" => return self.map_fmt.is_some(),
             "confirmation" => return self.confirmation.is_some(),
             "reanalysis" => return self.reanalysis.is_some(),
-            _ => return false
+            _ => return false,
         }
     }
 
     fn site_id(&mut self, sid: &str) -> Result<(), String> {
-        let site_ids = crate::jobs::Job::parse_site_id_str(sid)
-            .map_err(|e| e.to_string())?;
-        self.site_id = Some(site_ids);
-        Ok(())
+        match crate::jobs::Job::parse_site_id_str(sid) {
+            Ok(sids) => {
+                self.site_id = utils::BuilderValue::Set(sids);
+                Ok(())
+            }
+            Err(ref e @ crate::error::JobError::CannotParseSiteId(_, _)) => {
+                self.site_id = utils::BuilderValue::Invalid;
+                Err(e.to_string())
+            }
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     pub fn with_site_id(&mut self, sid: Vec<String>) {
-        self.site_id = Some(sid);
+        self.site_id = BuilderValue::Set(sid);
         ()
     }
 
@@ -393,10 +494,8 @@ impl InputJobBuilder {
             Ok(start_date) => {
                 self.with_start_date(start_date);
                 Ok(())
-            },
-            Err(e) => {
-                Err(format!("{e}"))
             }
+            Err(e) => Err(format!("{e}")),
         }
     }
 
@@ -409,10 +508,8 @@ impl InputJobBuilder {
             Ok(end_date) => {
                 self.with_end_date(end_date);
                 Ok(())
-            },
-            Err(e) => {
-                Err(format!("{e}"))
             }
+            Err(e) => Err(format!("{e}")),
         }
     }
 
@@ -424,7 +521,7 @@ impl InputJobBuilder {
         debug!("Parsing lat string: {valstr}");
         self.lat = match crate::jobs::Job::parse_lat_str(valstr) {
             Ok(v) => v,
-            Err(e) => return Err(format!("{e}"))
+            Err(e) => return Err(format!("{e}")),
         };
         Ok(())
     }
@@ -437,7 +534,7 @@ impl InputJobBuilder {
         debug!("Parsing lon string: {valstr}");
         self.lon = match crate::jobs::Job::parse_lon_str(valstr) {
             Ok(v) => v,
-            Err(e) => return Err(format!("{e}"))
+            Err(e) => return Err(format!("{e}")),
         };
         Ok(())
     }
@@ -448,7 +545,7 @@ impl InputJobBuilder {
 
     fn email(&mut self, valstr: &str) -> Result<(), String> {
         self.email = Some(valstr.to_owned());
-        return Ok(())
+        return Ok(());
     }
 
     pub fn with_email(&mut self, email: String) {
@@ -458,7 +555,7 @@ impl InputJobBuilder {
     fn mod_fmt(&mut self, valstr: &str) -> Result<(), String> {
         let the_fmt = match ModFmt::from_str(valstr) {
             Ok(v) => v,
-            Err(e) => return Err(format!("{e}"))
+            Err(e) => return Err(format!("{e}")),
         };
         self.mod_fmt = Some(the_fmt);
         Ok(())
@@ -471,7 +568,7 @@ impl InputJobBuilder {
     fn vmr_fmt(&mut self, valstr: &str) -> Result<(), String> {
         let the_fmt = match VmrFmt::from_str(valstr) {
             Ok(v) => v,
-            Err(e) => return Err(format!("{e}"))
+            Err(e) => return Err(format!("{e}")),
         };
         self.vmr_fmt = Some(the_fmt);
         Ok(())
@@ -484,7 +581,7 @@ impl InputJobBuilder {
     fn map_fmt(&mut self, valstr: &str) -> Result<(), String> {
         let the_fmt = match MapFmt::from_str(valstr) {
             Ok(v) => v,
-            Err(e) => return Err(format!("{e}"))
+            Err(e) => return Err(format!("{e}")),
         };
         self.map_fmt = Some(the_fmt);
         Ok(())
@@ -510,7 +607,7 @@ impl InputJobBuilder {
     fn confirmation(&mut self, valstr: &str) -> Result<(), String> {
         let conf = match crate::utils::parse_bool_str(valstr) {
             Ok(v) => v,
-            Err(e) => return Err(format!("{e}"))
+            Err(e) => return Err(format!("{e}")),
         };
         self.confirmation = Some(conf);
         Ok(())
@@ -532,7 +629,7 @@ impl InputJobBuilder {
 
     fn set_field_in_place(&mut self, field: &str, value: &str) -> Result<(), String> {
         if self.is_field_set(field) {
-            return Err(format!("{field} given multiple times"))
+            return Err(format!("{field} given multiple times"));
         }
 
         match field {
@@ -548,31 +645,29 @@ impl InputJobBuilder {
             "is_egi" => self.is_egi(value),
             "confirmation" => self.confirmation(value),
             "reanalysis" => self.reanalysis(value),
-            _ => Err(format!("Unknown field '{field}'"))
+            _ => Err(format!("Unknown field '{field}'")),
         }?;
 
         Ok(())
     }
 }
 
-
 pub async fn add_jobs_from_input_files(
-    conn: &mut crate::MySqlConn, 
+    conn: &mut crate::MySqlConn,
     config: &Config,
     input_files: &[PathBuf],
     save_dir: &Path,
-    mover: &mut InputFileCleanupHandler
+    mover: &mut InputFileCleanupHandler,
 ) -> anyhow::Result<()> {
     let mut jobs = vec![];
     let mut successful_input_files = vec![];
     let mut unmoved_input_file_errors = vec![];
 
-    // This ended up being more complicated than I expected: there is a chance that copying or deleting the input file can fail. 
+    // This ended up being more complicated than I expected: there is a chance that copying or deleting the input file can fail.
     // If it gets deleted but not copied, that's one thing, but the real problem comes if a file cannot be deleted. In that case,
     // we might end up parsing the input file over and over because it just sits there. Hence this convoluted logic, which checks
     for input_file in input_files {
-
-        // This is the key: the first time we encounter a file, as long as we can read it, we will try to 
+        // This is the key: the first time we encounter a file, as long as we can read it, we will try to
         // parse it. Then, if the move fails, it gets added to a list of files that failed to copy or delete
         if mover.file_previously_errored(&input_file) {
             warn!("Skipping input file {}, it looks like this was handled already but could not be moved for some reason", input_file.display());
@@ -583,43 +678,52 @@ pub async fn add_jobs_from_input_files(
             Ok(job) => {
                 jobs.push(job);
                 successful_input_files.push(input_file);
-                
-            },
+            }
             Err(e) => {
                 email_user_for_failed_parsing(e, config);
 
                 // Move failed files now; for successful file, we need the job number so that has to happen later
                 let now = chrono::Local::now();
-                let dest_file = config.execution.failure_input_file_dir.join(
-                    format!("failed_input_file_{}.txt", now.format("%Y-%m-%d %H:%M:%S.%f"))
-                );
+                let dest_file = config.execution.failure_input_file_dir.join(format!(
+                    "failed_input_file_{}.txt",
+                    now.format("%Y-%m-%d %H:%M:%S.%f")
+                ));
                 if let Err(e) = mover.move_file(&input_file, Some(&dest_file)) {
                     unmoved_input_file_errors.push(e);
                 }
             }
         };
-
-        
     }
 
     // Now that we've parsed the input files (successfully or not) we can add them to the database. Unless
     // we've blacklisted the person who made the request for abusing the system
     for (job, infile) in jobs.into_iter().zip(successful_input_files) {
         if let Some(blacklist_entry) = get_blacklist_match(&job, &config) {
-            let file_name = infile.file_name().map(|s| s.to_string_lossy()).unwrap_or("??".into());
+            let file_name = infile
+                .file_name()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or("??".into());
             handle_blacklisted_input(blacklist_entry, &job.email, &file_name, config);
-            info!("Rejected input file {} due to matching blacklist entry {}", infile.display(), blacklist_entry);
-
-            let dest_file = config.execution.failure_input_file_dir.join(
-                format!("blacklisted_input_file_{}.txt", chrono::Local::now())
+            info!(
+                "Rejected input file {} due to matching blacklist entry {}",
+                infile.display(),
+                blacklist_entry
             );
+
+            let dest_file = config.execution.failure_input_file_dir.join(format!(
+                "blacklisted_input_file_{}.txt",
+                chrono::Local::now()
+            ));
 
             if let Err(e) = mover.move_file(&infile, Some(&dest_file)) {
                 unmoved_input_file_errors.push(e);
             }
         } else {
-
-            let save_tarball = if job.is_egi { crate::jobs::TarChoice::Egi } else { crate::jobs::TarChoice::Yes };
+            let save_tarball = if job.is_egi {
+                crate::jobs::TarChoice::Egi
+            } else {
+                crate::jobs::TarChoice::Yes
+            };
 
             // If so configured, split up the input job into shorter jobs
             let date_ranges = if let Some(ndays) = config.execution.job_split_into_days {
@@ -632,7 +736,8 @@ pub async fn add_jobs_from_input_files(
             let delete_offset = chrono::Duration::hours(config.execution.hours_to_keep.into());
             let delete_time = chrono::Local::now().naive_local() + delete_offset;
             for (sub_start, sub_end) in date_ranges {
-                let this_res = crate::jobs::Job::add_job_from_args_with_options(conn,
+                let this_res = crate::jobs::Job::add_job_from_args_with_options(
+                    conn,
                     job.site_id.clone(),
                     sub_start,
                     sub_end,
@@ -648,14 +753,17 @@ pub async fn add_jobs_from_input_files(
                     Some(delete_time),
                     Some(save_tarball),
                     job.met_key.as_deref(),
-                    job.ginput_key.as_deref()
-                ).await;
+                    job.ginput_key.as_deref(),
+                )
+                .await;
                 results.push(this_res);
             }
 
             let njobs = results.len();
             let mut job_ids = vec![];
+            let mut parsing_error_reasons = vec![];
             let mut errored = false;
+            let mut added_unknown_sid_error = false;
             for res in results {
                 match res {
                     Ok(new_id) => {
@@ -663,10 +771,32 @@ pub async fn add_jobs_from_input_files(
                         // Moving the file might still error, so handle that internally
                         info!("Added job {new_id} from file {}", infile.display());
                         job_ids.push(new_id);
-                        
-                    },
+                    }
+                    Err(JobAddError::UnknownStdSid(site_ids)) => {
+                        if !added_unknown_sid_error {
+                            // If the file was split into multiple jobs, this error would
+                            // occur for all of them, but we only want to include it in the
+                            // email once (hence the extra boolean).
+                            let this_reason = format!(
+                                "Site ID{} '{}' {}, you must provide latitude and longitude",
+                                if site_ids.len() == 1 { "" } else { "s" },
+                                site_ids.join("', '"),
+                                if site_ids.len() == 1 {
+                                    "is not a known standard site"
+                                } else {
+                                    "are not known standard sites"
+                                },
+                            );
+                            parsing_error_reasons.push(this_reason);
+                            added_unknown_sid_error = true;
+                        }
+                        errored = true;
+                    }
                     Err(e) => {
-                        warn!("Error adding job from input file {} to database: {e:?}", infile.display());
+                        warn!(
+                            "Error adding job from input file {} to database: {e:?}",
+                            infile.display()
+                        );
                         errored = true;
                     }
                 }
@@ -678,25 +808,48 @@ pub async fn add_jobs_from_input_files(
                 } else if job_ids.len() == 1 {
                     format!("{:09}", job_ids[0])
                 } else {
-                    format!("{:09}-{:09}", job_ids[0], job_ids.last().copied().unwrap_or_default())
+                    format!(
+                        "{:09}-{:09}",
+                        job_ids[0],
+                        job_ids.last().copied().unwrap_or_default()
+                    )
                 };
-                let dest_file = config.execution.success_input_file_dir.join(
-                    format!("job_{job_id_string}_input_file.txt")
-                );
+                let dest_file = config
+                    .execution
+                    .success_input_file_dir
+                    .join(format!("job_{job_id_string}_input_file.txt"));
 
                 if let Err(e) = mover.move_file(&infile, Some(&dest_file)) {
                     unmoved_input_file_errors.push(e);
                 }
 
                 if job.confirmation {
-                    debug!("Sending confirmation email for input file {}", infile.display());
+                    debug!(
+                        "Sending confirmation email for input file {}",
+                        infile.display()
+                    );
                     confirm_successful_parsing(&job, config, infile, njobs);
                 } else {
-                    debug!("Confirmation email declined for input file {}", infile.display());
+                    debug!(
+                        "Confirmation email declined for input file {}",
+                        infile.display()
+                    );
                 }
+            } else if !parsing_error_reasons.is_empty() {
+                let parsing_err = FailedParsingError {
+                    reasons: parsing_error_reasons,
+                    input_file: infile.to_path_buf(),
+                    email: Some(job.email),
+                };
+                email_user_for_failed_parsing(parsing_err, config);
             } else {
                 let nfailures = njobs - job_ids.len();
-                let parsing_err = FailedParsingError::new_for_database_error(infile.to_path_buf(), job.email, nfailures, njobs);
+                let parsing_err = FailedParsingError::new_for_database_error(
+                    infile.to_path_buf(),
+                    job.email,
+                    nfailures,
+                    njobs,
+                );
                 email_user_for_failed_parsing(parsing_err, config);
             }
         }
@@ -706,31 +859,39 @@ pub async fn add_jobs_from_input_files(
         Ok(())
     } else {
         let nerrs = unmoved_input_file_errors.len();
-        let error_causes = unmoved_input_file_errors.into_iter()
+        let error_causes = unmoved_input_file_errors
+            .into_iter()
             .map(|e| e.to_string())
             .join("\n");
-        anyhow::bail!("There were problems moving {nerrs} input files. Reasons were:\n{error_causes}")
+        anyhow::bail!(
+            "There were problems moving {nerrs} input files. Reasons were:\n{error_causes}"
+        )
     }
 }
 
 fn confirm_successful_parsing(job: &InputJob, config: &Config, input_file: &Path, njobs: usize) {
     let email = &job.email;
-    let input_file_name = input_file.file_name()
+    let input_file_name = input_file
+        .file_name()
         .map(|n| n.to_string_lossy())
         .unwrap_or_else(|| "??".into());
     let mut body = format!("This confirms successful receipt of the following request for GGG priors:\n\n{job}\n\nTo disable these emails, set 'confirmation=false' (without the quotes) as the last line of your input file.");
     if njobs > 1 {
         body.push_str(&format!(" Note that your request was split into {njobs} smaller jobs, you will receive completion emails for each."));
     }
-    config.email.send_mail(
-        &[email],
-        None,
-        None,
-        &format!("Confirming receipt of GGG priors request file {}", input_file_name),
-        &body
-    ).unwrap_or_else(|e| {
-        warn!("Failed to send confirmation email to {email}. Reason was: {e}")
-    });
+    config
+        .email
+        .send_mail(
+            &[email],
+            None,
+            None,
+            &format!(
+                "Confirming receipt of GGG priors request file {}",
+                input_file_name
+            ),
+            &body,
+        )
+        .unwrap_or_else(|e| warn!("Failed to send confirmation email to {email}. Reason was: {e}"));
 }
 
 fn email_user_for_failed_parsing(error: FailedParsingError, config: &Config) {
@@ -746,20 +907,25 @@ fn email_user_for_failed_parsing(error: FailedParsingError, config: &Config) {
     warn!("{warn_msg}\n{sep}\n{}\n{sep}\n", error.email_body());
 
     // Email the user, if we could parse the file enough to find the email
-    let input_file_name = error.input_file
+    let input_file_name = error
+        .input_file
         .file_name()
         .map(|n| n.to_string_lossy())
         .unwrap_or_else(|| "??".into());
     if let Some(email) = &error.email {
-        config.email.send_mail(
-            &[email.as_str()],
-            None,
-            None,
-            &format!("Failed parsing AutoModMaker request file {}", input_file_name), 
-            &error.email_body()
-        ).unwrap_or_else(|e| {
-            warn!("Failed to send email to {email}, reason was: {e:?}")
-        });
+        config
+            .email
+            .send_mail(
+                &[email.as_str()],
+                None,
+                None,
+                &format!(
+                    "Failed parsing AutoModMaker request file {}",
+                    input_file_name
+                ),
+                &error.email_body(),
+            )
+            .unwrap_or_else(|e| warn!("Failed to send email to {email}, reason was: {e:?}"));
     }
 }
 
@@ -768,36 +934,45 @@ fn get_blacklist_match<'b>(job: &InputJob, config: &'b Config) -> Option<&'b Bla
         match &entry.identifier {
             BlacklistIdentifier::SubmitterEmail { submitter } => {
                 if submitter == &job.email {
-                    return Some(entry)
+                    return Some(entry);
                 }
-            },
+            }
         }
     }
 
     None
 }
 
-fn handle_blacklisted_input(blacklist_entry: &BlacklistEntry, submitter_email: &str, file_name: &str, config: &Config) {
+fn handle_blacklisted_input(
+    blacklist_entry: &BlacklistEntry,
+    submitter_email: &str,
+    file_name: &str,
+    config: &Config,
+) {
     if blacklist_entry.silent {
         return;
     }
 
     let subj = "GGG priors request rejected";
     let body = if let Some(reason) = &blacklist_entry.reason {
-        format!("Your priors request input file {file_name} has been rejected; further requests will NOT be accepted. Reason: {reason}.")
+        format!("Your priors request input file '{file_name}' has been rejected; further requests will NOT be accepted. Reason: {reason}.")
     } else {
-        format!("Your priors request input file {file_name} has been rejected; further requests will NOT be accepted.")
+        format!("Your priors request input file '{file_name}' has been rejected; further requests will NOT be accepted.")
     };
 
-    config.email.send_mail(&[submitter_email], None, None, subj, &body)
-        .unwrap_or_else(|e| warn!("Failed to send blacklist email to {submitter_email}, error was: {e:?}"));
+    config
+        .email
+        .send_mail(&[submitter_email], None, None, subj, &body)
+        .unwrap_or_else(|e| {
+            warn!("Failed to send blacklist email to {submitter_email}, error was: {e:?}")
+        });
 }
 
 pub async fn send_status_reports(
     conn: &mut crate::MySqlConn,
     config: &Config,
-    request_files: Vec<PathBuf>, 
-    deleter: &mut InputFileCleanupHandler
+    request_files: Vec<PathBuf>,
+    deleter: &mut InputFileCleanupHandler,
 ) -> Result<(), Vec<anyhow::Error>> {
     let mut errors = vec![];
 
@@ -805,14 +980,18 @@ pub async fn send_status_reports(
         let res = match std::fs::File::open(&file) {
             Ok(f) => handle_status_request(conn, config, f).await,
             Err(e) => Err(anyhow::Error::from(e)),
-        }.with_context(|| format!("Error occurred on status request file {}", file.display()));
+        }
+        .with_context(|| format!("Error occurred on status request file {}", file.display()));
 
         if let Err(e) = res {
             errors.push(e);
         }
 
         if let Err(e) = deleter.move_file(&file, None) {
-            errors.push(anyhow::anyhow!("Failed to delete status request file {}, error was: {e}", file.display()));
+            errors.push(anyhow::anyhow!(
+                "Failed to delete status request file {}, error was: {e}",
+                file.display()
+            ));
         }
     }
 
@@ -823,45 +1002,66 @@ pub async fn send_status_reports(
     }
 }
 
-async fn handle_status_request(conn: &mut crate::MySqlConn, config: &Config, mut request: std::fs::File) -> anyhow::Result<()> {
+async fn handle_status_request(
+    conn: &mut crate::MySqlConn,
+    config: &Config,
+    mut request: std::fs::File,
+) -> anyhow::Result<()> {
     use std::fmt::Write;
-    
+
     let mut buf = String::new();
     request.read_to_string(&mut buf)?;
     let buf = buf.trim();
 
     let sub_date = Local::now().date_naive() - Duration::days(31);
 
-    let jobs = crate::jobs::Job::get_jobs_for_user_submitted_after(
-        conn, &buf, sub_date
-    ).await?;
+    let jobs = crate::jobs::Job::get_jobs_for_user_submitted_after(conn, &buf, sub_date).await?;
 
     let job_report = if jobs.is_empty() {
         format!("There were no jobs submitted by {buf} in the last 31 days.")
     } else {
-        let mut report = format!("There were {} job(s) submitted by {buf} in the last 31 days:\n", jobs.len());
+        let mut report = format!(
+            "There were {} job(s) submitted by {buf} in the last 31 days:\n",
+            jobs.len()
+        );
         for j in jobs {
-            writeln!(&mut report, "  - {}: state = {}", j.to_long_string(), j.state)?;
+            writeln!(
+                &mut report,
+                "  - {}: state = {}",
+                j.to_long_string(),
+                j.state
+            )?;
         }
         report
     };
 
     let subject = "AutoModMaker job report";
 
-    config.email.send_mail(&[&buf], None, None, subject, &job_report)?;
+    config
+        .email
+        .send_mail(&[&buf], None, None, subject, &job_report)?;
 
     Ok(())
 }
 
-async fn check_met_available(conn: &mut crate::MySqlConn, config: &Config, start_date: NaiveDate, end_date: NaiveDate) -> Result<(), MissingMetError> {
+async fn check_met_available(
+    conn: &mut crate::MySqlConn,
+    config: &Config,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+) -> Result<(), MissingMetError> {
     let mut missing_dates = vec![];
     let mut unsupported_dates = vec![];
 
     for date in utils::DateIterator::new_one_range(start_date, end_date) {
-        let (missing, unsupported) = match crate::met::MetFile::is_date_complete_for_default_mets(conn, config, date).await {
+        let (missing, unsupported) = match crate::met::MetFile::is_date_complete_for_default_mets(
+            conn, config, date,
+        )
+        .await
+        {
             Ok(state) => (!state.is_complete(), false),
             Err(CheckMetAvailableError::NoDefaultsDefined(_)) => (true, true),
-            Err(CheckMetAvailableError::Other(e)) => return Err(e.into())
+            Err(CheckMetAvailableError::Other(e)) => return Err(e.into()),
         };
 
         if missing {
@@ -886,12 +1086,26 @@ async fn check_met_available(conn: &mut crate::MySqlConn, config: &Config, start
 #[derive(Debug)]
 pub struct InputFileCleanupHandler {
     last_clear_time: DateTime<Local>,
-    errored_files: HashSet<PathBuf>
+    errored_files: HashSet<PathBuf>,
+    delete_original: bool,
 }
 
 impl InputFileCleanupHandler {
     pub fn new() -> Self {
-        Self { last_clear_time: Local::now(), errored_files: HashSet::new() }
+        Self {
+            last_clear_time: Local::now(),
+            errored_files: HashSet::new(),
+            delete_original: true,
+        }
+    }
+
+    /// Create a new handler that will not delete the original input files.
+    /// This is mean for integration tests where you want to leave the original
+    /// file for future tests.
+    pub fn new_for_testing() -> Self {
+        let mut me = Self::new();
+        me.delete_original = false;
+        me
     }
 
     /// Returns `true` if we tried to delete `file` recently and doing so failed
@@ -900,14 +1114,14 @@ impl InputFileCleanupHandler {
     }
 
     /// Move `from_file` into the directory `to_dir`
-    /// 
+    ///
     /// Pass `None` as `to_dir` to only try deleting the file instead.
-    /// 
+    ///
     /// # Returns
     /// - `Ok(true)` if the move succeeded
     /// - `Ok(false)` if the move failed, but removing the file failed recently
     /// - `Err(e)` if this is the first time moving this file has failed recently
-    /// 
+    ///
     /// This is intended to help avoid spamming the admin emails if a file cannot be deleted.
     fn move_file(&mut self, from_file: &Path, to_file: Option<&Path>) -> anyhow::Result<bool> {
         let now = Local::now();
@@ -918,13 +1132,15 @@ impl InputFileCleanupHandler {
             self.last_clear_time = now;
         }
 
-        let res = Self::move_file_inner(from_file, to_file);
+        let res = Self::move_file_inner(from_file, to_file, self.delete_original);
         if res.is_err() && self.errored_files.contains(from_file) {
             // We've seen this file recently, so don't treat the move error as an actual error
             Ok(false)
         } else if res.is_err() {
-            if let InputFileMoveError::CopyAndRemoveFail(_, _, _) | InputFileMoveError::RemoveFail(_, _) = res {
-                // If we didn't remove the file, we need to ignore it on successive 
+            if let InputFileMoveError::CopyAndRemoveFail(_, _, _)
+            | InputFileMoveError::RemoveFail(_, _) = res
+            {
+                // If we didn't remove the file, we need to ignore it on successive
                 self.errored_files.insert(from_file.to_path_buf());
             }
             anyhow::bail!(res.to_string())
@@ -933,13 +1149,22 @@ impl InputFileCleanupHandler {
         }
     }
 
-    fn move_file_inner<'p>(from_file: &'p Path, to_file: Option<&Path>) -> InputFileMoveError<'p> {
+    fn move_file_inner<'p>(
+        from_file: &'p Path,
+        to_file: Option<&Path>,
+        delete_original: bool,
+    ) -> InputFileMoveError<'p> {
         let res_copy = if let Some(to) = to_file {
             std::fs::copy(from_file, to)
         } else {
             Ok(0)
         };
-        let res_rm = std::fs::remove_file(from_file);
+
+        let res_rm = if delete_original {
+            std::fs::remove_file(from_file)
+        } else {
+            Ok(())
+        };
 
         if let (Err(e_cp), Err(e_rm)) = (&res_copy, &res_rm) {
             // anyhow::bail!("URGENT: could not copy or remove original input file {}. Errors were\nCopying: {e_cp}\nRemoving: {e_rm}", from_file.display())
@@ -952,7 +1177,7 @@ impl InputFileCleanupHandler {
             InputFileMoveError::RemoveFail(from_file, e.to_string())
         } else {
             InputFileMoveError::Ok(from_file)
-        }            
+        }
     }
 }
 
@@ -961,14 +1186,14 @@ enum InputFileMoveError<'p> {
     Ok(&'p Path),
     CopyFail(&'p Path, String),
     RemoveFail(&'p Path, String),
-    CopyAndRemoveFail(&'p Path, String, String)
+    CopyAndRemoveFail(&'p Path, String, String),
 }
 
 impl<'p> InputFileMoveError<'p> {
     fn is_err(&self) -> bool {
         match self {
             InputFileMoveError::Ok(_) => false,
-            _ => true
+            _ => true,
         }
     }
 }
@@ -977,7 +1202,7 @@ impl<'p> Display for InputFileMoveError<'p> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InputFileMoveError::Ok(p) => write!(f, "{} moved successfully", p.display()),
-            InputFileMoveError::CopyFail(p, e) => write!(f, "Could not copy original input file {}, file was deleted. Error was: {e}", p.display()),
+            InputFileMoveError::CopyFail(p, e) => write!(f, "Could not copy original input file {}. Error was: {e}", p.display()),
             InputFileMoveError::RemoveFail(p, e) => write!(f, "URGENT: Could not remove original input file {}. Error was: {e}", p.display()),
             InputFileMoveError::CopyAndRemoveFail(p, e_cp, e_rm) => write!(f, "URGENT: could not copy or remove original input file {}. Errors were\nCopying: {e_cp}\nRemoving: {e_rm}", p.display()),
         }

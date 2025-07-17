@@ -138,7 +138,8 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Jobs(JobCli { commands: JobActions::Print(subargs) }) => {
             let mut conn = db.get_connection().await?;
-            jobs::print_jobs_table_cli(&mut conn, subargs).await?;
+            let loaded_config = load_config()?;
+            jobs::print_jobs_table_cli(&mut conn, &loaded_config, subargs).await?;
         },
 
         Commands::Jobs(JobCli { commands: JobActions::Reset(subargs) }) => {

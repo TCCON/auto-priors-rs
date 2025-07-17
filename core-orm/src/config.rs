@@ -1,25 +1,36 @@
 //! Configurable options for the core object relational model and priors jobs
-//! 
+//!
 //! The functions [`load_config_file`] and [`load_env_config_file`] provide a
 //! simple mechanism to load the [`Config`] struct which holds the configuration
 //! data for the priors code. [`load_config_file_or_default`] provides an infallible
 //! option which returns a default configuration if no configuration file is available
 //! or there is a problem reading the configuration.
-//! 
+//!
 //! A default (mostly blank) configuration file can be created by calling [`generate_config_file`].
-//! 
-use std::{path::{PathBuf, Path}, fs::File, io::{Write, Read}, collections::HashMap, fmt::Display, str::FromStr};
+//!
 use anyhow::{self, Context};
-use chrono::{NaiveDate, NaiveDateTime, Duration, NaiveTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use hostname;
 use itertools::Itertools;
 use lettre::message::{Mailbox, Mailboxes};
 use log::{debug, info};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+    fs::File,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 use toml;
 use url::Url;
 
-use crate::{met::{self, MetDataType}, error::{DefaultOptsQueryError, EmailError}, email::SendMail};
+use crate::{
+    email::SendMail,
+    error::{DefaultOptsQueryError, EmailError},
+    met::{self, MetDataType},
+};
 
 /// Name of the environmental variable to look at for the path to the configuration file
 pub static CFG_FILE_ENV_VAR: &str = "PRIOR_CONFIG_FILE";
@@ -41,7 +52,7 @@ impl Display for ConfigValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Configuration failed validation:")?;
         for (idx, cause) in self.0.iter().enumerate() {
-            writeln!(f, " {}) {cause}", idx+1)?;
+            writeln!(f, " {}) {cause}", idx + 1)?;
         }
         Ok(())
     }
@@ -59,20 +70,42 @@ impl ConfigValidationError {
 
 #[derive(Debug)]
 pub enum ConfigValErrorCause {
-    UnknownGinputKey{key: String, location: String},
-    UnknownMetKey{key: String, defaults_index: usize},
-    BadMetConfig{key: String, reason: String},
+    UnknownGinputKey {
+        key: String,
+        location: String,
+    },
+    UnknownMetKey {
+        key: String,
+        defaults_index: usize,
+    },
+    BadMetConfig {
+        key: String,
+        reason: String,
+    },
     DefaultsDateInverted(usize),
     DefaultsOverlap(Vec<(String, String)>),
-    FtpPathsMismatch{ftp_root: PathBuf, output_path: PathBuf},
-    NoncanonicalPath{description: &'static str, path: PathBuf},
+    FtpPathsMismatch {
+        ftp_root: PathBuf,
+        output_path: PathBuf,
+    },
+    NoncanonicalPath {
+        description: &'static str,
+        path: PathBuf,
+    },
     MissingPath(String),
     MissingOptPath(String),
     MissingParentPath(String),
     ExpectedFileNotDir(String),
-    QueueSameName{q1: &'static str, q2: &'static str, name: String},
+    QueueSameName {
+        q1: &'static str,
+        q2: &'static str,
+        name: String,
+    },
     MissingEmail(&'static str),
-    DuplicateKey{field: &'static str, key: String},
+    DuplicateKey {
+        field: &'static str,
+        key: String,
+    },
 }
 
 impl Display for ConfigValErrorCause {
@@ -80,57 +113,83 @@ impl Display for ConfigValErrorCause {
         match self {
             ConfigValErrorCause::UnknownGinputKey { key, location } => {
                 write!(f, "Undefined ginput key '{key}' in {location}")
-            },
-            ConfigValErrorCause::UnknownMetKey { key, defaults_index } => {
-                write!(f, "Undefined met key '{key}' in default options #{}", defaults_index+1)
-            },
+            }
+            ConfigValErrorCause::UnknownMetKey {
+                key,
+                defaults_index,
+            } => {
+                write!(
+                    f,
+                    "Undefined met key '{key}' in default options #{}",
+                    defaults_index + 1
+                )
+            }
             ConfigValErrorCause::BadMetConfig { key, reason } => {
-                write!(f, "The met download config '{key}' is not valid for use with ginput: {reason}")
-            },
+                write!(
+                    f,
+                    "The met download config '{key}' is not valid for use with ginput: {reason}"
+                )
+            }
             ConfigValErrorCause::DefaultsDateInverted(idx) => {
-                write!(f, "Default options #{} has the end date before the start date", idx+1)
-            },
+                write!(
+                    f,
+                    "Default options #{} has the end date before the start date",
+                    idx + 1
+                )
+            }
             ConfigValErrorCause::DefaultsOverlap(pairs) => {
-                let overlaps = pairs.into_iter()
-                    .map(|(a,b)| format!("{a} and {b}"))
+                let overlaps = pairs
+                    .into_iter()
+                    .map(|(a, b)| format!("{a} and {b}"))
                     .join(", ");
                 write!(f, "Some default options overlap: {overlaps}")
-            },
-            ConfigValErrorCause::FtpPathsMismatch { ftp_root, output_path } => {
-                write!(f, "The output path ({}) is not under the FTP root ({})", output_path.display(), ftp_root.display())
-            },
+            }
+            ConfigValErrorCause::FtpPathsMismatch {
+                ftp_root,
+                output_path,
+            } => {
+                write!(
+                    f,
+                    "The output path ({}) is not under the FTP root ({})",
+                    output_path.display(),
+                    ftp_root.display()
+                )
+            }
             ConfigValErrorCause::NoncanonicalPath { description, path } => {
-                write!(f, "The {description} path ({}) cannot be canonicalized", path.display())
-            },
+                write!(
+                    f,
+                    "The {description} path ({}) cannot be canonicalized",
+                    path.display()
+                )
+            }
             ConfigValErrorCause::MissingPath(description) => {
                 write!(f, "The {description} path is undefined or does not point to an extant file/directory")
-            },
+            }
             ConfigValErrorCause::MissingOptPath(description) => {
                 write!(f, "The {description} path does not point to a valid file; remove the option entirely to make this a None")
-            },
+            }
             ConfigValErrorCause::MissingParentPath(description) => {
                 write!(f, "The parent directory of the {description} path does not exist, is a file, or could not be determined from the given path.")
-            },
+            }
             ConfigValErrorCause::ExpectedFileNotDir(description) => {
                 write!(f, "The {description} path is expected to be a file (extant or not), but points to an existing directory")
-            },
+            }
             ConfigValErrorCause::QueueSameName { q1, q2, name } => {
                 write!(f, "The {q1} and {q2} queues have the same name: {name}")
-            },
+            }
             ConfigValErrorCause::MissingEmail(description) => {
                 write!(f, "The {description} email is empty")
-            },
+            }
             ConfigValErrorCause::DuplicateKey { field, key } => {
                 write!(f, "The key {key} occurs multiple times in {field}")
-            },
-            
+            }
         }
     }
 }
 
 /// Top level configuration structure, comprised of subsections represented by other structures:
-/// 
-/// - `blacklist`: a list of [`BlacklistEntry`] instances that block specific users from 
+///
+/// - `blacklist`: a list of [`BlacklistEntry`] instances that block specific users from
 ///    requesting jobs.
 /// - `default_options`: a `Vec` of [`DefaultOptions`] that specify which ginput and met version
 ///   to use by default for different time periods.
@@ -158,25 +217,34 @@ pub struct Config {
 
 impl Config {
     /// Get the slice of download configuration needed for a given met type
-    /// 
+    ///
     /// Returns an `Err` if the given met_key is not present in the config.
     pub fn get_met_configs(&self, met_key: &str) -> anyhow::Result<&[DownloadConfig]> {
-        self.data.download.get(met_key)
-        .map(|cfgs| cfgs.as_slice())
-        .ok_or_else(|| anyhow::Error::msg(format!("No meteorology with key '{met_key}' found.")))
+        self.data
+            .download
+            .get(met_key)
+            .map(|cfgs| cfgs.as_slice())
+            .ok_or_else(|| {
+                anyhow::Error::msg(format!("No meteorology with key '{met_key}' found."))
+            })
     }
 
     /// Returns a list of [`met::MetProduct`]s and [`DownloadConfig`] sets that could have data on the given `date`.
-    /// 
+    ///
     /// Note: if a set of [`DownloadConfig`]s contains different product values (e.g. a mix of GEOS FP-IT and GEOS-IT)
     /// this function will always exclude that set. This is because this function assumes it is being called to identify
     /// the external met products which we want to check the status of, and thus that any set that mixes products is
     /// mixing products that have their own set of download configs for just that met product. This way, the function
     /// can be infallible, which is helpful for the web interface.
-    pub fn get_single_product_configs_for_date(&self, date: NaiveDate) -> Vec<(&met::MetProduct, &[DownloadConfig])> {
+    pub fn get_single_product_configs_for_date(
+        &self,
+        date: NaiveDate,
+    ) -> Vec<(&met::MetProduct, &[DownloadConfig])> {
         let mut available_products = vec![];
         for key in self.data.download.keys() {
-            let cfgs = self.get_met_configs(key).expect("should not fail to get met configs when iterating over their keys");
+            let cfgs = self
+                .get_met_configs(key)
+                .expect("should not fail to get met configs when iterating over their keys");
             let products = cfgs.iter().map(|c| &c.product).unique().collect_vec();
 
             let all_start_too_late = cfgs.iter().all(|c| c.earliest_date > date);
@@ -184,7 +252,9 @@ impl Config {
                 continue;
             }
 
-            let all_end_too_early = cfgs.iter().all(|c| c.latest_date.map(|d| d <= date).unwrap_or(false));
+            let all_end_too_early = cfgs
+                .iter()
+                .all(|c| c.latest_date.map(|d| d <= date).unwrap_or(false));
             if all_end_too_early {
                 continue;
             }
@@ -202,9 +272,9 @@ impl Config {
     }
 
     /// Return the span of dates covered by the default meteorologies
-    /// 
+    ///
     /// Returns the earliest start date and latest end date of all meteorologies
-    /// used in the default option sets. If at least one default met defines no 
+    /// used in the default option sets. If at least one default met defines no
     /// start date, then the returned start date will be `None`, and likewise for
     /// the end date. Note that this function does not check for overlap among the
     /// default ranges (i.e. it assumes a validated configuration), nor does it check
@@ -247,19 +317,19 @@ impl Config {
     }
 
     /// Get the GEOS and chemistry directories required to pass to version 1 ginput instances
-    /// 
+    ///
     /// Version 1.x ginput instances expect GEOS data to be organized in a specific way: all files
     /// are to be directly stored in directories that match the levels their data is on: Nx for
     /// 2D files, Nv for eta-hybrid level files, and Np for fixed pressure level files. Further,
     /// all met files must be in subdirectories of the same parent. This function will return
     /// the paths to provide to ginput for a given met key.
-    /// 
+    ///
     /// # Returns
     /// If successful, a tuple containing the `geos_path`, `chem_path`, and the string telling ginput
-    /// which met type these paths are for, in that order. If the met configuration requested does not 
+    /// which met type these paths are for, in that order. If the met configuration requested does not
     /// define any chemistry files, a warning will be logged and the `chem_path` will be the same as the
     /// `geos_path`.
-    /// 
+    ///
     /// This returns an error in a number of conditions:
     /// 1. Any of the `download_dir` paths cannot be canonicalized
     /// 2. Any of the `download_dir` paths does not contain at least 1 component
@@ -268,7 +338,8 @@ impl Config {
     /// 4. Any of the `download_dir` paths does not have a parent directory
     /// 5. Inconsistent `geos_path`, `chem_path`, or `ginput_met_key` values are defined.
     pub fn get_ginput_met_args(&self, met_key: &str) -> anyhow::Result<(PathBuf, PathBuf, String)> {
-        let dl_cfgs = self.get_met_configs(met_key)
+        let dl_cfgs = self
+            .get_met_configs(met_key)
             .context("Could not find meteorology while setting up geos & chem paths")?;
         let mut geos_path = None;
         let mut chem_path = None;
@@ -317,11 +388,15 @@ impl Config {
                     }
 
                     match &cfg.levels {
-                        met::MetLevels::Surf => { found_2d_met = true; },
-                        met::MetLevels::Eta => { found_eta_met = true; },
-                        _ => ()
+                        met::MetLevels::Surf => {
+                            found_2d_met = true;
+                        }
+                        met::MetLevels::Eta => {
+                            found_eta_met = true;
+                        }
+                        _ => (),
                     }
-                },
+                }
                 MetDataType::Chm => {
                     if chem_path.is_none() {
                         chem_path = Some(parent_dir.to_owned());
@@ -335,24 +410,23 @@ impl Config {
                     if let met::MetLevels::Eta = &cfg.levels {
                         found_eta_chem = true;
                     }
-                },
+                }
                 MetDataType::Other(v) => {
                     info!("Ignoring met type of {v} for GEOS met/chm paths")
                 }
             }
         }
 
-        let geos_path = geos_path.ok_or_else(|| anyhow::anyhow!(
-            "Met type {met_key} defines no met files for download"
-        ))?;
+        let geos_path = geos_path.ok_or_else(|| {
+            anyhow::anyhow!("Met type {met_key} defines no met files for download")
+        })?;
 
-        let chem_path = chem_path.ok_or_else(|| anyhow::anyhow!(
-            "Met type {met_key} defines no chem files for download"
-        ))?;
+        let chem_path = chem_path.ok_or_else(|| {
+            anyhow::anyhow!("Met type {met_key} defines no chem files for download")
+        })?;
 
-        let ginput_met_key = ginput_met_key.ok_or_else(|| anyhow::anyhow!(
-            "Met type {met_key} defines no files for download"
-        ))?;
+        let ginput_met_key = ginput_met_key
+            .ok_or_else(|| anyhow::anyhow!("Met type {met_key} defines no files for download"))?;
 
         if !found_2d_met {
             anyhow::bail!("2D met files not defined for download");
@@ -370,7 +444,8 @@ impl Config {
     }
 
     pub fn get_ginput_output_subdirs_for_met(&self, met_key: &str) -> anyhow::Result<String> {
-        let dl_cfgs = self.get_met_configs(met_key)
+        let dl_cfgs = self
+            .get_met_configs(met_key)
             .context("Could not find meteorology while getting output subdirs")?;
         let mut subdir = None;
 
@@ -388,16 +463,15 @@ impl Config {
             // this really shouldn't happen
             anyhow::bail!("No download configurations defined for {met_key}")
         }
-
     }
 
     /// Get the earliest start date for all the file types of a given met configuration
-    /// 
+    ///
     /// When a met type has multiple files (e.g. 3D assimilation, 2D assimilation, and 3D chemistry for GEOS),
     /// it is possible that different file types start at different times, so the each file has an earliest
     /// date it is available for in the config. This returns the minimum among all of those for the given
     /// `met_key`, or `None` if `met_key` exists but has no files defined.
-    /// 
+    ///
     /// Will also return an `Err` is `met_key` is not in the config.
     pub fn get_met_start_date(&self, met_key: &str) -> anyhow::Result<Option<NaiveDate>> {
         let met_cfgs = self.get_met_configs(met_key)?;
@@ -405,51 +479,55 @@ impl Config {
         if met_cfgs.len() == 0 {
             // This is redundant (Iterator::min() returns None if the iterator is empty) but I find this clearer
             Ok(None)
-        }else {
+        } else {
             let x = met_cfgs.iter().map(|c| c.earliest_date);
             Ok(x.min())
         }
     }
-    
 
     /// Get the sequence of [`DefaultOptions`] in time order.
     pub fn get_all_defaults(&self) -> Vec<&DefaultOptions> {
-        let mut all_options: Vec<&DefaultOptions> = self.default_options.iter()
-            .collect();
+        let mut all_options: Vec<&DefaultOptions> = self.default_options.iter().collect();
 
-        // Order by start date, treating None as the earliest possible 
-        all_options.sort_by(|a, b| {
-            match (a.start_date, b.start_date) {
-                (None, None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Less,
-                (Some(_), None) => std::cmp::Ordering::Greater,
-                (Some(d1), Some(d2)) => d1.cmp(&d2),
-            }
+        // Order by start date, treating None as the earliest possible
+        all_options.sort_by(|a, b| match (a.start_date, b.start_date) {
+            (None, None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (Some(d1), Some(d2)) => d1.cmp(&d2),
         });
 
         all_options
     }
 
-    /// Get the sequence of [`DefaultOptions`] in time order and check that none overlap in time. 
-    /// 
+    /// Get the sequence of [`DefaultOptions`] in time order and check that none overlap in time.
+    ///
     /// Returns an `Err` (with a [`DefaultOptsQueryError::MatchesOverlap`] inner value) if any two
     /// sets of default options do overlap in time.
-    pub fn get_all_defaults_check_overlap(&self) -> Result<Vec<&DefaultOptions>, DefaultOptsQueryError> {
+    pub fn get_all_defaults_check_overlap(
+        &self,
+    ) -> Result<Vec<&DefaultOptions>, DefaultOptsQueryError> {
         let all_options = self.get_all_defaults();
         let pairs = Self::check_defaults_overlap(&all_options, true);
         if !pairs.is_empty() {
-            return Err(DefaultOptsQueryError::MatchesOverlap(pairs[0].0.to_string(), pairs[0].1.to_string()));
+            return Err(DefaultOptsQueryError::MatchesOverlap(
+                pairs[0].0.to_string(),
+                pairs[0].1.to_string(),
+            ));
         }
 
         Ok(all_options)
     }
 
-    fn check_defaults_overlap<'d>(all_options: &[&'d DefaultOptions], short_circuit: bool) -> Vec<(&'d DefaultOptions, &'d DefaultOptions)> {
+    fn check_defaults_overlap<'d>(
+        all_options: &[&'d DefaultOptions],
+        short_circuit: bool,
+    ) -> Vec<(&'d DefaultOptions, &'d DefaultOptions)> {
         let mut overlaps = vec![];
         for pair in all_options.iter().combinations(2) {
             if pair[0].overlaps(pair[1]) {
                 if short_circuit {
-                    return vec![(pair[0], pair[1])]
+                    return vec![(pair[0], pair[1])];
                 } else {
                     overlaps.push((*pair[0], *pair[1]));
                 }
@@ -459,50 +537,48 @@ impl Config {
         return overlaps;
     }
 
-
     /// Get the [`DefaultOptions`] instance for a given date.
-    /// 
+    ///
     /// Returns a `Err` if 0 or >1 option set matches the date. The inner value will be a
     /// [`DefaultOptsQueryError::NoMatches`] for 0 and [`DefaultOptsQueryError::MultipleMatches`]
     /// for >1.
-    pub fn get_defaults_for_date(&self, date: NaiveDate) -> Result<&DefaultOptions, DefaultOptsQueryError> {
+    pub fn get_defaults_for_date(
+        &self,
+        date: NaiveDate,
+    ) -> Result<&DefaultOptions, DefaultOptsQueryError> {
         let all_options = self.default_options.as_slice();
 
         // Filter down to the rows which apply to this date. If >1 or 0, that is an error.
-        let all_options: Vec<&DefaultOptions> = all_options.into_iter()
-            .filter(|o| {
-                match (o.start_date, o.end_date) {
-                    (None, None) => true,
-                    (None, Some(end)) => date < end,
-                    (Some(start), None) => date >= start,
-                    (Some(start), Some(end)) => start <= date && date < end,
-                }
-            }).collect();
+        let all_options: Vec<&DefaultOptions> = all_options
+            .into_iter()
+            .filter(|o| match (o.start_date, o.end_date) {
+                (None, None) => true,
+                (None, Some(end)) => date < end,
+                (Some(start), None) => date >= start,
+                (Some(start), Some(end)) => start <= date && date < end,
+            })
+            .collect();
 
         if all_options.len() == 1 {
             Ok(all_options[0])
         } else if all_options.is_empty() {
             Err(DefaultOptsQueryError::NoMatches(date))
         } else {
-            let matches = all_options.iter()
-                .map(|o| o.to_string())
-                .collect_vec();
+            let matches = all_options.iter().map(|o| o.to_string()).collect_vec();
             Err(DefaultOptsQueryError::MultipleMatches { date, matches })
         }
     }
 
     /// Get the information about a job queue by name
-    /// 
+    ///
     /// If the queue does not have a section defined in the configuration, then the
     /// `None` is returned. Use `unwrap_or_default` to get the default queue with
     /// one processor allocated.
     pub fn get_queue(&self, queue_name: &str) -> Option<JobQueueOptions> {
-        self.execution.queues
-            .get(queue_name)
-            .map(|q| q.to_owned())
+        self.execution.queues.get(queue_name).map(|q| q.to_owned())
     }
 
-    /// If the configuration is set for simulation, return the number of seconds to delay 
+    /// If the configuration is set for simulation, return the number of seconds to delay
     /// ginput outputting sim files by. If not set for a simulation, return `None`.
     pub fn get_sim_delay(&self) -> Option<u32> {
         if !self.execution.simulate {
@@ -532,20 +608,26 @@ impl Config {
 
         let email_errors = self.validate_emails();
         errors.extend(email_errors);
-        
+
         errors.into()
-    } 
+    }
 
     fn validate_default_options(&self) -> ConfigValidationError {
         let mut errors = ConfigValidationError::default();
 
         for (idx, default_opts) in self.default_options.iter().enumerate() {
             if !self.execution.ginput.contains_key(&default_opts.ginput) {
-                errors.push(ConfigValErrorCause::UnknownGinputKey { key: default_opts.ginput.clone(), location: format!("default options #{}", idx+1) });
+                errors.push(ConfigValErrorCause::UnknownGinputKey {
+                    key: default_opts.ginput.clone(),
+                    location: format!("default options #{}", idx + 1),
+                });
             }
 
             if self.get_met_configs(&default_opts.met).is_err() {
-                errors.push(ConfigValErrorCause::UnknownMetKey { key: default_opts.met.clone(), defaults_index: idx });
+                errors.push(ConfigValErrorCause::UnknownMetKey {
+                    key: default_opts.met.clone(),
+                    defaults_index: idx,
+                });
             }
 
             if default_opts.start_date >= default_opts.end_date {
@@ -555,12 +637,13 @@ impl Config {
 
         let pairs = Self::check_defaults_overlap(&self.get_all_defaults(), false);
         if !pairs.is_empty() {
-            let pairs = pairs.into_iter()
-                .map(|(a,b)| (a.to_string(), b.to_string()))
+            let pairs = pairs
+                .into_iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
                 .collect_vec();
             errors.push(ConfigValErrorCause::DefaultsOverlap(pairs));
         }
-        
+
         errors
     }
 
@@ -569,16 +652,24 @@ impl Config {
 
         // Check paths are not empty
         if !self.execution.ftp_download_root.exists() {
-            errors.push(ConfigValErrorCause::MissingPath("execution.ftp_download_root".to_string()));
+            errors.push(ConfigValErrorCause::MissingPath(
+                "execution.ftp_download_root".to_string(),
+            ));
         }
         if !self.execution.output_path.exists() {
-            errors.push(ConfigValErrorCause::MissingPath("execution.output_path".to_string()));
+            errors.push(ConfigValErrorCause::MissingPath(
+                "execution.output_path".to_string(),
+            ));
         }
         if !self.execution.std_sites_output_base.exists() {
-            errors.push(ConfigValErrorCause::MissingPath("execution.std_sites_output_base".to_string()));
+            errors.push(ConfigValErrorCause::MissingPath(
+                "execution.std_sites_output_base".to_string(),
+            ));
         }
         if !self.execution.std_sites_tar_output.exists() {
-            errors.push(ConfigValErrorCause::MissingPath("execution.std_sites_tar_output".to_string()));
+            errors.push(ConfigValErrorCause::MissingPath(
+                "execution.std_sites_tar_output".to_string(),
+            ));
         }
 
         // Check output is in the FTP directory
@@ -586,20 +677,23 @@ impl Config {
         let ftp_root = self.execution.ftp_download_root.canonicalize();
         if let (Ok(out), Ok(ftp)) = (&output, &ftp_root) {
             if out.strip_prefix(ftp).is_err() {
-                errors.push(ConfigValErrorCause::FtpPathsMismatch { ftp_root: ftp.to_path_buf(), output_path: out.to_path_buf() });
+                errors.push(ConfigValErrorCause::FtpPathsMismatch {
+                    ftp_root: ftp.to_path_buf(),
+                    output_path: out.to_path_buf(),
+                });
             }
         } else {
             if output.is_err() {
-                errors.push(ConfigValErrorCause::NoncanonicalPath { 
-                    description: "execution.output_path", 
-                    path: self.execution.output_path.clone() 
+                errors.push(ConfigValErrorCause::NoncanonicalPath {
+                    description: "execution.output_path",
+                    path: self.execution.output_path.clone(),
                 });
             }
 
             if ftp_root.is_err() {
-                errors.push(ConfigValErrorCause::NoncanonicalPath { 
-                    description: "execution.ftp_download_root", 
-                    path: self.execution.ftp_download_root.clone()
+                errors.push(ConfigValErrorCause::NoncanonicalPath {
+                    description: "execution.ftp_download_root",
+                    path: self.execution.ftp_download_root.clone(),
                 })
             }
         }
@@ -607,30 +701,38 @@ impl Config {
         // Check JSON paths' parent directories exist
         if let Some(p) = &self.execution.flat_stdsite_json_file {
             if !p.parent().map(|p| p.exists()).unwrap_or(false) {
-                errors.push(ConfigValErrorCause::MissingParentPath("execution.flat_stdsite_json_file".to_string()));
+                errors.push(ConfigValErrorCause::MissingParentPath(
+                    "execution.flat_stdsite_json_file".to_string(),
+                ));
             }
 
             if p.is_dir() {
-                errors.push(ConfigValErrorCause::ExpectedFileNotDir("execution.flat_stdsite_json_file".to_string()));
+                errors.push(ConfigValErrorCause::ExpectedFileNotDir(
+                    "execution.flat_stdsite_json_file".to_string(),
+                ));
             }
         }
 
         if let Some(p) = &self.execution.grouped_stdsite_json_file {
             if !p.parent().map(|p| p.exists()).unwrap_or(false) {
-                errors.push(ConfigValErrorCause::MissingParentPath("execution.grouped_stdsite_json_file".to_string()));
+                errors.push(ConfigValErrorCause::MissingParentPath(
+                    "execution.grouped_stdsite_json_file".to_string(),
+                ));
             }
 
             if p.is_dir() {
-                errors.push(ConfigValErrorCause::ExpectedFileNotDir("execution.grouped_stdsite_json_file".to_string()));
+                errors.push(ConfigValErrorCause::ExpectedFileNotDir(
+                    "execution.grouped_stdsite_json_file".to_string(),
+                ));
             }
         }
 
         // Check queues
         if self.execution.submitted_job_queue == self.execution.std_site_job_queue {
-            errors.push(ConfigValErrorCause::QueueSameName { 
-                q1: "submitted", 
-                q2: "std_site", 
-                name: self.execution.submitted_job_queue.clone() 
+            errors.push(ConfigValErrorCause::QueueSameName {
+                q1: "submitted",
+                q2: "std_site",
+                name: self.execution.submitted_job_queue.clone(),
             });
         }
 
@@ -644,11 +746,11 @@ impl Config {
             match ginput {
                 GinputConfig::Script { entry_point_path } => {
                     if !entry_point_path.is_file() {
-                        errors.push(ConfigValErrorCause::MissingPath(
-                            format!("execution.ginput.{key}.entry_point_path")
-                        ));
+                        errors.push(ConfigValErrorCause::MissingPath(format!(
+                            "execution.ginput.{key}.entry_point_path"
+                        )));
                     }
-                },
+                }
             }
         }
 
@@ -660,11 +762,17 @@ impl Config {
 
         for (idx, allowed_met) in self.requests.allowed_mets.values().enumerate() {
             if let Err(e) = self.get_met_configs(&allowed_met.met_key) {
-                errors.push(ConfigValErrorCause::BadMetConfig { key: allowed_met.met_key.clone(), reason: e.to_string() });
+                errors.push(ConfigValErrorCause::BadMetConfig {
+                    key: allowed_met.met_key.clone(),
+                    reason: e.to_string(),
+                });
             }
 
             if self.execution.ginput.get(&allowed_met.ginput_key).is_none() {
-                errors.push(ConfigValErrorCause::UnknownGinputKey { key: allowed_met.ginput_key.clone(), location: format!("request allowed met #{}", idx+1) })
+                errors.push(ConfigValErrorCause::UnknownGinputKey {
+                    key: allowed_met.ginput_key.clone(),
+                    location: format!("request allowed met #{}", idx + 1),
+                })
             }
         }
 
@@ -674,22 +782,44 @@ impl Config {
     fn validate_data(&self) -> ConfigValidationError {
         let mut errors = ConfigValidationError::default();
 
-        if self.data.zgrid_file.as_deref().map(|p| !p.exists()).unwrap_or(false) {
-            errors.push(ConfigValErrorCause::MissingPath("data.zgrid_file".to_string()));
+        if self
+            .data
+            .zgrid_file
+            .as_deref()
+            .map(|p| !p.exists())
+            .unwrap_or(false)
+        {
+            errors.push(ConfigValErrorCause::MissingPath(
+                "data.zgrid_file".to_string(),
+            ));
         }
 
-        if self.data.base_vmr_file.as_deref().map(|p| !p.exists()).unwrap_or(false) {
-            errors.push(ConfigValErrorCause::MissingPath("data.base_vmr_file".to_string()));
+        if self
+            .data
+            .base_vmr_file
+            .as_deref()
+            .map(|p| !p.exists())
+            .unwrap_or(false)
+        {
+            errors.push(ConfigValErrorCause::MissingPath(
+                "data.base_vmr_file".to_string(),
+            ));
         }
 
         // Confirm that all mets are valid for ginput
         for met_key in self.data.download.keys() {
             if let Err(e) = self.get_ginput_met_args(met_key) {
-                errors.push(ConfigValErrorCause::BadMetConfig { key: met_key.to_string(), reason: e.to_string() });
+                errors.push(ConfigValErrorCause::BadMetConfig {
+                    key: met_key.to_string(),
+                    reason: e.to_string(),
+                });
             }
 
             if let Err(e) = self.get_ginput_output_subdirs_for_met(met_key) {
-                errors.push(ConfigValErrorCause::BadMetConfig { key: met_key.to_string(), reason: e.to_string() });
+                errors.push(ConfigValErrorCause::BadMetConfig {
+                    key: met_key.to_string(),
+                    reason: e.to_string(),
+                });
             }
         }
 
@@ -698,7 +828,7 @@ impl Config {
 
     fn validate_emails(&self) -> ConfigValidationError {
         let mut errors = ConfigValidationError::default();
-        
+
         if self.email.admin_emails.iter().count() == 0 {
             errors.push(ConfigValErrorCause::MissingEmail("admin emails list"));
         }
@@ -795,23 +925,23 @@ pub struct ExecutionConfig {
 
 impl Default for ExecutionConfig {
     fn default() -> Self {
-        let host = hostname::get()
-            .unwrap_or("localhost".into());
+        let host = hostname::get().unwrap_or("localhost".into());
         let host = host.to_string_lossy();
 
-        Self { 
+        Self {
             error_handler: Default::default(),
-            queues: Default::default(), 
-            max_numpy_threads: 2, 
+            queues: Default::default(),
+            max_numpy_threads: 2,
             hours_to_keep: 168,
             input_file_pattern: "input_file_2020*.txt".to_owned(),
             status_request_file_pattern: "ginput_status*.txt".to_owned(),
             success_input_file_dir: PathBuf::from("."),
             failure_input_file_dir: PathBuf::from("."),
-            ftp_download_server: Url::parse(&format!("ftp://{host}/")).unwrap_or_else(|_| Url::parse("ftp://localhost/").unwrap()), 
-            ftp_download_root: Default::default(), 
-            output_path: Default::default(), 
-            std_sites_tar_output: Default::default(), 
+            ftp_download_server: Url::parse(&format!("ftp://{host}/"))
+                .unwrap_or_else(|_| Url::parse("ftp://localhost/").unwrap()),
+            ftp_download_root: Default::default(),
+            output_path: Default::default(),
+            std_sites_tar_output: Default::default(),
             std_sites_output_base: Default::default(),
             flat_stdsite_json_file: Default::default(),
             grouped_stdsite_json_file: Default::default(),
@@ -837,7 +967,7 @@ fn default_sim_delay() -> u32 {
 pub enum GinputConfig {
     /// A ginput installation to be called via its `run_ginput.py` entry point. Requires
     /// one option, `entry_point_path`, which is the path to the `run_ginput.py` file.
-    Script{entry_point_path: PathBuf}
+    Script { entry_point_path: PathBuf },
 }
 
 /// Configuration section dealing with allowed options for user-requested jobs
@@ -851,28 +981,41 @@ pub struct UserRequestConfig {
 }
 
 impl UserRequestConfig {
-    pub fn check_met_request(&self, key: &str, request_start: Option<NaiveDate>, request_end: Option<NaiveDate>) -> Result<&AllowedRequestMet, String> {
-        let met = self.allowed_mets.get(key)
+    pub fn check_met_request(
+        &self,
+        key: &str,
+        request_start: Option<NaiveDate>,
+        request_end: Option<NaiveDate>,
+    ) -> Result<&AllowedRequestMet, String> {
+        let met = self
+            .allowed_mets
+            .get(key)
             .ok_or_else(|| format!("'{key}' is not a valid met"))?;
 
         if request_start.is_none() || request_end.is_none() {
-            // Requests must provide start and end dates, so if either is None, this is a malformed 
+            // Requests must provide start and end dates, so if either is None, this is a malformed
             // request. It's not this function's job to check that.
-            return Ok(met)
+            return Ok(met);
         }
 
         let request_start = request_start.unwrap();
         let request_end = request_end.unwrap();
 
-        match crate::utils::DateRangeOverlap::classify(met.start_date, met.end_date, Some(request_start), Some(request_end)) {
-            crate::utils::DateRangeOverlap::AContainsB | crate::utils::DateRangeOverlap::AEqualsB => Ok(met),
-            crate::utils::DateRangeOverlap::AInsideB |
-            crate::utils::DateRangeOverlap::AEndsInB |
-            crate::utils::DateRangeOverlap::AStartsInB |
-            crate::utils::DateRangeOverlap::None => {
+        match crate::utils::DateRangeOverlap::classify(
+            met.start_date,
+            met.end_date,
+            Some(request_start),
+            Some(request_end),
+        ) {
+            crate::utils::DateRangeOverlap::AContainsB
+            | crate::utils::DateRangeOverlap::AEqualsB => Ok(met),
+            crate::utils::DateRangeOverlap::AInsideB
+            | crate::utils::DateRangeOverlap::AEndsInB
+            | crate::utils::DateRangeOverlap::AStartsInB
+            | crate::utils::DateRangeOverlap::None => {
                 let range_str = met.describe_date_range();
                 Err(format!("met '{key}' spans {range_str} but you requested dates ({request_start} to {request_end}) outside this range"))
-            },
+            }
         }
     }
 }
@@ -908,18 +1051,18 @@ impl AllowedRequestMet {
 /// Configuration section dealing with input data for jobs
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct DataConfig {
-    /// The path to an integral.gnd file that specifies an altitude grid. If omitted, 
+    /// The path to an integral.gnd file that specifies an altitude grid. If omitted,
     /// or an empty string, then the priors are produced on the native GEOS grid.
     pub zgrid_file: Option<PathBuf>,
 
-    /// The path to a summer, 35N .vmr file that will be used for the secondary 
+    /// The path to a summer, 35N .vmr file that will be used for the secondary
     /// gases. If omitted or an empty string, the secondary gases are not included.
     pub base_vmr_file: Option<PathBuf>,
 
     /// A map of arrays of configurations that specify how to download reanalysis files.
     /// Each config in the array represents a file that needs to be downloaded for ginput
     /// to run. The keys to the map must be strings that will be passed as arguments to
-    /// the downloader to specify which file type to download. See [`DownloadConfig`] for 
+    /// the downloader to specify which file type to download. See [`DownloadConfig`] for
     /// details on the array elements.
     pub download: HashMap<String, Vec<DownloadConfig>>,
 }
@@ -943,10 +1086,10 @@ pub struct DownloadConfig {
 
     /// The expected pattern for the downloaded file names.
     /// Use [Chrono format strings](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
-    /// (e.g. "%Y", "%d") to insert date/time elements into the name. The default is to assume that 
+    /// (e.g. "%Y", "%d") to insert date/time elements into the name. The default is to assume that
     /// the last part of the URL in `url_pattern` will become the basename, use this to override that
     /// if that assumption is not true.
-    /// 
+    ///
     /// NOTE: in order for this program to properly parse the date & time from the filename for the database,
     /// the pattern MUST include year, month, day, hour, and minute.
     pub basename_pattern: Option<String>,
@@ -988,7 +1131,11 @@ pub struct DownloadConfig {
 
 impl Display for DownloadConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "product = {}, type = {}, levels = {}", self.product, self.data_type, self.levels)
+        write!(
+            f,
+            "product = {}, type = {}, levels = {}",
+            self.product, self.data_type, self.levels
+        )
     }
 }
 
@@ -996,18 +1143,18 @@ impl DownloadConfig {
     pub fn to_short_string(&self) -> String {
         format!("{}, {}, {}", self.product, self.data_type, self.levels)
     }
-    
+
     /// Get the pattern for file names of this type of file, with no leading path.
-    /// 
+    ///
     /// If the configuration has a value for the `basename_pattern` specified, that is
     /// returned. Otherwise, the URL pattern is split on the last "/" and everything after
     /// that slash is used as the pattern.
-    /// 
+    ///
     /// Can return an `Err` if it could not identify a part after the final slash in the URL.
     pub fn get_basename_pattern(&self) -> anyhow::Result<&str> {
         if let Some(pat) = &self.basename_pattern {
-            return Ok(&pat)
-        }else{
+            return Ok(&pat);
+        } else {
             // let full_url = url::Url::parse(&self.url_pattern)?
             //     .path_segments()
             //     .ok_or_else(|| anyhow::Error::msg(format!("Could not find the file base name from URL pattern {}", self.url_pattern)))?
@@ -1017,10 +1164,12 @@ impl DownloadConfig {
 
             // Preferring this over the URL library because the latter makes it difficult to
             // return a &str.
-            self.url_pattern
-                .split('/')
-                .last()
-                .ok_or_else(|| anyhow::Error::msg(format!("Could not find the file base name from URL pattern {}", self.url_pattern)))
+            self.url_pattern.split('/').last().ok_or_else(|| {
+                anyhow::Error::msg(format!(
+                    "Could not find the file base name from URL pattern {}",
+                    self.url_pattern
+                ))
+            })
         }
     }
 
@@ -1029,21 +1178,21 @@ impl DownloadConfig {
         let end = date.and_hms_opt(0, 0, 0).unwrap() + Duration::days(1);
         let mut file_time = date.and_hms_opt(0, 0, 0).unwrap();
         let file_time_del = Duration::minutes(self.file_freq_min);
-        
+
         let mut times = vec![];
         while file_time < end {
             times.push(file_time);
             file_time += file_time_del;
         }
-        
+
         times
     }
 
     /// Provide a vector of the files of this type expected to exist on a given date.
-    /// 
+    ///
     /// The returned paths point to files for the times given by [`DownloadConfig::times_on_day`]
     /// in the path gievn by [`DownloadConfig::get_save_dir`].
-    /// 
+    ///
     /// Returns an `Err` if it cannot get the save directory or the filename pattern.
     pub fn expected_files_on_day(&self, date: NaiveDate) -> anyhow::Result<Vec<PathBuf>> {
         let save_dir = &self.download_dir;
@@ -1057,17 +1206,16 @@ impl DownloadConfig {
     }
 }
 
-
 /// Configuration for default choices of Ginput version, meteorology files, etc. for different time periods.
-/// 
+///
 /// The time range is determined by `start_date` and `end_date`. If both are given, the this applies to all
 /// dates `start_date <= date < end_date`. If `start_date` is `None`, then this applies to all dates up to
 /// (but not including) the end date, and vice versa if `end_date` is `None`. If both are `None` this applies
 /// to all dates.
-/// 
+///
 /// `ginput` and `met` must be valid keys for the `.execution.ginput` and `.data.download` maps, respectively.
 /// These specify which installation of ginput and which set of met data to use for that time period.
-/// 
+///
 /// Note that if you access the vector of these directly there is no guarantee that they are time-ordered or
 /// non-overlapping. Use the methods [`Config::get_all_defaults`] and [`Config::get_all_defaults_check_overlap`]
 /// for that.
@@ -1079,30 +1227,35 @@ pub struct DefaultOptions {
     pub met: String,
 }
 
-
 impl DefaultOptions {
     // Test whether this `DefaultOptions` instance overlaps another in time
     fn overlaps(&self, other: &Self) -> bool {
         let class = crate::utils::DateRangeOverlap::classify(
             self.start_date,
-            self.end_date, 
-            other.start_date, 
-            other.end_date);
+            self.end_date,
+            other.start_date,
+            other.end_date,
+        );
         class.has_overlap()
     }
 }
 
 impl Display for DefaultOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{} to {}: ginput = {}, met = {}]", 
-            self.start_date.map(|d| d.to_string()).unwrap_or_else(|| "None".to_owned()),
-            self.end_date.map(|d| d.to_string()).unwrap_or_else(|| "None".to_owned()),
+        write!(
+            f,
+            "[{} to {}: ginput = {}, met = {}]",
+            self.start_date
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "None".to_owned()),
+            self.end_date
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "None".to_owned()),
             self.ginput,
             self.met
         )
     }
 }
-
 
 /// A structure describing configuration of a job queue.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1112,46 +1265,56 @@ pub struct JobQueueOptions {
 
     /// The fair share policy to use for this queue
     #[serde(default)]
-    pub fair_share_policy: FairSharePolicy
+    pub fair_share_policy: FairSharePolicy,
 }
 
 impl Default for JobQueueOptions {
     fn default() -> Self {
-        Self { 
+        Self {
             max_num_procs: 1,
-            fair_share_policy: Default::default()
+            fair_share_policy: Default::default(),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-
 #[serde(tag = "type")]
 pub enum FairSharePolicy {
-    Simple(crate::jobs::PrioritySubmitFS)
+    Simple(crate::jobs::PrioritySubmitFS),
+    RoundRobin(crate::jobs::PsuedoRoundRobinFS),
 }
 
 impl Default for FairSharePolicy {
     fn default() -> Self {
-        Self::Simple(crate::jobs::PrioritySubmitFS{})
+        Self::Simple(crate::jobs::PrioritySubmitFS {})
     }
 }
 
 #[async_trait::async_trait]
 impl crate::jobs::FairShare for FairSharePolicy {
-    async fn next_job_in_queue(&self, conn: &mut crate::MySqlConn, queue: &str) -> crate::error::JobResult<Option<crate::jobs::Job>> {
+    async fn next_job_in_queue(
+        &self,
+        conn: &mut crate::MySqlConn,
+        queue: &str,
+    ) -> crate::error::JobResult<Option<crate::jobs::Job>> {
         match self {
-            Self::Simple(policy) => policy.next_job_in_queue(conn, queue).await
+            Self::Simple(policy) => policy.next_job_in_queue(conn, queue).await,
+            Self::RoundRobin(policy) => policy.next_job_in_queue(conn, queue).await,
         }
     }
 
-    async fn list_jobs_in_order(&self, conn: &mut crate::MySqlConn, queue: &str, states: Option<&[crate::jobs::JobState]>) -> crate::error::JobResult<Vec<crate::jobs::Job>> {
+    async fn order_jobs_for_display(
+        &self,
+        conn: &mut crate::MySqlConn,
+        queue: &str,
+        jobs: Vec<crate::jobs::Job>,
+    ) -> crate::error::JobResult<Vec<(crate::jobs::Job, HashMap<&'static str, String>)>> {
         match self {
-            Self::Simple(policy) => policy.list_jobs_in_order(conn, queue, states).await
+            Self::Simple(policy) => policy.order_jobs_for_display(conn, queue, jobs).await,
+            Self::RoundRobin(policy) => policy.order_jobs_for_display(conn, queue, jobs).await,
         }
     }
 }
-
 
 /// Configuration for how frequently elements of the systemd service run
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1159,7 +1322,7 @@ pub struct ServiceTimingOptions {
     /// Set to true to disable met downloading
     pub disable_met_download: bool,
 
-    /// How many hours between attempts to download the met data. 
+    /// How many hours between attempts to download the met data.
     /// The met download will run on even multiples of that hour,
     /// e.g. if this is 6, then the met download will run at 00:00,
     /// 06:00, 12:00, and 18:00
@@ -1177,7 +1340,7 @@ pub struct ServiceTimingOptions {
     pub status_report_seconds: u32,
 
     /// How frequently (in days) to insert jobs to regenerate the stratosphere
-    /// look up tables for ginput. 
+    /// look up tables for ginput.
     pub lut_regen_days: u32,
 
     /// What time of the day, in HH:MM:SS format, to run the LUT regen. If
@@ -1189,8 +1352,8 @@ pub struct ServiceTimingOptions {
     pub delete_expired_jobs_hours: u32,
 
     /// How many minutes to add to the time when determining when to clean
-    /// up expired jobs' output. For example, setting this to 15 when 
-    /// delete_expired_jobs_minutes` is 60 would run the standard sites at 
+    /// up expired jobs' output. For example, setting this to 15 when
+    /// delete_expired_jobs_minutes` is 60 would run the standard sites at
     /// 15 minutes past each hour.
     #[serde(default)]
     pub delete_expired_jobs_offset_minutes: Option<u32>,
@@ -1233,18 +1396,18 @@ pub struct ServiceTimingOptions {
 
 impl Default for ServiceTimingOptions {
     fn default() -> Self {
-        Self { 
+        Self {
             disable_met_download: false,
-            met_download_hours: 6, 
+            met_download_hours: 6,
             disable_job: false,
-            job_start_seconds: 60, 
+            job_start_seconds: 60,
             status_report_seconds: 60,
-            lut_regen_days: 24, 
+            lut_regen_days: 24,
             lut_regen_at: NaiveTime::from_hms_opt(0, 0, 0),
             delete_expired_jobs_hours: 12,
             delete_expired_jobs_offset_minutes: None,
             disable_std_site_gen: false,
-            std_site_gen_hours: 24, 
+            std_site_gen_hours: 24,
             std_site_gen_offset_minutes: Some(180),
             std_site_tar_minutes: 30,
             disable_reports: false,
@@ -1277,7 +1440,7 @@ pub struct EmailConfig {
     pub std_site_req_emails: Option<Mailboxes>,
 
     /// Which email backend to use to send the emails.
-    backend: EmailBackend,
+    pub backend: EmailBackend,
 
     /// Additional emails to send to when sending an email to all past submitters
     pub extra_submitters: Mailboxes,
@@ -1290,29 +1453,35 @@ impl Default for EmailConfig {
         let email = lettre::Address::new(user, host)
             .expect("user@hostname cannot be used as a valid email address, you will need to configure the 'from_address' in the 'email' section of the config");
         let from_addr = Mailbox::new(None, email);
-        Self { 
-            from_address: from_addr, 
-            admin_emails: Default::default(), 
+        Self {
+            from_address: from_addr,
+            admin_emails: Default::default(),
             report_emails: Default::default(),
             std_site_req_emails: Default::default(),
             backend: Default::default(),
-            extra_submitters: Default::default()
+            extra_submitters: Default::default(),
         }
     }
 }
 
 impl EmailConfig {
     /// Send an email, using the configured backend, from the configured address.
-    pub fn send_mail(&self, to: &[&str], cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError> {
+    pub fn send_mail(
+        &self,
+        to: &[&str],
+        cc: Option<&[&str]>,
+        bcc: Option<&[&str]>,
+        subject: &str,
+        message: &str,
+    ) -> Result<(), EmailError> {
         let from = self.from_address.to_string();
         match &self.backend {
             EmailBackend::Internal(backend) => {
                 backend.send_mail(to, &from, cc, bcc, subject, message)
-            },
-            EmailBackend::Mailx(backend) => {
-                backend.send_mail(to, &from, cc, bcc, subject, message)
-            },
-            EmailBackend::Mock(backend) => {
+            }
+            EmailBackend::Mailx(backend) => backend.send_mail(to, &from, cc, bcc, subject, message),
+            EmailBackend::Mock(backend) => backend.send_mail(to, &from, cc, bcc, subject, message),
+            EmailBackend::Testing(backend) => {
                 backend.send_mail(to, &from, cc, bcc, subject, message)
             }
         }
@@ -1320,17 +1489,14 @@ impl EmailConfig {
 
     /// Send an email to the admins, using the configured backed and from address
     pub fn send_mail_to_admins(&self, subject: &str, message: &str) -> Result<(), EmailError> {
-        let to_strings: Vec<_> = self.admin_emails.iter()
-            .map(|e| e.to_string())
-            .collect();
-        let to: Vec<_> = to_strings.iter()
-            .map(|s| s.as_str())
-            .collect();
+        let to_strings: Vec<_> = self.admin_emails.iter().map(|e| e.to_string()).collect();
+        let to: Vec<_> = to_strings.iter().map(|s| s.as_str()).collect();
         self.send_mail(to.as_slice(), None, None, subject, message)
     }
 
     pub fn report_emails_string_list(&self, fall_back_on_admin: bool) -> Vec<String> {
-        let emails = self.report_emails
+        let emails = self
+            .report_emails
             .iter()
             .map(|email| email.to_string())
             .collect_vec();
@@ -1370,8 +1536,13 @@ pub enum EmailBackend {
     /// emails.
     Mailx(crate::email::Mailx),
 
-    /// Prints the email to the terminal (intended for testing)
+    /// Prints the email to the terminal (intended for development)
     Mock(crate::email::MockEmail),
+
+    /// Store the emails [`lettre::Message`], or a the string version of an
+    /// error from constructing the message, in a queue. Useful for unit/integration
+    /// tests to inspect the emails.
+    Testing(crate::email::TestingEmail),
 }
 
 impl Default for EmailBackend {
@@ -1384,7 +1555,7 @@ impl Default for EmailBackend {
 #[serde(tag = "type")]
 pub enum ErrorHandlerChoice {
     Logging,
-    EmailAdmins
+    EmailAdmins,
 }
 
 impl Default for ErrorHandlerChoice {
@@ -1409,7 +1580,7 @@ impl FromStr for ErrorHandlerChoice {
         match s.to_ascii_lowercase().as_str() {
             "logging" => Ok(Self::Logging),
             "emailadmins" => Ok(Self::EmailAdmins),
-            _ => anyhow::bail!("Unknown error handler choice: {s}")
+            _ => anyhow::bail!("Unknown error handler choice: {s}"),
         }
     }
 }
@@ -1434,27 +1605,27 @@ impl Display for BlacklistEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum BlacklistIdentifier {
-    SubmitterEmail{submitter: String}
+    SubmitterEmail { submitter: String },
 }
 
 impl Display for BlacklistIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SubmitterEmail { submitter } => write!(f, "submitter email = {submitter}")
+            Self::SubmitterEmail { submitter } => write!(f, "submitter email = {submitter}"),
         }
     }
 }
 
-
 /// Generate a default configuration .toml file at `path`
-/// 
+///
 /// # Errors
 /// Returns an `Err` if:
-/// 
+///
 /// * the default configuration could not be serialized
 /// * the file could not be created or written to at `path`
-pub fn generate_config_file<T>(path: T) -> anyhow::Result<()> 
-where T: AsRef<Path>
+pub fn generate_config_file<T>(path: T) -> anyhow::Result<()>
+where
+    T: AsRef<Path>,
 {
     // TODO: make a macro that will copy docstring comments from the structs to the file
     // Note: if you get a "values must be emitted before tables" error, it has to do with the
@@ -1464,8 +1635,9 @@ where T: AsRef<Path>
 
     default_cfg.data.base_vmr_file = Some(PathBuf::new());
     default_cfg.data.zgrid_file = Some(PathBuf::new());
-    default_cfg.data.download.insert("geosfpit".to_string(), vec![
-        DownloadConfig{ 
+    default_cfg.data.download.insert(
+        "geosfpit".to_string(),
+        vec![DownloadConfig {
             product: met::MetProduct::GeosFpit,
             data_type: MetDataType::Met,
             levels: met::MetLevels::Eta,
@@ -1478,51 +1650,68 @@ where T: AsRef<Path>
             days_latency: 1,
             ginput_met_key: "fpit-eta".to_string(),
             ginput_output_subdir: "fpit".to_string(),
-        }
-    ]);
+        }],
+    );
 
-    default_cfg.default_options = vec![
-        DefaultOptions { 
-            start_date: NaiveDate::from_ymd_opt(2000, 1, 1),
-            end_date: NaiveDate::from_ymd_opt(2038, 1, 1),
-            ginput: "".to_string(),
-            met: "".to_string()
-        }
-    ];
+    default_cfg.default_options = vec![DefaultOptions {
+        start_date: NaiveDate::from_ymd_opt(2000, 1, 1),
+        end_date: NaiveDate::from_ymd_opt(2038, 1, 1),
+        ginput: "".to_string(),
+        met: "".to_string(),
+    }];
 
     let sub_queue = default_cfg.execution.submitted_job_queue.clone();
     let std_queue = default_cfg.execution.std_site_job_queue.clone();
-    default_cfg.execution.queues.insert(sub_queue, JobQueueOptions { max_num_procs: 4, ..Default::default() });
-    default_cfg.execution.queues.insert(std_queue, JobQueueOptions { max_num_procs: 4, ..Default::default() });
+    default_cfg.execution.queues.insert(
+        sub_queue,
+        JobQueueOptions {
+            max_num_procs: 4,
+            ..Default::default()
+        },
+    );
+    default_cfg.execution.queues.insert(
+        std_queue,
+        JobQueueOptions {
+            max_num_procs: 4,
+            ..Default::default()
+        },
+    );
 
-    default_cfg.execution.ginput.insert("v1.0.6".to_string(), GinputConfig::Script { entry_point_path: PathBuf::new() });
+    default_cfg.execution.ginput.insert(
+        "v1.0.6".to_string(),
+        GinputConfig::Script {
+            entry_point_path: PathBuf::new(),
+        },
+    );
 
-    let toml_str = toml::to_string_pretty(&default_cfg).context("Could not convert default config to string")?;
+    let toml_str = toml::to_string_pretty(&default_cfg)
+        .context("Could not convert default config to string")?;
     let mut f = File::create(path).context("Could not create the configuration file.")?;
-    f.write_all(toml_str.as_bytes()).context("Could not write the configuration file.")?;
+    f.write_all(toml_str.as_bytes())
+        .context("Could not write the configuration file.")?;
 
     Ok(())
 }
 
-
-/// Load an existing configuration .toml file from `path`. 
-/// 
+/// Load an existing configuration .toml file from `path`.
+///
 /// Disable validation by passing `false` as the second argument. The
 /// TOML file must still deserialize successfully for an `Ok(_)` to be
 /// returned.
-/// 
+///
 /// # Errors
 /// An `Err` is returned if:
-/// 
+///
 /// * it could not open the file at `path`
 /// * it could not read the contents of `path`
 /// * the .toml file could not be decoded or failed validation
-/// 
+///
 /// # See also
 /// * [`load_env_config_file`]
 /// * [`load_config_file_or_default`]
-pub fn load_config_file<T>(path: T, validate: bool) -> anyhow::Result<Config> 
-where T: AsRef<Path>
+pub fn load_config_file<T>(path: T, validate: bool) -> anyhow::Result<Config>
+where
+    T: AsRef<Path>,
 {
     let mut f = File::open(path).context("Failed to open configuration file.")?;
     let mut toml_str = String::new();
@@ -1535,29 +1724,26 @@ where T: AsRef<Path>
     } else {
         Ok(config)
     }
-
-
 }
-
 
 pub fn get_env_config_path() -> anyhow::Result<PathBuf> {
     dotenv::dotenv().ok();
     let key = std::env::var(CFG_FILE_ENV_VAR)?;
-    return Ok(PathBuf::from(key))
+    return Ok(PathBuf::from(key));
 }
 
 /// Load an existing configuration at the path pointed to by [`CFG_FILE_ENV_VAR`]
-/// 
+///
 /// This is a convenience function that uses [`dotenv`] to augment existing environmental
 /// variables with any in a `.env` file, then gets the path to the configuration file
 /// from the environmental variable `$PRIOR_CONFIG_FILE`.
-/// 
+///
 /// # Errors
 /// Returns an `Err` if:
-/// 
+///
 /// * there was a problem getting the `$PRIOR_CONFIG_FILE` value
 /// * there was a problem reading the file (e.g. didn't exist or lacked read permissions)
-/// 
+///
 /// # See also
 /// * [`load_config_file`]
 /// * [`load_config_file_or_default`]
@@ -1567,54 +1753,58 @@ pub fn load_env_config_file(validate: bool) -> anyhow::Result<Config> {
 }
 
 /// Load an existing configuration file *or* provide defaults.
-/// 
+///
 /// This is intended as a convenience function for either (a) testing or
-/// (b) cases where a configuration object is expected, but the precise 
+/// (b) cases where a configuration object is expected, but the precise
 /// configuration is not essential. Since it silently falls back on the default
 /// if there is an error reading the configuration file, this is not the
 /// best function to use when it would be helpful to know if a default was
 /// used. In such a case, using [`load_config_file`] with `unwrap_or_else`
 /// might be better:
-/// 
+///
 /// ```
 /// use tccon_priors_orm::config::{Config, load_config_file};
 /// use log::warn;
 /// let path = "does_not_exist.toml";
-/// let config = load_config_file(path).unwrap_or_else(|_| {
+/// let config = load_config_file(path, true).unwrap_or_else(|_| {
 ///     warn!("Using default configuration due to error reading {path}");
 ///     Config::default()
 /// });
 /// ```
-/// 
+///
 /// # Parameters
-/// 
+///
 /// * `path` - the path to the configuration file to read. If this is `None`,
 ///   then a default configuration will be returned.
-/// 
+///
 /// # Returns
-/// 
+///
 /// * [`Config`] - a configuration object, either read from the .toml file or
 ///   a default if the file does not exist or there is an error reading it.
-/// 
+///
 /// # See also
-/// 
+///
 /// * [`load_config_file`]
 /// * [`load_env_config_file`]
 pub fn load_config_file_or_default<T>(path: Option<T>) -> anyhow::Result<Config>
-where T: AsRef<Path>
+where
+    T: AsRef<Path>,
 {
     if let Some(p) = path {
         if p.as_ref().exists() {
             debug!("Reading config file from {}", p.as_ref().display());
             return load_config_file(p.as_ref(), true).with_context(|| {
                 format!("Error loading configuration file {}", p.as_ref().display())
-            })
-        }else{
-            debug!("Given config file ({}) does not exist, using default", p.as_ref().display());
-            return Ok(Config::default())
+            });
+        } else {
+            debug!(
+                "Given config file ({}) does not exist, using default",
+                p.as_ref().display()
+            );
+            return Ok(Config::default());
         }
-    }else{
+    } else {
         debug!("No config file path given, using default");
-        return Ok(Config::default())
+        return Ok(Config::default());
     }
 }

@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use orm::{MySqlPC, jobs::{Job, JobState}, error::JobError};
-use serial_test::serial;
+use chrono::NaiveDate;
+use orm::{error::JobError, jobs::{self, Job, JobState}, test_utils::open_test_database, MySqlPC};
 use sqlx::{Connection, MySqlConnection};
 
 mod common;
@@ -60,14 +60,13 @@ async fn mock_run_job_with_delay_transaction(mut conn: MySqlPC, delay_seconds: f
     anyhow::bail!("Could not get next job after 5 tries")
 }
 
-// Any tests that rely on database access should be marked as #[serial] to prevent
-// them from conflicting. Even tests that use different tables should all be run
-// in serial because the default reset migration drops ALL tables.
-#[tokio::test]
-#[serial]
+// Because the tests use a database, if we're not using testcontainers to give each test its
+// own database, we have to call the tests as `$ cargo test -- --test-threads=1` to ensure only
+// one test runs at a time.
+#[test_log::test(tokio::test)]
 async fn test_next_job_no_transaction() {
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let pool = common::open_test_database(true).await
+    let (pool, _test_db) = open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -85,10 +84,9 @@ async fn test_next_job_no_transaction() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_next_job_with_transaction() {
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let pool = common::open_test_database(true).await
+    let (pool, _test_db) = open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -113,13 +111,12 @@ async fn test_next_job_with_transaction() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_claim_job() {
     // The difference between this and test_next_job_with_transaction is this tests the library
     // capability to claim a job with a transaction and deadlock checking
 
     // We'll need two connections to the database for this test, so we'll handle initialization manually
-    let pool = common::open_test_database(true).await
+    let (pool, _test_db) = open_test_database(true).await
         .expect("Could not open database");
 
     let mut conn1 = pool.get_connection().await.expect("Could not get first DB connection");
@@ -148,9 +145,8 @@ async fn test_claim_job() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_set_job_state() {
-    let mut conn = multiline_sql_init!("sql/two_test_jobs.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/two_test_jobs.sql");
     let mut job = Job::get_job_with_id(&mut conn, 1)
         .await
         .expect("Could not get job with ID = 1");
@@ -164,4 +160,44 @@ async fn test_set_job_state() {
         .expect("Could not get job with ID = 1 the second time");
 
     assert_eq!(job2.state, JobState::Running, "Job state was not set to 'running' in the database");
+}
+
+#[tokio::test]
+async fn test_psuedo_round_robin_claim_jobs() {
+    let (mut conn, _test_db) = multiline_sql_init!("sql/test_round_robin_fairshare.sql");
+    let rr_fairshare = jobs::PsuedoRoundRobinFS::new(14);
+
+    // The first job should be the one from user3, site "zz", for 2014-01-01 to 2014-01-02, because
+    // user3 should have no fair share penalty and this job was submitted first
+    let job1 = Job::claim_next_job_in_queue(&mut conn, "default", &rr_fairshare).await.unwrap()
+        .expect("Should be able to claim the first job");
+    assert_eq!(job1.email.as_deref(), Some("user3@test.net"));
+    assert_eq!(job1.site_id.as_slice(), &["zz".to_string()]);
+    assert_eq!(job1.start_date, NaiveDate::from_ymd_opt(2014, 1, 1).unwrap());
+    assert_eq!(job1.end_date, NaiveDate::from_ymd_opt(2014, 1, 2).unwrap());
+
+    // The second job should be the other one from user3
+    let job2 = Job::claim_next_job_in_queue(&mut conn, "default", &rr_fairshare).await.unwrap()
+        .expect("Should be able to claim the second job");
+    assert_eq!(job2.email.as_deref(), Some("user3@test.net"));
+    assert_eq!(job2.site_id.as_slice(), &["zz".to_string()]);
+    assert_eq!(job2.start_date, NaiveDate::from_ymd_opt(2014, 1, 2).unwrap());
+    assert_eq!(job2.end_date, NaiveDate::from_ymd_opt(2014, 1, 3).unwrap());
+
+    // The third job should be from user2, because they had a lower fair share penalty than user 1,
+    // even though their job was submitted after user1
+    let job3 = Job::claim_next_job_in_queue(&mut conn, "default", &rr_fairshare).await.unwrap()
+        .expect("Should be able to claim the third job");
+    assert_eq!(job3.email.as_deref(), Some("user2@test.net"));
+    assert_eq!(job3.site_id.as_slice(), &["yy".to_string()]);
+    assert_eq!(job3.start_date, NaiveDate::from_ymd_opt(2012, 1, 4).unwrap());
+    assert_eq!(job3.end_date, NaiveDate::from_ymd_opt(2012, 1, 5).unwrap());
+
+    // user1 should have the last job, since they used the most jobs in the preceeding period
+    let job3 = Job::claim_next_job_in_queue(&mut conn, "default", &rr_fairshare).await.unwrap()
+        .expect("Should be able to claim the fourth job");
+    assert_eq!(job3.email.as_deref(), Some("user1@test.net"));
+    assert_eq!(job3.site_id.as_slice(), &["xx".to_string()]);
+    assert_eq!(job3.start_date, NaiveDate::from_ymd_opt(2010, 1, 11).unwrap());
+    assert_eq!(job3.end_date, NaiveDate::from_ymd_opt(2010, 1, 12).unwrap());
 }

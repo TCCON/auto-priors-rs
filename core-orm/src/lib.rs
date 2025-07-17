@@ -17,6 +17,8 @@ pub mod input_files;
 pub mod stdsitejobs;
 pub mod export;
 
+pub mod test_utils;
+
 pub type MySqlPool = sqlx::pool::Pool<sqlx::MySql>;
 pub type MySqlPC = sqlx::pool::PoolConnection<sqlx::MySql>;
 pub type MySqlConn = sqlx::MySqlConnection;

@@ -1,18 +1,23 @@
-use std::{fmt::Display, path::PathBuf, str::FromStr};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, path::PathBuf, str::FromStr};
 
 use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use clap::{self, Args, Subcommand};
 use itertools::Itertools;
 use log::{debug, info};
-use orm::{config::Config, error::JobError, jobs::{Job, JobState, MapFmt, ModFmt, TarChoice, VmrFmt}, MySqlConn};
-
+use orm::{
+    config::Config,
+    error::JobError,
+    jobs::{FairShare, Job, JobState, MapFmt, ModFmt, TarChoice, VmrFmt},
+    MySqlConn,
+};
+use tabled::Tabled;
 
 /// Manage ginput jobs
 #[derive(Debug, Args)]
 pub struct JobCli {
     #[clap(subcommand)]
-    pub commands: JobActions
+    pub commands: JobActions,
 }
 
 #[derive(Debug, Subcommand)]
@@ -49,26 +54,25 @@ pub enum JobActions {
 #[clap(setting = clap::AppSettings::DeriveDisplayOrder)]
 /// Add a job manually from the command line
 pub struct AddJobCli {
-    
-    #[clap(long="mod-fmt")]
-    /// What format to output the .mod files in ("none" or "text"). 
+    #[clap(long = "mod-fmt")]
+    /// What format to output the .mod files in ("none" or "text").
     /// Default is "text".
     mod_fmt: Option<ModFmt>,
-    #[clap(long="vmr-fmt")]
-    /// What format to output the .vmr files in ("none" or "text"). 
+    #[clap(long = "vmr-fmt")]
+    /// What format to output the .vmr files in ("none" or "text").
     /// Default is "text".
     vmr_fmt: Option<VmrFmt>,
-    #[clap(long="map-fmt")]
-    /// What format to output the .map files in ("none", "text", or "netcdf"). 
+    #[clap(long = "map-fmt")]
+    /// What format to output the .map files in ("none", "text", or "netcdf").
     /// Default is "text".
     map_fmt: Option<MapFmt>,
-    #[clap(short='p', long="priority")]
+    #[clap(short = 'p', long = "priority")]
     /// Priority to give this job; higher will be run before jobs with lower values.
     priority: Option<i32>,
-    #[clap(long="no-delete")]
+    #[clap(long = "no-delete")]
     /// Never delete the output files from this job.
     no_delete: bool,
-    #[clap(short='t', long="to-tarball")]
+    #[clap(short = 't', long = "to-tarball")]
     /// Pack the output files from this job into a single tarball.
     to_tarball: bool,
 
@@ -82,7 +86,7 @@ pub struct AddJobCli {
     #[clap(long)]
     queue: Option<String>,
 
-    /// The two-letter site IDs used to identify the output in this job. 
+    /// The two-letter site IDs used to identify the output in this job.
     /// Pass multiple site IDs as a comma-separated list. If multiple lat/lons
     /// are given, the number of site IDs must be 1 or equal to the number of
     /// lat/lons. If lat/lons are not given, then these site IDs must be recognized
@@ -98,7 +102,6 @@ pub struct AddJobCli {
     /// The email address to contact when the priors are ready
     email: String,
 
-
     #[clap(allow_hyphen_values = true)]
     /// The latitudes to generate priors for. May be omitted if all SITE_ID values are standard sites.
     /// Note that if a latitude is provided for any locations, it must be provided for ALL locations;
@@ -109,7 +112,7 @@ pub struct AddJobCli {
 
     #[clap(allow_hyphen_values = true)]
     /// The longitudes to generate priors for. Same caveats as latitudes apply, must have the same number of latitudes as longitudes.
-    lon: Option<String>
+    lon: Option<String>,
 }
 
 #[derive(Debug)]
@@ -127,7 +130,7 @@ pub struct AddJobArgs {
     priority: Option<i32>,
     delete_time: Option<NaiveDateTime>,
     save_dir: PathBuf,
-    save_tarball: TarChoice
+    save_tarball: TarChoice,
 }
 
 /// Reset a job, deleting a run directory or output, and setting its status to 'pending'
@@ -169,16 +172,22 @@ pub struct SetPriorityCli {
     /// By default, only jobs that are pending can have their priority updated
     /// (because it will only affect them). Use this flag to allow changing any
     /// job's priority.
-    #[clap(short='a', long)]
+    #[clap(short = 'a', long)]
     allow_any_state: bool,
 }
 
-pub async fn set_job_priority_cli(conn: &mut MySqlConn, args: SetPriorityCli) -> anyhow::Result<()> {
+pub async fn set_job_priority_cli(
+    conn: &mut MySqlConn,
+    args: SetPriorityCli,
+) -> anyhow::Result<()> {
     let res = Job::set_priority_by_id(args.id, conn, args.new_priority, args.allow_any_state).await;
     match res {
         Ok(_) => Ok(()),
-        Err(orm::error::JobPriorityError::StateNotPending) => Err(anyhow::anyhow!("{}. To allow changing this job's priority, use --allow-any-state.", orm::error::JobPriorityError::StateNotPending)),
-        Err(e) => Err(e.into())
+        Err(orm::error::JobPriorityError::StateNotPending) => Err(anyhow::anyhow!(
+            "{}. To allow changing this job's priority, use --allow-any-state.",
+            orm::error::JobPriorityError::StateNotPending
+        )),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -189,13 +198,15 @@ impl AddJobArgs {
         }
         let site_ids = orm::jobs::Job::parse_site_id_str(&clargs.site_id)?;
 
-        let lat = orm::jobs::Job::parse_lat_str(&clargs.lat.unwrap_or("".to_owned())).context("Problem with given latitude.")?;
-        let lon = orm::jobs::Job::parse_lon_str(&clargs.lon.unwrap_or("".to_owned())).context("Problem with given longitude.")?;
+        let lat = orm::jobs::Job::parse_lat_str(&clargs.lat.unwrap_or("".to_owned()))
+            .context("Problem with given latitude.")?;
+        let lon = orm::jobs::Job::parse_lon_str(&clargs.lon.unwrap_or("".to_owned()))
+            .context("Problem with given longitude.")?;
         let (site_ids, lat, lon) = orm::jobs::Job::expand_site_lat_lon(site_ids, lat, lon)?;
 
         let delete_time = if clargs.no_delete {
             None
-        }else{
+        } else {
             let now = chrono::Local::now().naive_local();
             Some(now + chrono::Duration::hours(config.execution.hours_to_keep as i64))
         };
@@ -204,15 +215,15 @@ impl AddJobArgs {
             anyhow::bail!("Cannot have both --to-tarball and --egi-tarball");
         } else if clargs.to_tarball {
             TarChoice::Yes
-        }else if clargs.egi_tarball {
+        } else if clargs.egi_tarball {
             TarChoice::Egi
         } else {
             TarChoice::No
         };
 
         let save_dir = config.execution.output_path.clone();
-        
-        Ok(Self { 
+
+        Ok(Self {
             site_id: site_ids,
             start_date: clargs.start_date,
             end_date: clargs.end_date,
@@ -226,28 +237,36 @@ impl AddJobArgs {
             priority: clargs.priority,
             delete_time: delete_time,
             save_dir: save_dir,
-            save_tarball: save_tarball
+            save_tarball: save_tarball,
         })
     }
 }
 
-pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli, config: &Config) -> anyhow::Result<()> {
+pub async fn add_job(
+    db: &mut orm::MySqlConn,
+    clargs: AddJobCli,
+    config: &Config,
+) -> anyhow::Result<()> {
     let args = AddJobArgs::convert_from_clargs(clargs, config)?;
-    let id = Job::add_job_from_args(db, 
+    let id = Job::add_job_from_args(
+        db,
         args.site_id,
-        args.start_date, 
-        args.end_date, 
-        args.save_dir, 
-        Some(args.email), 
+        args.start_date,
+        args.end_date,
+        args.save_dir,
+        Some(args.email),
         args.lat,
         args.lon,
-        &args.queue.unwrap_or_else(|| config.execution.submitted_job_queue.clone()),
-        args.mod_fmt, 
-        args.vmr_fmt, 
-        args.map_fmt, 
-        args.priority, 
-        args.delete_time, 
-        Some(args.save_tarball))
+        &args
+            .queue
+            .unwrap_or_else(|| config.execution.submitted_job_queue.clone()),
+        args.mod_fmt,
+        args.vmr_fmt,
+        args.map_fmt,
+        args.priority,
+        args.delete_time,
+        Some(args.save_tarball),
+    )
     .await?;
     println!("Added new job, ID = {id}");
     Ok(())
@@ -258,11 +277,14 @@ pub async fn add_job(db: &mut orm::MySqlConn, clargs: AddJobCli, config: &Config
 #[derive(Debug, Args)]
 pub struct CleanExpiredCli {
     /// Do not actually delete output or change status, just print what would occur.
-    #[clap(short='d', long)]
+    #[clap(short = 'd', long)]
     dry_run: bool,
 }
 
-pub async fn clean_expired_jobs_cli(conn: &mut MySqlConn, args: CleanExpiredCli) -> anyhow::Result<()> {
+pub async fn clean_expired_jobs_cli(
+    conn: &mut MySqlConn,
+    args: CleanExpiredCli,
+) -> anyhow::Result<()> {
     Job::clean_up_expired_jobs(conn, args.dry_run).await
 }
 
@@ -286,7 +308,10 @@ pub struct CleanErroredCli {
     dry_run: bool,
 }
 
-pub async fn clean_errored_jobs_cli(conn: &mut MySqlConn, args: CleanErroredCli) -> anyhow::Result<()> {
+pub async fn clean_errored_jobs_cli(
+    conn: &mut MySqlConn,
+    args: CleanErroredCli,
+) -> anyhow::Result<()> {
     clean_errored_jobs(conn, args.not_before, args.not_after, args.dry_run).await
 }
 
@@ -294,28 +319,33 @@ pub async fn clean_errored_jobs(
     conn: &mut MySqlConn,
     not_before: Option<NaiveDate>,
     not_after: Option<NaiveDate>,
-    dry_run: bool
-) -> anyhow::Result<()> 
-{
+    dry_run: bool,
+) -> anyhow::Result<()> {
     let not_before = not_before.map(|d| d.and_hms_opt(0, 0, 0).unwrap());
     let not_after = not_after.map(|d| d.and_hms_opt(0, 0, 0).unwrap());
-    let errored_jobs = Job::get_jobs_in_state(conn, orm::jobs::JobState::Errored).await
+    let errored_jobs = Job::get_jobs_in_state(conn, orm::jobs::JobState::Errored)
+        .await
         .context("Error occured getting the list of errors jobs")?;
 
     for job in errored_jobs {
         if let Some(start) = not_before {
-            if job.submit_time < start { continue; }
+            if job.submit_time < start {
+                continue;
+            }
         }
 
         if let Some(end) = not_after {
-            if job.submit_time >= end { continue; }
+            if job.submit_time >= end {
+                continue;
+            }
         }
 
         if dry_run {
             println!("Would clean up output for job #{}", job.job_id);
         } else {
-            job.delete_output_and_run_dir()
-                .with_context(|| format!("Error occured cleaning up output for job #{}", job.job_id))?;
+            job.delete_output_and_run_dir().with_context(|| {
+                format!("Error occured cleaning up output for job #{}", job.job_id)
+            })?;
             println!("Output for job #{} cleaned up", job.job_id);
         }
     }
@@ -327,7 +357,7 @@ pub async fn clean_errored_jobs(
 pub enum JobStateFilter {
     Any,
     PendingAndRunning,
-    Only(Vec<JobState>)
+    Only(Vec<JobState>),
 }
 
 impl JobStateFilter {
@@ -339,8 +369,10 @@ impl JobStateFilter {
             JobStateFilter::Any => false,
             JobStateFilter::PendingAndRunning => true,
             JobStateFilter::Only(states) => {
-                states.len() == 2 && states.contains(&JobState::Pending) && states.contains(&JobState::Running)
-            },
+                states.len() == 2
+                    && states.contains(&JobState::Pending)
+                    && states.contains(&JobState::Running)
+            }
         }
     }
 }
@@ -358,7 +390,7 @@ impl Display for JobStateFilter {
                     write!(f, "{s}")?;
                 }
                 Ok(())
-            },
+            }
         }
     }
 }
@@ -376,9 +408,7 @@ impl FromStr for JobStateFilter {
             return Ok(Self::PendingAndRunning);
         }
 
-        let states: Vec<_> = s.split(',')
-            .map(|x| JobState::from_str(x))
-            .try_collect()?;
+        let states: Vec<_> = s.split(',').map(|x| JobState::from_str(x)).try_collect()?;
 
         Ok(Self::Only(states))
     }
@@ -411,24 +441,28 @@ pub struct PrintJobsCli {
 
     /// Limit to certain job IDs, repeat this argument to specify multiple
     /// job IDs. If given, these jobs will be displayed regardless of their
-    /// state (i.e. --states will have no effect). 
+    /// state (i.e. --states will have no effect).
     #[clap(short = 'j', long)]
     job_id: Vec<i32>,
 
     /// Limit jobs to those submitted on or after this date
     #[clap(short = 'a', long)]
     submitted_after: Option<NaiveDate>,
-        
+
     /// Limit jobs to those submitted before this date
     #[clap(short = 'b', long)]
     submitted_before: Option<NaiveDate>,
 
     /// Limit jobs to those submitted under this email. Use "NONE" to filter for jobs submitted without an email.
     #[clap(short = 'e', long)]
-    submitter_email: Option<String>
+    submitter_email: Option<String>,
 }
 
-pub async fn print_jobs_table_cli(conn: &mut MySqlConn, args: PrintJobsCli) -> anyhow::Result<()> {
+pub async fn print_jobs_table_cli(
+    conn: &mut MySqlConn,
+    config: &Config,
+    args: PrintJobsCli,
+) -> anyhow::Result<()> {
     let states = if args.all {
         JobStateFilter::Any
     } else {
@@ -436,22 +470,25 @@ pub async fn print_jobs_table_cli(conn: &mut MySqlConn, args: PrintJobsCli) -> a
     };
 
     print_jobs_table(
-        conn, 
+        conn,
+        config,
         args.details,
         states,
         args.job_id.as_slice(),
         (args.submitted_after, args.submitted_before),
-        args.submitter_email.as_deref()
-    ).await
+        args.submitter_email.as_deref(),
+    )
+    .await
 }
 
 pub async fn print_jobs_table(
     conn: &mut MySqlConn,
+    config: &Config,
     detailed: bool,
     state_filter: JobStateFilter,
     job_ids: &[i32],
     submit_date_range: (Option<NaiveDate>, Option<NaiveDate>),
-    submit_email: Option<&str>
+    submit_email: Option<&str>,
 ) -> anyhow::Result<()> {
     let state_filter = if !job_ids.is_empty() {
         JobStateFilter::Any
@@ -466,14 +503,19 @@ pub async fn print_jobs_table(
     let submit_start = submit_date_range.0.map(|d| d.and_hms_opt(0, 0, 0).unwrap());
     let submit_end = submit_date_range.1.map(|d| d.and_hms_opt(0, 0, 0).unwrap());
 
-    let jobs = jobs.into_iter()
+    let jobs = jobs
+        .into_iter()
         .filter(|j| {
             if let Some(start) = submit_start {
-                if j.submit_time < start { return false; }
+                if j.submit_time < start {
+                    return false;
+                }
             }
 
             if let Some(end) = submit_end {
-                if j.submit_time >= end { return false; }
+                if j.submit_time >= end {
+                    return false;
+                }
             }
 
             if !job_ids.is_empty() {
@@ -491,7 +533,8 @@ pub async fn print_jobs_table(
             }
 
             return true;
-        }).map(|mut j| {
+        })
+        .map(|mut j| {
             // Email should be the only field where a used string is
             // stored. Carriage returns mess up the table, so escape them.
             j.email = j.email.map(|s| s.replace('\r', "\\r"));
@@ -501,6 +544,9 @@ pub async fn print_jobs_table(
     if detailed {
         let mut at_least_one = false;
         for job in jobs {
+            // We could still have the fair share policies add their extra information,
+            // but since those have to do with order, right now it doesn't seem as useful
+            // for the detail view.
             println!("{}", job.verbose_display());
             at_least_one = true;
         }
@@ -508,13 +554,117 @@ pub async fn print_jobs_table(
             println!("No jobs matching given criteria.");
         }
     } else {
-        let table = orm::utils::to_std_table(jobs);
+        let jobs = jobs.collect_vec();
+        let mut table = make_jobs_table(conn, config, jobs).await?;
+        let table = table.with(orm::utils::std_table_options());
         println!("{table}");
     }
 
     Ok(())
 }
 
+async fn make_jobs_table(
+    conn: &mut MySqlConn,
+    config: &Config,
+    jobs: Vec<Job>,
+) -> anyhow::Result<tabled::Table> {
+    // This gets a little complicated, because we want to group the jobs by queue, and have each queue's fair share
+    // object get all the jobs at once. That way it can order them correctly, and avoid having to query the database
+    // for each job. (For example, the pseudo-round robin policy can get the penalties from the database once, and just
+    // apply them to each job.) We'll probably want to return a CliTableJob or something that has (1) the order of that
+    // job in its queue as an i64 (finished jobs first with i64::MIN, then running with 0, then pending with >0 - or maybe
+    // this should be an enum?), the job itself, and any extra fields as a hashmap. This will need to use tabled::Builder
+    // to allow for arbitrary numbers of records from the hashmap.
+    //
+    // Then to interleave the queues; we implement a custom orderer that does all of one "category" (finished, running, pending)
+    // for each queue in a block. For example, print all the "std-sites" finished first, then all the "submitted" finished,
+    // then "std-sites" running, "submitted" running, "std-sites" pending, and "submitted" pending.
+    let mut builder = tabled::builder::Builder::with_capacity(jobs.len());
+    let mut header = Job::headers();
+    let mut grouped_jobs = group_jobs_by_queue_and_state(jobs);
+
+    for (queue, queue_jobs) in grouped_jobs.iter_mut() {
+        let these_jobs = std::mem::take(&mut queue_jobs.finished);
+        make_jobs_table_helper(conn, config, queue, these_jobs, &mut header, &mut builder).await?;
+    }
+    for (queue, queue_jobs) in grouped_jobs.iter_mut() {
+        let these_jobs = std::mem::take(&mut queue_jobs.running);
+        make_jobs_table_helper(conn, config, queue, these_jobs, &mut header, &mut builder).await?;
+    }
+    for (queue, queue_jobs) in grouped_jobs.iter_mut() {
+        let these_jobs = std::mem::take(&mut queue_jobs.pending);
+        make_jobs_table_helper(conn, config, queue, these_jobs, &mut header, &mut builder).await?;
+    }
+    builder.insert_record(0, header);
+    Ok(builder.build())
+}
+
+async fn make_jobs_table_helper(
+    conn: &mut MySqlConn,
+    config: &Config,
+    queue: &str,
+    these_jobs: Vec<Job>,
+    header: &mut Vec<Cow<'static, str>>,
+    builder: &mut tabled::builder::Builder,
+) -> anyhow::Result<()> {
+    let fs_policy = config
+        .get_queue(queue)
+        .map(|q| q.fair_share_policy)
+        .unwrap_or(orm::config::FairSharePolicy::default());
+    let display_jobs = fs_policy
+        .order_jobs_for_display(conn, queue, these_jobs)
+        .await?;
+
+    // This is ugly by necessity: `row` starts with the job fields, then we make sure it is long
+    // enough to handle all the known fields. Only then do we extend the header and row if there
+    // are new fields we haven't seen yet. We do it this way to avoid iterating through the jobs
+    // twice: when `header` is initialized, we don't know what extra fields the different queues'
+    // fair share policies might want to add.
+    for (job, extra_fields) in display_jobs {
+        let mut row = job.fields();
+        row.resize_with(header.len(), || Cow::from("".to_string()));
+        for (col, val) in extra_fields {
+            if let Some(idx) = header.iter().position(|el| el == col) {
+                row[idx] = Cow::from(val);
+            } else {
+                header.push(Cow::from(col));
+                row.push(Cow::from(val));
+            }
+        }
+        builder.push_record(row);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Default)]
+struct JobStateGroups {
+    finished: Vec<Job>,
+    running: Vec<Job>,
+    pending: Vec<Job>,
+}
+
+fn group_jobs_by_queue_and_state(jobs: Vec<Job>) -> HashMap<String, JobStateGroups> {
+    let mut grouped_jobs: HashMap<String, JobStateGroups> = HashMap::new();
+    for job in jobs {
+        let this_queue = &job.queue;
+        if !grouped_jobs.contains_key(this_queue) {
+            grouped_jobs.insert(this_queue.to_string(), JobStateGroups::default());
+        }
+
+        let state_groups = grouped_jobs
+            .get_mut(this_queue)
+            .expect("Any queue must have its groups inserted in the hash map");
+
+        match job.state {
+            JobState::Pending => state_groups.pending.push(job),
+            JobState::Running => state_groups.running.push(job),
+            JobState::Complete | JobState::Errored | JobState::Cleaned => {
+                state_groups.finished.push(job)
+            }
+        }
+    }
+    grouped_jobs
+}
 
 #[derive(Debug, Args)]
 pub struct JobStatusCli {
@@ -526,9 +676,9 @@ pub async fn print_job_status_cli(conn: &mut MySqlConn, args: JobStatusCli) -> a
     print_job_status(conn, args.job_id).await
 }
 
-
 pub async fn print_job_status(conn: &mut MySqlConn, job_id: i32) -> anyhow::Result<()> {
-    let job = orm::jobs::Job::get_job_with_id(conn, job_id).await
+    let job = orm::jobs::Job::get_job_with_id(conn, job_id)
+        .await
         .context("Error occurred while retrieving the job from the database")?;
 
     let run_dir = job.run_dir(false);
@@ -546,8 +696,8 @@ pub async fn print_job_status(conn: &mut MySqlConn, job_id: i32) -> anyhow::Resu
                     let new_time = time
                         .map(|t| if t < ctime { t } else { ctime })
                         .unwrap_or(ctime);
-                    (Some(new_time), n+1)
-                },
+                    (Some(new_time), n + 1)
+                }
                 Err(e) => {
                     debug!("While querying run arguments for {date}: {e}");
                     (time, n)
@@ -557,7 +707,11 @@ pub async fn print_job_status(conn: &mut MySqlConn, job_id: i32) -> anyhow::Resu
 
     if let Some(start_time) = start_time {
         let run_dur = chrono::Local::now() - start_time;
-        println!("  Started at {}, running for {}", start_time.format("%Y-%m-%d %H:%M:%S"), orm::utils::duration_string(run_dur));
+        println!(
+            "  Started at {}, running for {}",
+            start_time.format("%Y-%m-%d %H:%M:%S"),
+            orm::utils::duration_string(run_dur)
+        );
         let total_ndays = (job.end_date - job.start_date).num_days();
         println!("  Generating day {ndays} of {total_ndays}");
     } else if job.state.is_over() {
@@ -569,7 +723,10 @@ pub async fn print_job_status(conn: &mut MySqlConn, job_id: i32) -> anyhow::Resu
         }
         return Ok(());
     } else {
-        println!("  Job not yet executing (no run args files under {}).", run_dir.display());
+        println!(
+            "  Job not yet executing (no run args files under {}).",
+            run_dir.display()
+        );
         return Ok(());
     }
 
@@ -577,12 +734,18 @@ pub async fn print_job_status(conn: &mut MySqlConn, job_id: i32) -> anyhow::Resu
     // we'll have already returned.
     let (nmod, nvmr, nmap) = walkdir::WalkDir::new(&run_dir)
         .into_iter()
-        .filter_entry(|entry| entry.file_name().to_str().map(|s| !s.starts_with(".")).unwrap_or(true))
+        .filter_entry(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(|s| !s.starts_with("."))
+                .unwrap_or(true)
+        })
         .fold((0, 0, 0), |(mods, vmrs, maps), entry| {
             if let Ok(entry) = entry {
                 let name = entry.file_name().to_str().unwrap_or("");
                 if name.ends_with(".mod") {
-                    (mods +1, vmrs, maps)
+                    (mods + 1, vmrs, maps)
                 } else if name.ends_with(".vmr") {
                     (mods, vmrs + 1, maps)
                 } else if name.ends_with(".map") || name.ends_with(".map.nc") {
@@ -601,36 +764,54 @@ pub async fn print_job_status(conn: &mut MySqlConn, job_id: i32) -> anyhow::Resu
     Ok(())
 }
 
-
 #[derive(Debug, Args)]
 pub struct ChangeDeleteTimeCli {
-    /// Time to update jobs to. If not given, then will be computed 
+    /// Time to update jobs to. If not given, then will be computed
     /// as now plus the configured delay
-    #[clap(short='t', long)]
+    #[clap(short = 't', long)]
     delete_time: Option<NaiveDateTime>,
-    
+
     /// Job IDs to update.
-    #[clap(short='j', long)]
+    #[clap(short = 'j', long)]
     job_id: Vec<i32>,
 
     /// The name of a queue; if given, jobs with a NULL deletion time in
-    /// that queue will have their deletion time updated. This works as 
+    /// that queue will have their deletion time updated. This works as
     /// an intersection with --job-id
-    #[clap(short='n', long)]
+    #[clap(short = 'n', long)]
     null_in_queue: Option<String>,
 
     /// Set this to only print what will happen.
-    #[clap(short='d', long)]
+    #[clap(short = 'd', long)]
     dry_run: bool,
 }
 
-pub async fn change_jobs_delete_time_cli(conn: &mut MySqlConn, config: &Config, args: ChangeDeleteTimeCli) -> anyhow::Result<()> {
-    change_jobs_delete_time(conn, config, args.delete_time, &args.job_id, args.null_in_queue.as_deref(), args.dry_run).await
+pub async fn change_jobs_delete_time_cli(
+    conn: &mut MySqlConn,
+    config: &Config,
+    args: ChangeDeleteTimeCli,
+) -> anyhow::Result<()> {
+    change_jobs_delete_time(
+        conn,
+        config,
+        args.delete_time,
+        &args.job_id,
+        args.null_in_queue.as_deref(),
+        args.dry_run,
+    )
+    .await
 }
 
-pub async fn change_jobs_delete_time(conn: &mut MySqlConn, config: &Config, delete_time: Option<NaiveDateTime>, job_ids: &[i32], null_in_queue: Option<&str>, dry_run: bool) -> anyhow::Result<()> {
+pub async fn change_jobs_delete_time(
+    conn: &mut MySqlConn,
+    config: &Config,
+    delete_time: Option<NaiveDateTime>,
+    job_ids: &[i32],
+    null_in_queue: Option<&str>,
+    dry_run: bool,
+) -> anyhow::Result<()> {
     let jobs = if let Some(queue) = null_in_queue {
-        Job::get_jobs_in_queue(conn, queue).await?
+        Job::get_jobs_in_queue(conn, queue, None).await?
     } else {
         Job::get_jobs_list(conn, false).await?
     };
@@ -651,13 +832,19 @@ pub async fn change_jobs_delete_time(conn: &mut MySqlConn, config: &Config, dele
         }
 
         if dry_run {
-            println!("Would change delete time on job {} from {:?} to {:?}", job.job_id, job.delete_time, delete_time);
+            println!(
+                "Would change delete time on job {} from {:?} to {:?}",
+                job.job_id, job.delete_time, delete_time
+            );
         } else {
             Job::set_delete_time_by_id(job.job_id, conn, delete_time).await?;
             debug!("Updated deletion time for job {}", job.job_id);
         }
         nchanged += 1;
     }
-    info!("{nchanged} jobs deletion times updated to {}", delete_time.unwrap());
+    info!(
+        "{nchanged} jobs deletion times updated to {}",
+        delete_time.unwrap()
+    );
     Ok(())
 }

@@ -1,27 +1,31 @@
 [workspace]
-members = [
-    "core-orm",
-    "cli",
-    "service",
-    "web-app"
-]
+members = ["core-orm", "cli", "service", "web-app"]
 exclude = ["deps/Rocket", "python-bindings", "rocket-app"]
 
 [workspace.dependencies]
 anyhow = "1.0"
 async-trait = "0.1.72"
 chrono = "0.4"
-clap = {version = "3.2", features = ["derive", "cargo"]}
+clap = { version = "3.2", features = ["derive", "cargo"] }
 dotenv = "0.15.0"
 env_logger = "0.9"
 glob = "0.3"
 itertools = "0.10.3"
+lettre = { version = "0.10", features = ["serde"] }
 log = "0.4"
-serde = {version = "1.0", features = ["derive"]}
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = {version = "0.7", features = ["mysql", "runtime-tokio-rustls", "chrono"]}
+sqlx = { version = "0.7", features = [
+    "mysql",
+    "runtime-tokio-rustls",
+    "chrono",
+] }
 tabled = "0.14.0"
-tokio = {version = "1.31.0", features = ["full"]}
-url = {version = "2.2", features = ["serde"]}
+testcontainers-modules = { version = "0.6.1", features = [
+    "mariadb",
+    "blocking",
+] }
+test-log = "0.2.16"
+tokio = { version = "1.41.0", features = ["full"] }
+url = { version = "2.2", features = ["serde"] }
 # tokio = {version = "1.31.0", features = ["full", "tracing"]}
-

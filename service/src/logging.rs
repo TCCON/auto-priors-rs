@@ -17,7 +17,7 @@ pub(crate) struct ServiceLoggingCli {
 
     /// If given, a file which messages from the service will be written to.
     #[clap(long)]
-    log_file: Option<String>,
+    pub(crate) log_file: Option<String>,
 
     /// The lowest severity message to write to the file. Same options as --stderr-level
     #[clap(long, default_value_t = LevelFilter::Info)]
