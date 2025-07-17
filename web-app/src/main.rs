@@ -1,19 +1,25 @@
-use std::{sync::Arc, fmt::Debug};
+use std::{fmt::Debug, sync::Arc};
 
-use axum::{extract::State, http::StatusCode, routing::{get, post}, Router};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    routing::{get, post},
+    Router,
+};
 use axum_login::{login_required, AuthManagerLayerBuilder};
-use log::{error, info, debug};
+use log::{debug, error, info};
 use tower_http::services::ServeDir;
 
 use orm;
 
-mod templates_common;
 mod auth;
+mod auth_api;
 mod auth_web;
 mod home;
 mod jobs;
 mod met_data;
 mod std_sites;
+mod templates_common;
 
 use tower_sessions::cookie::time::Duration;
 
@@ -30,7 +36,7 @@ impl AppState {
         let root_uri = match std::env::var("PRIORS_WEB_ROOT_URI") {
             Ok(v) => v,
             Err(std::env::VarError::NotPresent) => "/".to_string(),
-            Err(e) => return Err(e.into())
+            Err(e) => return Err(e.into()),
         };
 
         Ok(Self { pool, root_uri })
@@ -40,7 +46,6 @@ impl AppState {
         self.pool.clone()
     }
 }
-
 
 fn server_error<T, E: Debug>(res: Result<T, E>) -> Result<T, StatusCode> {
     match res {
@@ -67,7 +72,9 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let address = "127.0.0.1:8080";
 
-    let state = AppState::new().await.expect("Could not set up shared state");
+    let state = AppState::new()
+        .await
+        .expect("Could not set up shared state");
     let pool = state.clone_pool();
     let shared_state = Arc::new(state);
 

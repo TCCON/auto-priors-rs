@@ -9,14 +9,17 @@ pub(crate) type AuthSession = axum_login::AuthSession<Backend>;
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub(crate) struct User {
-    id: i64,
+    pub(crate) id: i64,
     pub(crate) username: String,
     pub(crate) email: String,
     password: String,
 }
 
 impl User {
-    pub(crate) async fn all_associated_emails(&self, conn: &mut MySqlConn) -> anyhow::Result<Vec<String>> {
+    pub(crate) async fn all_associated_emails(
+        &self,
+        _conn: &mut MySqlConn,
+    ) -> anyhow::Result<Vec<String>> {
         // TODO: this should query the database to find other emails associated with this user
         Ok(vec![self.email.clone()])
     }
@@ -56,10 +59,9 @@ pub(crate) struct Credentials {
     pub(crate) next: Option<String>,
 }
 
-
 #[derive(Debug, Clone)]
 pub(crate) struct Backend {
-    pool: PoolWrapper
+    pool: PoolWrapper,
 }
 
 impl Backend {
@@ -91,13 +93,17 @@ impl AuthnBackend for Backend {
     type Credentials = Credentials;
     type Error = AuthError;
 
-    async fn authenticate(&self, creds: Self::Credentials) -> Result<Option<Self::User>, Self::Error> {
+    async fn authenticate(
+        &self,
+        creds: Self::Credentials,
+    ) -> Result<Option<Self::User>, Self::Error> {
         let mut conn = self.pool.get_connection().await?;
         let user: Option<Self::User> = sqlx::query_as!(
             User,
             "SELECT id,username,email,password FROM v_auth_user WHERE username = ?",
             creds.username
-        ).fetch_optional(&mut *conn)
+        )
+        .fetch_optional(&mut *conn)
         .await?;
 
         if user.is_none() {
@@ -111,7 +117,8 @@ impl AuthnBackend for Backend {
             // The axum-login example suggests doing password validation in a separate
             // thread since it can be slow.
             djangohashers::check_password(&form_pw, &user_pw)
-        }).await??;
+        })
+        .await??;
 
         if pw_valid {
             Ok(Some(user))
@@ -126,7 +133,8 @@ impl AuthnBackend for Backend {
             User,
             "SELECT id,username,email,password FROM v_auth_user WHERE id = ?",
             user_id
-        ).fetch_optional(&mut *conn)
+        )
+        .fetch_optional(&mut *conn)
         .await?;
 
         Ok(user)
