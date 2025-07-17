@@ -5,12 +5,15 @@ exclude = ["deps/Rocket", "python-bindings", "rocket-app"]
 [workspace.dependencies]
 anyhow = "1.0"
 async-trait = "0.1.72"
+axum-login = "0.15.3"
+base64 = "0.22"
 chrono = "0.4"
 clap = { version = "3.2", features = ["derive", "cargo"] }
 dotenv = "0.15.0"
 env_logger = "0.9"
 glob = "0.3"
 itertools = "0.10.3"
+jsonwebtoken = "9.3.1"
 lettre = { version = "0.10", features = ["serde"] }
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
@@ -26,6 +29,7 @@ testcontainers-modules = { version = "0.6.1", features = [
     "blocking",
 ] }
 test-log = "0.2.16"
+thiserror = "1.0.61"
 tokio = { version = "1.41.0", features = ["full"] }
 url = { version = "2.2", features = ["serde"] }
 # tokio = {version = "1.31.0", features = ["full", "tracing"]}

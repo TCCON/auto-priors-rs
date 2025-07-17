@@ -11,9 +11,9 @@ use log::{debug, error, info};
 use tower_http::services::ServeDir;
 
 use orm;
+use orm::auth;
+use orm::auth::api as auth_api;
 
-mod auth;
-mod auth_api;
 mod auth_web;
 mod home;
 mod jobs;

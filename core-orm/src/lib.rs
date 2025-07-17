@@ -6,16 +6,17 @@ use log;
 use sqlx;
 use sqlx::migrate::Migrator;
 
-pub mod error;
+pub mod auth;
 pub mod config;
-pub mod utils;
 pub mod email;
+pub mod error;
+pub mod export;
+pub mod input_files;
+pub mod jobs;
 pub mod met;
 pub mod siteinfo;
-pub mod jobs;
-pub mod input_files;
 pub mod stdsitejobs;
-pub mod export;
+pub mod utils;
 
 pub mod test_utils;
 
@@ -36,32 +37,40 @@ pub async fn unapply_migrations(conn: &mut MySqlConn, target: i64) -> anyhow::Re
 
 pub fn get_database_url(url_in: Option<String>) -> anyhow::Result<String> {
     if let Some(url) = url_in {
-        return Ok(url)
+        return Ok(url);
     }
 
     // First, try the regular environmental variables
     for key in DB_ENV_VARS {
         if let Ok(val) = env::var(key) {
-            log::debug!("Using database URL {} from the environmental variable {key}", sanitize_db_url(&val));
-            return Ok(val)
+            log::debug!(
+                "Using database URL {} from the environmental variable {key}",
+                sanitize_db_url(&val)
+            );
+            return Ok(val);
         }
     }
 
     // If we can't find the URL in existing environmental variables, try using dotenv.
-    let env_path = dotenv::dotenv().context("No database URL defined in existing environmental variables, and no .env file found.")?;
+    let env_path = dotenv::dotenv().context(
+        "No database URL defined in existing environmental variables, and no .env file found.",
+    )?;
     for key in DB_ENV_VARS {
         if let Ok(val) = dotenv::var(key) {
             let epd = env_path.display();
-            log::debug!("Using database URL {} from the variable {key} in {epd}", sanitize_db_url(&val));
-            return Ok(val)
+            log::debug!(
+                "Using database URL {} from the variable {key} in {epd}",
+                sanitize_db_url(&val)
+            );
+            return Ok(val);
         }
     }
 
-    return Err(anyhow::anyhow!("Unable to find database URL."))
+    return Err(anyhow::anyhow!("Unable to find database URL."));
 }
 
 /// A wrapper around a [`sqlx::MySqlPool`] that helps enforce certain access conditions.
-/// 
+///
 /// For the priors code, we want to enforce the safest behavior regarding transactions'
 /// interaction with each other. That means setting the isolation level to `SERIALIZABLE`.
 /// This wrapper ensures that any connections returned via the `get_connection` method
@@ -83,17 +92,21 @@ impl PoolWrapper {
 }
 
 /// Returns access to a pool of database connections
-/// 
-/// All access to the database for the priors should use this function to ensure 
+///
+/// All access to the database for the priors should use this function to ensure
 /// certain per-session settings are enabled.
 pub async fn get_database_pool(url_in: Option<String>) -> anyhow::Result<PoolWrapper> {
     let url = get_database_url(url_in)
         .context("Error occurred getting database URL within get_database_pool")?;
-    let pool = sqlx::MySqlPool::connect(&url).await
+    let pool = sqlx::MySqlPool::connect(&url)
+        .await
         .with_context(|| format!("Error occurred connecting to MySqlPool at url = {url}"))?;
-    log::debug!("Database pool established with URL = {}", sanitize_db_url(&url));
+    log::debug!(
+        "Database pool established with URL = {}",
+        sanitize_db_url(&url)
+    );
     let wrapper = PoolWrapper(pool);
-    return Ok(wrapper)
+    return Ok(wrapper);
 }
 
 pub fn sanitize_db_url(url: &str) -> String {
@@ -101,7 +114,7 @@ pub fn sanitize_db_url(url: &str) -> String {
     let mut url = if let Ok(s) = Url::parse(url) {
         s
     } else {
-        return "****".to_string()
+        return "****".to_string();
     };
 
     // Ignore errors, if we get an error, it just means this URL couldn't have a username or password

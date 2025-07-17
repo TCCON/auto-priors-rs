@@ -3,20 +3,22 @@ use axum_login::{AuthUser, AuthnBackend, UserId};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use orm::{MySqlConn, PoolWrapper};
+use crate::{MySqlConn, PoolWrapper};
 
-pub(crate) type AuthSession = axum_login::AuthSession<Backend>;
+pub mod api;
+
+pub type AuthSession = axum_login::AuthSession<Backend>;
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]
-pub(crate) struct User {
-    pub(crate) id: i64,
-    pub(crate) username: String,
-    pub(crate) email: String,
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    pub email: String,
     password: String,
 }
 
 impl User {
-    pub(crate) async fn all_associated_emails(
+    pub async fn all_associated_emails(
         &self,
         _conn: &mut MySqlConn,
     ) -> anyhow::Result<Vec<String>> {
@@ -53,25 +55,25 @@ impl AuthUser for User {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct Credentials {
-    pub(crate) username: String,
-    pub(crate) password: String,
-    pub(crate) next: Option<String>,
+pub struct Credentials {
+    pub username: String,
+    pub password: String,
+    pub next: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Backend {
+pub struct Backend {
     pool: PoolWrapper,
 }
 
 impl Backend {
-    pub(crate) fn new(pool: PoolWrapper) -> Self {
+    pub fn new(pool: PoolWrapper) -> Self {
         Backend { pool }
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum AuthError {
+pub enum AuthError {
     #[error(transparent)]
     SqlError(#[from] sqlx::Error),
     #[error(transparent)]

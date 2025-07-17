@@ -11,19 +11,17 @@ askama = "0.12.1"
 askama_axum = "0.4.0"
 async-trait.workspace = true
 axum = "0.7.3"
-axum-login = "0.15.3"
-base64 = "0.22"
+axum-login.workspace = true
+base64.workspace = true
 chrono.workspace = true
-djangohashers = "1.7.3"
 env_logger.workspace = true
 itertools.workspace = true
-jsonwebtoken = "9.3.1"
+jsonwebtoken.workspace = true
 log.workspace = true
-rand = "0.9.1"
 serde.workspace = true
 sqlx.workspace = true
 # tera = "1.19.1"
-thiserror = "1.0.61"
+thiserror.workspace = true
 tokio.workspace = true
 tower-sessions = { version = "0.12.2", features = ["signed"] }
 orm = { path = "../core-orm", package = "tccon_priors_orm" }

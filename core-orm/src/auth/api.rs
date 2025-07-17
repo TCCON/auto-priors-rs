@@ -1,7 +1,7 @@
+use crate::MySqlConn;
 use anyhow::Context;
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use jsonwebtoken::{EncodingKey, Header};
-use orm::MySqlConn;
 use rand::{rng, RngCore};
 use serde::{Deserialize, Serialize};
 use sqlx::Connection;
