@@ -218,3 +218,30 @@ impl Display for EmailError {
 }
 
 impl Error for EmailError {}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ApiAuthError {
+    #[error("The token is invalid as its embedded expiration date has passed")]
+    TokenInvalidExpired,
+    #[error("The token is invalid: {0}")]
+    TokenInvalidOther(#[from] jsonwebtoken::errors::Error),
+    #[error("The token is invalid as its expiration date on the server has passed")]
+    TokenExpiredOnServer,
+    #[error("The token is invalid as its ID or user could not be found on the server")]
+    TokenNotFound,
+    #[error("A database error occurred")]
+    SqlError(#[from] sqlx::Error),
+    #[error("{0}")]
+    Other(String),
+}
+
+impl ApiAuthError {
+    /// Return a string that communicates the problem to the user
+    pub fn user_error(&self) -> &'static str {
+        match self {
+            Self::TokenExpiredOnServer | Self::TokenInvalidExpired => "This token has expired",
+            Self::SqlError(_) => "A server error occurred",
+            _ => "This token is not valid",
+        }
+    }
+}

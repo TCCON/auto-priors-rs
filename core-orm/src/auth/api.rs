@@ -1,10 +1,12 @@
-use crate::MySqlConn;
+use std::collections::HashSet;
+
+use crate::{error::ApiAuthError, MySqlConn};
 use anyhow::Context;
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
-use jsonwebtoken::{EncodingKey, Header};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header};
 use rand::{rng, RngCore};
 use serde::{Deserialize, Serialize};
-use sqlx::Connection;
+use sqlx::{prelude::FromRow, Connection};
 
 use crate::auth::User;
 
@@ -45,7 +47,7 @@ pub(crate) struct RefreshClaims {
     /// The token issuer (this will be us)
     iss: String,
 
-    /// The subject of the token (this will be the user, identified by an email usually)
+    /// The subject of the token (this will be the username)
     sub: String,
 
     /// UTC expiration date & time as a Unix timestamp
@@ -56,23 +58,23 @@ pub(crate) struct RefreshClaims {
 }
 
 impl RefreshClaims {
-    fn new(user_email: String) -> Self {
+    fn new(username: String) -> Self {
         let exp = chrono::Utc::now() + chrono::Days::new(365);
         // TODO: decide if I want the issuer to be set in the config
         Self {
             iss: "ggg2020-priors".to_string(),
-            sub: user_email,
+            sub: username,
             exp: exp.timestamp(),
             jti: generate_api_key(),
         }
     }
 
-    fn new_expire_after(user_email: String, expire_after: chrono::Duration) -> Self {
+    fn new_expire_after(username: String, expire_after: chrono::Duration) -> Self {
         let exp = chrono::Utc::now() + expire_after;
         // TODO: decide if I want the issuer to be set in the config
         Self {
             iss: "ggg2020-priors".to_string(),
-            sub: user_email,
+            sub: username,
             exp: exp.timestamp(),
             jti: generate_api_key(),
         }
@@ -81,6 +83,53 @@ impl RefreshClaims {
     fn sql_exp(&self) -> chrono::NaiveDateTime {
         let exp = chrono::DateTime::from_timestamp_nanos(self.exp * 1_000_000_000);
         exp.naive_utc()
+    }
+}
+
+#[derive(Debug, FromRow)]
+pub(crate) struct RefreshTokenDb {
+    id: i64,
+    user_id: i64,
+    api_key: String,
+    expires: chrono::NaiveDateTime,
+    nickname: String,
+}
+
+impl RefreshTokenDb {
+    pub(crate) async fn load_from_db(
+        conn: &mut MySqlConn,
+        user_id: i64,
+        api_key: &str,
+    ) -> Result<Option<RefreshTokenDb>, sqlx::Error> {
+        sqlx::query_as!(
+            RefreshTokenDb,
+            "SELECT * FROM auth_api_user WHERE user_id = ? AND api_key = ?",
+            user_id,
+            api_key
+        )
+        .fetch_optional(conn)
+        .await
+    }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, strum::EnumString, strum::IntoStaticStr)]
+#[strum(serialize_all = "UPPERCASE")]
+pub enum ApiPermission {
+    Admin,
+    Query,
+    Submit,
+    Download,
+}
+
+pub struct ApiPermSet(HashSet<ApiPermission>);
+
+impl ApiPermSet {
+    pub fn has_perm(&self, perm: &ApiPermission) -> bool {
+        self.0.contains(perm)
+    }
+
+    pub fn load_from_db(_token_id: i64) -> Result<Self, sqlx::Error> {
+        todo!()
     }
 }
 
@@ -93,9 +142,9 @@ pub async fn generate_refresh_token(
 ) -> anyhow::Result<String> {
     let header = Header::default();
     let claims = if let Some(after) = expire_after {
-        RefreshClaims::new_expire_after(user.email, after)
+        RefreshClaims::new_expire_after(user.username, after)
     } else {
-        RefreshClaims::new(user.email)
+        RefreshClaims::new(user.username)
     };
 
     // Insert an entry for this token into the database, then encode and return it.
@@ -125,12 +174,37 @@ pub async fn generate_refresh_token(
     Ok(jwt)
 }
 
-pub(crate) async fn authenticate_refresh_token(token: String) -> anyhow::Result<()> {
+pub async fn authenticate_refresh_token(
+    conn: &mut MySqlConn,
+    token: &str,
+    decode_key: &DecodingKey,
+) -> Result<(), ApiAuthError> {
     // First validate the token itself - if not signed or otherwise invalid, auth fails
+    let val = jsonwebtoken::Validation::default();
+    let res = jsonwebtoken::decode::<RefreshClaims>(token, decode_key, &val);
+    let claims = match res {
+        Ok(tok) => tok.claims,
+        Err(e) => match e.kind() {
+            jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+                return Err(ApiAuthError::TokenInvalidExpired)
+            }
+            _ => return Err(ApiAuthError::TokenInvalidOther(e)),
+        },
+    };
+
     // Then check against the database to confirm the token is not expired and is still
     // allowed. If not, auth fails
-    // If auth succeeds, return permissions associated with this user.
-    anyhow::bail!("Authentication failed")
+    let user = User::load_from_db(conn, &claims.sub)
+        .await
+        .map_err(|e| ApiAuthError::Other(e.to_string()))?
+        .ok_or_else(|| ApiAuthError::TokenNotFound)?;
+
+    let _api_key_opt = RefreshTokenDb::load_from_db(conn, user.id, &claims.jti)
+        .await?
+        .ok_or_else(|| ApiAuthError::TokenNotFound)?;
+
+    // TODO: If auth succeeds, return permissions associated with this user.
+    Ok(())
 }
 
 pub(crate) fn generate_api_key() -> String {

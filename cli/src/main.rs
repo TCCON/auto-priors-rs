@@ -408,6 +408,14 @@ async fn main() -> anyhow::Result<()> {
             let mut conn = db.get_connection().await?;
             api::generate_api_key_cli(&mut conn, &loaded_config, subargs).await?;
         }
+
+        Commands::Api(ApiCli {
+            command: ApiActions::ValidateToken(subargs),
+        }) => {
+            let loaded_config = load_config()?;
+            let mut conn = db.get_connection().await?;
+            api::validate_api_key_cli(&mut conn, &loaded_config, subargs).await?;
+        }
     };
 
     Ok(())

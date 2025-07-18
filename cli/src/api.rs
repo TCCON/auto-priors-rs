@@ -1,5 +1,7 @@
+use std::io::Read;
+
 use clap::{Args, Subcommand};
-use orm::auth::api::generate_refresh_token;
+use orm::auth::api::{authenticate_refresh_token, generate_refresh_token};
 use orm::auth::{load_jwt_hmac_secret, User};
 use orm::config::Config;
 use orm::MySqlConn;
@@ -14,6 +16,7 @@ pub struct ApiCli {
 #[derive(Debug, Subcommand)]
 pub enum ApiActions {
     CreateToken(CreateTokenCli),
+    ValidateToken(ValidateTokenCli),
 }
 
 /// Create an API token for a user
@@ -40,7 +43,7 @@ pub async fn generate_api_key_cli(
 ) -> anyhow::Result<()> {
     let expire_after = cli.expire_after_hours.map(|h| chrono::TimeDelta::hours(h));
     let token = generate_api_key(conn, config, &cli.username, cli.nickname, expire_after).await?;
-    println!("New token for {}: {token}", cli.username);
+    println!("{token}");
     Ok(())
 }
 
@@ -61,4 +64,43 @@ pub async fn generate_api_key(
     });
     let token = generate_refresh_token(conn, user, &nickname, &encode_key, expire_after).await?;
     Ok(token)
+}
+
+/// Check that a JWT given is valid
+#[derive(Debug, Args)]
+pub struct ValidateTokenCli {
+    /// The full JSON web token to validate, or a path to a file to read it from if --file is given
+    token: String,
+
+    /// If this flag is given, then TOKEN will be intepreted as a path to read from, rather than the
+    /// token itself
+    #[clap(short = 'f', long)]
+    file: bool,
+}
+
+pub async fn validate_api_key_cli(
+    conn: &mut MySqlConn,
+    config: &Config,
+    cli: ValidateTokenCli,
+) -> anyhow::Result<()> {
+    if cli.file {
+        let mut f = std::fs::File::open(&cli.token)?;
+        let mut s = String::new();
+        f.read_to_string(&mut s)?;
+        // .trim() is needed - guess there must be whitespace at the end of some files
+        validate_api_key(conn, config, s.trim().to_string()).await
+    } else {
+        validate_api_key(conn, config, cli.token).await
+    }
+}
+
+pub async fn validate_api_key(
+    conn: &mut MySqlConn,
+    config: &Config,
+    token: String,
+) -> anyhow::Result<()> {
+    let (_, decode_key) = load_jwt_hmac_secret(&config.auth.hmac_secret_file)?;
+    authenticate_refresh_token(conn, &token, &decode_key).await?;
+    println!("Token is valid.");
+    Ok(())
 }
