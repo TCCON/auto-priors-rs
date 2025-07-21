@@ -6,6 +6,7 @@ use env_logger;
 use log::{self, debug};
 use orm;
 use tccon_priors_cli::api::{self, ApiActions, ApiCli};
+use tccon_priors_cli::auth::{self, AuthActions, AuthCli};
 use tccon_priors_cli::config::{self, ConfigActions, ConfigCli};
 use tccon_priors_cli::dbexport::{self, DbActions, DbCli};
 use tccon_priors_cli::email::{self, EmailActions, EmailCli};
@@ -40,6 +41,7 @@ enum Commands {
     Db(DbCli),
     Completions(CompletionsCli),
     Api(ApiCli),
+    Auth(AuthCli),
 }
 
 // Had to change rust-analyzer settings as described in https://github.com/rust-lang/rust-analyzer/issues/12450
@@ -415,6 +417,13 @@ async fn main() -> anyhow::Result<()> {
             let loaded_config = load_config()?;
             let mut conn = db.get_connection().await?;
             api::validate_api_key_cli(&mut conn, &loaded_config, subargs).await?;
+        }
+
+        Commands::Auth(AuthCli {
+            command: AuthActions::MakeAdmin(subargs),
+        }) => {
+            let mut conn = db.get_connection().await?;
+            auth::make_user_admin_cli(&mut conn, subargs).await?;
         }
     };
 

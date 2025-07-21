@@ -112,19 +112,30 @@ impl RefreshTokenDb {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, strum::EnumString, strum::IntoStaticStr)]
+#[derive(Debug, Hash, PartialEq, Eq, strum::Display, strum::EnumString, strum::IntoStaticStr)]
 #[strum(serialize_all = "UPPERCASE")]
-pub enum ApiPermission {
+pub enum Permission {
     Admin,
     Query,
     Submit,
     Download,
 }
 
-pub struct ApiPermSet(HashSet<ApiPermission>);
+impl Permission {
+    pub(crate) async fn get_id(&self, conn: &mut MySqlConn) -> sqlx::Result<Option<i32>> {
+        let s: &'static str = self.into();
+        let id = sqlx::query!("SELECT id FROM auth_prior_permissions WHERE tag = ?", s)
+            .fetch_optional(conn)
+            .await?
+            .map(|rec| rec.id);
+        Ok(id)
+    }
+}
+
+pub struct ApiPermSet(HashSet<Permission>);
 
 impl ApiPermSet {
-    pub fn has_perm(&self, perm: &ApiPermission) -> bool {
+    pub fn has_perm(&self, perm: &Permission) -> bool {
         self.0.contains(perm)
     }
 
@@ -204,6 +215,82 @@ pub async fn authenticate_refresh_token(
         .ok_or_else(|| ApiAuthError::TokenNotFound)?;
 
     // TODO: If auth succeeds, return permissions associated with this user.
+    Ok(())
+}
+
+/// Add a new permission for the given user to the database.
+///
+/// Returns an error if the permission was not in the database (which is a bug)
+/// or if adding the permission failed.
+pub async fn add_user_permission(
+    conn: &mut MySqlConn,
+    user: &User,
+    perm: &Permission,
+) -> anyhow::Result<()> {
+    let perm_id = perm
+        .get_id(conn)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Permission {perm} not found in database"))?;
+
+    if !user_has_perm(conn, user, perm_id).await? {
+        add_permission(conn, user, perm_id).await?;
+    }
+    Ok(())
+}
+
+async fn user_has_perm(conn: &mut MySqlConn, user: &User, perm_id: i32) -> sqlx::Result<bool> {
+    let opt = sqlx::query!(
+        "SELECT * FROM auth_prior_user_permissions WHERE user_id = ? AND perm_id = ?",
+        user.id,
+        perm_id
+    )
+    .fetch_optional(conn)
+    .await?;
+    Ok(opt.is_some())
+}
+
+async fn add_permission(conn: &mut MySqlConn, user: &User, perm_id: i32) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO auth_prior_user_permissions(user_id, perm_id) VALUES (?, ?)",
+        user.id,
+        perm_id
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// Remove a permission from the user.
+///
+/// Returns `Ok(true)` if the user had that permission and it was successfully removed.
+/// Returns `Ok(false)` if the user did not have that permission.
+/// Returns an error if any of the calls to the database failed.
+pub async fn delete_user_permission(
+    conn: &mut MySqlConn,
+    user: &User,
+    perm: &Permission,
+) -> anyhow::Result<bool> {
+    let perm_id = perm
+        .get_id(conn)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Permission {perm} not found in database"))?;
+
+    if user_has_perm(conn, user, perm_id).await? {
+        delete_permission(conn, user, perm_id).await?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+async fn delete_permission(conn: &mut MySqlConn, user: &User, perm_id: i32) -> sqlx::Result<()> {
+    sqlx::query!(
+        "DELETE FROM auth_prior_user_permissions WHERE user_id = ? AND perm_id = ?",
+        user.id,
+        perm_id
+    )
+    .execute(conn)
+    .await?;
     Ok(())
 }
 
