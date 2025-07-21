@@ -1,4 +1,4 @@
-use std::{io::Read, path::Path};
+use std::{collections::HashSet, fmt::Display, io::Read, path::Path, str::FromStr};
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -173,4 +173,70 @@ pub fn load_jwt_hmac_secret(file: &Path) -> anyhow::Result<(EncodingKey, Decodin
     let encoding = EncodingKey::from_secret(&buf);
     let decoding = DecodingKey::from_secret(&buf);
     Ok((encoding, decoding))
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, strum::Display, strum::EnumString, strum::IntoStaticStr)]
+#[strum(serialize_all = "UPPERCASE")]
+pub enum Permission {
+    Admin,
+    Query,
+    Submit,
+    Download,
+}
+
+impl Permission {
+    pub(crate) async fn get_id(&self, conn: &mut MySqlConn) -> sqlx::Result<Option<i32>> {
+        let s: &'static str = self.into();
+        let id = sqlx::query!("SELECT id FROM auth_prior_permissions WHERE tag = ?", s)
+            .fetch_optional(conn)
+            .await?
+            .map(|rec| rec.id);
+        Ok(id)
+    }
+}
+
+pub struct PermSet(HashSet<Permission>);
+
+impl PermSet {
+    pub fn has_perm(&self, perm: &Permission) -> bool {
+        self.0.contains(perm)
+    }
+
+    pub async fn load_from_db(conn: &mut MySqlConn, user: &User) -> anyhow::Result<Self> {
+        let perm_rows = sqlx::query!(
+            "SELECT perm_id,tag FROM auth_prior_user_permissions LEFT JOIN auth_prior_permissions ON auth_prior_user_permissions.perm_id = auth_prior_permissions.id WHERE user_id = ?",
+            user.id
+        ).fetch_all(conn)
+        .await?;
+
+        let mut perm_set = HashSet::new();
+        for row in perm_rows {
+            // let tag = row.tag.ok_or_else(|| anyhow::anyhow!("Permission ID {} did not have an associated tag", row.perm_id))?;
+            let tag = if let Some(tag) = row.tag {
+                tag
+            } else {
+                log::error!(
+                    "Permission ID {} did not have an associated tag",
+                    row.perm_id
+                );
+                continue;
+            };
+
+            let perm = Permission::from_str(&tag).with_context(|| {
+                format!("Could not convert permission tag '{tag}' to a concrete permission")
+            })?;
+            perm_set.insert(perm);
+        }
+
+        Ok(Self(perm_set))
+    }
+}
+
+impl Display for PermSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut tags: Vec<&'static str> = self.0.iter().map(|perm| perm.into()).collect();
+        tags.sort();
+        let joined_tags = tags.join(", ");
+        write!(f, "{joined_tags}")
+    }
 }

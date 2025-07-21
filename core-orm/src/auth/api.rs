@@ -1,6 +1,4 @@
-use std::collections::HashSet;
-
-use crate::{error::ApiAuthError, MySqlConn};
+use crate::{auth::Permission, error::ApiAuthError, MySqlConn};
 use anyhow::Context;
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header};
@@ -109,38 +107,6 @@ impl RefreshTokenDb {
         )
         .fetch_optional(conn)
         .await
-    }
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, strum::Display, strum::EnumString, strum::IntoStaticStr)]
-#[strum(serialize_all = "UPPERCASE")]
-pub enum Permission {
-    Admin,
-    Query,
-    Submit,
-    Download,
-}
-
-impl Permission {
-    pub(crate) async fn get_id(&self, conn: &mut MySqlConn) -> sqlx::Result<Option<i32>> {
-        let s: &'static str = self.into();
-        let id = sqlx::query!("SELECT id FROM auth_prior_permissions WHERE tag = ?", s)
-            .fetch_optional(conn)
-            .await?
-            .map(|rec| rec.id);
-        Ok(id)
-    }
-}
-
-pub struct ApiPermSet(HashSet<Permission>);
-
-impl ApiPermSet {
-    pub fn has_perm(&self, perm: &Permission) -> bool {
-        self.0.contains(perm)
-    }
-
-    pub fn load_from_db(_token_id: i64) -> Result<Self, sqlx::Error> {
-        todo!()
     }
 }
 
