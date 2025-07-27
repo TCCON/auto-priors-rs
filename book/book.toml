@@ -1,0 +1,6 @@
+[book]
+authors = ["Joshua Laughner"]
+language = "en"
+multilingual = false
+src = "src"
+title = "TCCON automatic priors generation design"
