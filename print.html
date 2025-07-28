@@ -1,0 +1,699 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>TCCON automatic priors generation design</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="mdbook-admonish.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">TCCON automatic priors generation design</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="component-crates-of-the-automation"><a class="header" href="#component-crates-of-the-automation">Component crates of the automation</a></h1>
+<p>Rust calls its packages "crates".
+The automation has several top levels components, each written as its own crate, and tied together in a <a href="https://doc.rust-lang.org/book/ch14-03-cargo-workspaces.html">Cargo workspace</a>.
+The crates are:</p>
+<ul>
+<li><code>core-orm</code>: this crate provides several core components: the interface to the database, the configuration structure, and other shared utilities.</li>
+<li><code>cli</code>: this crate provides a command line interface for an admin to check on the system and make changes to the database.</li>
+<li><code>service</code>: this crate compiles to a program intented to run as a systemd service to handle the routine operations of the automation.</li>
+</ul>
+<h2 id="interacting-with-the-database"><a class="header" href="#interacting-with-the-database">Interacting with the database</a></h2>
+<p>One of the primary purpose sof the <code>core-orm</code> crate is to serve as the interface to the database.
+The "orm" part of its name stands for <a href="https://en.wikipedia.org/wiki/Object%E2%80%93relational_mapping">"object-relational mapping"</a>, a fancy way of referring to an interface to a database that maps tables in the database to structures in the programming language.
+None of the other crates should make direct SQL calls to the database; instead, if a new type of query is needed, a new function should be added to the <code>core-orm</code> crate (which does the query) and that function should be called by the other crates.
+<code>core-orm</code> should use the compile-time checked query functions from <a href="https://docs.rs/sqlx/latest/sqlx/"><code>sqlx</code></a>: <a href="https://docs.rs/sqlx/latest/sqlx/macro.query.html"><code>query!</code></a> and <a href="https://docs.rs/sqlx/latest/sqlx/macro.query_as.html"><code>query_as!</code></a> whenever possible.
+These ensure that all queries are valid without needing to write a test for them.</p>
+<p><code>core-orm</code> also stores the migration SQL files for the database.
+These contain SQL commands that set up the necessary tables and views in the database.</p>
+<p>Many of the different modules within <code>core-orm</code> map to tables in the database; for example, <code>met</code> has mappings to the table storing the met model files and <code>jobs</code> has mappings to the list of ginput jobs to run.
+Within these modules, there will be one or more structures that directly map to a row from the corresponding table.
+For example, the <code>Job</code> in <code>jobs</code> represents one row of the "Jobs" table, with each field on the struct mapping to a column of the table.
+In some cases, we need an intermediate struct for the <code>sqlx</code> crate to deserialize the database fields into first for the <code>query_as!</code> macro - this is the case if we want to use custom types in the struct that <code>sqlx</code> doesn't know how to map to SQL types.
+Such intermediate structs follow the naming convention of "Q" (for "query") + the final structure name, e.g., <code>QJob</code> for <code>Job</code>.
+We then implement the <a href="https://doc.rust-lang.org/std/convert/trait.TryFrom.html"><code>TryFrom</code></a> or <a href="https://doc.rust-lang.org/std/convert/trait.From.html"><code>From</code></a> traits to convert both ways (e.g., <code>QJob</code> to <code>Job</code> and <code>Job</code> to <code>QJob</code>) as needed.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="setup"><a class="header" href="#setup">Setup</a></h1>
+<h2 id="initial-setup"><a class="header" href="#initial-setup">Initial setup</a></h2>
+<p>Installing Rust and the SQL database server, setting up the database, compiling the priors automation, and generating the initial configuration are all described in the <a href="https://github.com/TCCON/auto-priors-rs/blob/main/README.md">README</a>.</p>
+<h2 id="installing-ginput"><a class="header" href="#installing-ginput">Installing ginput</a></h2>
+<p>This program calls <a href="https://github.com/TCCON/py-ginput"><code>ginput</code></a> to generate GGG2020 priors.
+Currently, it can only do so by using the <code>ginput</code> command line interface, through the <code>auto</code> subcommand.
+This will require <code>ginput</code> v1.2.0 or greater <em>or</em> using the <code>lts/v1.0.6</code> branch.
+Where <code>ginput</code> is installed is configurable; however, we recommend placing it in a <code>python</code> subdirectory
+of this repository and creating the conda/mamba environment for it within the <code>ginput</code> directory.
+That is, use the <a href="https://ginput.readthedocs.io/en/latest/ginput_usage/installation_and_first_steps.html#manual-installation">manual installation</a>
+method in the ginput docs and create a directory structure like so:</p>
+<pre><code>.
+├── Cargo.lock
+├── Cargo.toml
+├── cli
+├── core-orm
+├── Makefile
+├── python
+│   └── ginput
+│       ├── .condaenv
+│       ├── (other ginput code)
+│       └── run_ginput.py
+├── README.md
+├── service
+├── target
+├── testing
+└── var
+</code></pre>
+<p>where <code>.condaenv</code> contains the conda or mamba environment used to run ginput.</p>
+<h2 id="downloading-met-data"><a class="header" href="#downloading-met-data">Downloading met data</a></h2>
+<p>GGG2020 uses GEOS FP-IT or GEOS IT met data, specifically three products from each:</p>
+<ul>
+<li><code>asm_inst_3hr_glo_L576x361_v72</code> (assimilated 3D meteorological variables output every 3 hours, instantaneous on 72 hybrid levels),</li>
+<li><code>chm_inst_3hr_glo_L576x361_v72</code> (assimilated 3D chemical variables output every 3 hours, instantaneous on 72 hybrid levels), and</li>
+<li><code>asm_inst_1hr_glo_L576x361_slv</code> (assimilated 2D meteorological variables output every hour, though only the same 3-hourly cadence as the 3D variables is required).</li>
+</ul>
+<p>GEOS FP-IT is the predecessor, and in the standard TCCON GGG2020 priors, it is used as priors for all data through 31 Mar 2024.
+GEOS IT is used for all data from 1 Apr 2024 on.
+Note that GEOS FP-IT will no longer be produced sometime in 2025, and may not be available for download after that.</p>
+<p>Both GEOS FP-IT and IT require a data subscription to access.
+As of 27 Jul 2025, contact Robert Lucchesi (robert.a.lucchesi@nasa.gov) to arrange that access.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="concepts"><a class="header" href="#concepts">Concepts</a></h1>
+<h2 id="jobs-and-queues"><a class="header" href="#jobs-and-queues">Jobs and queues</a></h2>
+<p>This automation works similarly to a job scheduler like SLURM or PBS that you might find on a high performance cluster.
+Each request for priors is referred to as a "job" and represents one call to <code>ginput</code> to generate priors for a certain time period and set of locations.
+These jobs can be added several ways:</p>
+<ol>
+<li>user request through an input file uploaded to the server,</li>
+<li>automatically to generate standard sites' priors, or</li>
+<li>by an administrator using the command line interface.</li>
+</ol>
+<p>The jobs are also divided into queues.
+A queue represents a pool of computing resources to be shared among jobs in that queue.
+Within each queue, the jobs are processed by default in the order that they were submitted.
+There is also a fair-share option which can be assigned to a given queue that adjusts individual jobs' priority based on how heavily that user has been using the system.</p>
+<p>Jobs can also be assigned a custom base priority that allows administrators to prioritize certain jobs.
+This is used by the automation when generating standard sites to ensure that jobs generating new priors (for the most recent days) take priority over any backfilling of old priors for a new site recently added to the system.</p>
+<p>The automation expects at least two queues: one for user submitted requests and one for standard sites.
+This division of resources ensures that standard site processing is not delayed when large user requests are being processed.</p>
+<h2 id="standard-sites"><a class="header" href="#standard-sites">Standard sites</a></h2>
+<p>A standard site is a location where priors are routinely needed.
+All established TCCON sites are added as standard sites, and other locations (such as quasi-permanent EM27/SUN sites) can ask to be added.
+The automation will routinely add jobs to the standard site queue for all sites in its list.
+If a site moves or is taken permanently offline, that can be noted in the database to avoid generating unnecessary priors.</p>
+<p>For sites that need priors routinely, generating them as a standard site has benefits for both the automation and the user.
+For the user, this alleviates the need for them to submit requests and helps ensure that the priors are ready as early as possible.
+For the automation, this allows the jobs to be batched in such a way that certain calculations in <code>ginput</code> can be shared across all of the sites, reducing the compute time compared to what would be needed if each site submitted a separate request.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="configuration"><a class="header" href="#configuration">Configuration</a></h1>
+<h2 id="execution"><a class="header" href="#execution">Execution</a></h2>
+<p>This section has the largest number of options.
+Here we will go through them in groups.
+An example</p>
+<pre><code class="language-toml">[execution]
+# General options
+error_handler.type = "EmailAdmins"
+max_numpy_threads = 2
+
+# Input file options
+input_file_pattern = '/data/ftp/input_ingest/*.txt'
+status_request_file_pattern = '/data/ftp/input_ingest/ginput_status*.txt'
+success_input_file_dir = '/data/ftp/input_success'
+failure_input_file_dir = '/data/ftp/input_failure'
+
+# Download location options
+hours_to_keep = 168
+ftp_download_server = 'ftp://ccycle.gps.caltech.edu/'
+ftp_download_root = '/data/ftp/'
+output_path = '/data/ftp/outputs'
+std_sites_tar_output = '/data/ftp/std-tarballs'
+std_sites_output_base = '/data/ftp/std-runs'
+
+# Job run options
+job_max_days = 180
+job_split_into_days = 3
+simulate = false
+simulation_delay = 10
+submitted_job_queue = 'submitted'
+std_site_job_queue = 'std-sites'
+
+# Site information options
+flat_stdsite_json_file = "/data/ftp/outputs/stdsites_flat.json"
+grouped_stdsite_json_file = "/data/ftp/outputs/stdsites_grouped.json"
+
+[execution.queues.std-sites]
+max_num_procs = 4
+
+[execution.queues.submitted]
+max_num_procs = 4
+fair_share_policy = {type = "RoundRobin", time_period_days=14}
+
+[execution.ginput."v1.0.6"]
+type = 'Script'
+entry_point_path = '/home/tccon/auto-priors-rs/python/ginput/run_ginput.py'
+
+[execution.ginput."v1.2.0"]
+type = 'Script'
+entry_point_path = '/home/tccon/auto-priors-rs/python/ginput-geos-it/run_ginput.py'
+</code></pre>
+<p>The following subsections will describe the available options in more detail.</p>
+<h3 id="general"><a class="header" href="#general">General</a></h3>
+<p>These are settings that control miscellaneous operation of the automation.</p>
+<ul>
+<li><code>error_handler</code>: this controls how the automation responds to an error. The <code>type</code> subfield controls which version is used. The options are "Logging" and "EmailAdmins". "Logging" will log the error to the local log file. "EmailAdmins" will also send an error report by email to the individuals specified in the <code>[email]</code> section.</li>
+<li><code>max_numpy_threads</code>: this limits how many CPU threads Numpy will use in <code>ginput</code>. This can be useful to avoid <code>ginput</code> overwhelming your CPU. Note that Numpy can be built with different libraries which may not respect this setting; if you see <code>ginput</code> is using too many threads, this is a bug in the Numpy thread limiting in <code>ginput</code> itself.</li>
+</ul>
+<h3 id="input-files"><a class="header" href="#input-files">Input files</a></h3>
+<p>These are settings that control how the automation handles input files.</p>
+<ul>
+<li><code>input_file_pattern</code>: a glob style pattern that must match the names of text files users upload by FTP to request jobs.</li>
+<li><code>status_request_file_pattern</code>: a glob style pattern that must match the names of text files users upload to check the status of their jobs.</li>
+<li><code>success_input_file_dir</code>: the directory where the automation will copy input files that are successfully parsed.</li>
+<li><code>failure_input_file_dir</code>: the directory where the automation will copy input files that cannot be successfully parsed.</li>
+</ul>
+<h3 id="download-options"><a class="header" href="#download-options">Download options</a></h3>
+<p>These are settings that relate to how users can download their priors.</p>
+<ul>
+<li><code>hours_to_keep</code>: how many hours the <code>.tgz</code> files made in request to job requests will be kept.</li>
+<li><code>ftp_download_server</code>: the name that users use to connect to the FTP server to upload requests and download jobs.</li>
+<li><code>ftp_download_root</code>: the file path <em>on your server</em> where users start (by default) when they connect to the server. This will be used to make paths communicated to the users correctly represent the path they access from the FTP server (as such paths must be relative to this root).</li>
+<li><code>output_path</code>: The directory where user requested jobs will be output. This must be under <code>ftp_download_root</code>.</li>
+<li><code>std_sites_tar_output</code>: The directory where the tarballs for the standard sites will be output. This must be under <code>ftp_download_root</code>.</li>
+<li><code>std_sites_output_base</code>: The directory where the standard site runs will be carried out. This does <em>not</em> need to be under <code>ftp_download_root</code>; it is an intermediate directory.</li>
+</ul>
+<h3 id="jobs"><a class="header" href="#jobs">Jobs</a></h3>
+<p>These are settings that relate to how jobs are run.</p>
+<ul>
+<li><code>job_max_days</code>: The maximum number of days a single user request can ask to generate. This is intended to prevent excessively long jobs clogging up the system.</li>
+<li><code>job_split_into_days</code>: If set, then jobs longer than this length will be split into smaller jobs each running at most this many days. This allows users to submit larger jobs that will be divided into smaller tasks so that the queue can refresh more quickly and allow other users' jobs to start earlier.</li>
+<li><code>simulate</code>: a boolean, that if <code>true</code>, will simulate running jobs rather than actually calling <code>ginput</code>. Useful for testing.</li>
+<li><code>simulation_delay</code>: how long in seconds to pretend a simulated job takes to run (for testing).</li>
+</ul>
+<h3 id="site-information"><a class="header" href="#site-information">Site information</a></h3>
+<p>These are settings that control where standard site information is provided.</p>
+<ul>
+<li><code>flat_stdsite_json_file</code>: The file path for a JSON file listing the standard sites in "flat" format to be written. "Flat" format means that sites that have different coordinates in different time periods will have a separate top-level entry for each time period.</li>
+<li><code>grouped_stdsite_json_file</code>: The file path for a JSON file listing the standard sites in "grouped" format to be written. "Grouped" means that each site has one top-level entry; if it has multiple coordinates, they will be listed within that same top-level entry.</li>
+</ul>
+<p>Ideally, these will be placed somewhere that users can download them.</p>
+<h3 id="queues"><a class="header" href="#queues">Queues</a></h3>
+<p>There are two options that set the queues to use for user submitted jobs and standard site jobs:</p>
+<ul>
+<li><code>submitted_job_queue</code>: the name of the queue to use for user-submitted jobs.</li>
+<li><code>std_site_job_queue</code>: the name of the queue to use for jobs generating the standard TCCON/COCCON/etc. sites.</li>
+</ul>
+<p>Under <code>[execution.queues]</code>, each of these can have their own settings:</p>
+<pre><code class="language-toml">[execution.queues.std-sites]
+max_num_procs = 4
+
+[execution.queues.submitted]
+max_num_procs = 4
+fair_share_policy = {type = "RoundRobin", time_period_days=14}
+</code></pre>
+<p>Within [<code>execution.queues</code>], the keys must match the queue names; here, this is "std-sites" and "submitted".
+Each queue has the following options:</p>
+<ul>
+<li><code>max_num_procs</code>: the maximum number of jobs in this queue that can run simultaneously. Default is 1.</li>
+<li><code>fair_share_policy</code>: controls how jobs are prioritized. The options for the <code>type</code> value and additional keys for each type are:
+<ul>
+<li><code>type = "Simple"</code>: Jobs are prioritized by the order they are submitted and their "priority" value. The priority value can only be set when submitting a job via the CLI. No additional options.</li>
+<li><code>type = "RoundRobin"</code>: Jobs are initially prioritized following the same rules as "Simple", but users will have their priority reduced by 1 for each job run recently. The additional <code>time_period_days</code> option controls that time period from which completed jobs are counted. In the example above for the "submitted" queue, the <code>time_period_days=14</code> will reduce user priority for each job run in the preceding two weeks (14 days). 14 days is the default.</li>
+</ul>
+</li>
+</ul>
+<h3 id="ginput"><a class="header" href="#ginput">Ginput</a></h3>
+<p>The <code>[execution.ginput]</code> section defines different ginput versions that the automation can use to generate the priors.
+The keys within this section can be anything, and will be used to refer to the <code>ginput</code> versions in the <a href="configuration.html#default-options"><code>[[default_options]]</code></a> sections.</p>
+<p>At present, "Script" is the only possible value for <code>type</code>.
+This means that the automation calls <code>ginput</code> through its <code>run_ginput.py</code> CLI.
+The "Script" type requires the <code>entry_point_path</code> option that points to the <code>run_ginput.py</code> script used to access ginput.</p>
+<h2 id="data"><a class="header" href="#data">Data</a></h2>
+<p>This section relates to input data <code>ginput</code> requires to produce priors.
+An example data section is:</p>
+<pre><code class="language-toml">[data]
+zgrid_file = '/home/tccon/ggg-stable/levels/ap_51_level_0_to_70km.gnd'
+base_vmr_file = '/home/tccon/ggg-stable/vmrs/gnd/summer_35N.vmr'
+
+
+[[data.download.geosfpit]]
+product = 'geosfpit'
+data_type = 'met'
+levels = 'eta'
+url_pattern = 'https://dummy.org/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4'
+# basename_pattern = '(omit to infer from url_pattern)'
+file_freq_min = 180
+earliest_date = '2000-01-01'
+download_dir = '/data/GEOS/Nv'
+ginput_met_key = "fpit-eta"
+ginput_output_subdir = "fpit"
+days_latency = 1
+
+[[data.download.geosfpit]]
+product = 'geosfpit'
+data_type = 'chm'
+levels = 'eta'
+url_pattern = 'https://dummy.org/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4'
+# basename_pattern = '(omit to infer from url_pattern)'
+file_freq_min = 180
+earliest_date = '2000-01-01'
+download_dir = '/data/GEOS/Nv'
+ginput_met_key = "fpit-eta"
+ginput_output_subdir = "fpit"
+days_latency = 1
+
+[[data.download.geosfpit]]
+product = 'geosfpit'
+data_type = 'met'
+levels = 'surf'
+url_pattern = 'https://dummy.org/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.%Y%m%d_%H%M.V01.nc4'
+# basename_pattern = '(omit to infer from url_pattern)'
+file_freq_min = 180
+earliest_date = '2000-01-01'
+download_dir = '/data/GEOS/Nx'
+ginput_met_key = "fpit-eta"
+ginput_output_subdir = "fpit"
+days_latency = 1
+</code></pre>
+<p>The first two keys point to GGG files that <code>ginput</code> uses to ensure that the <code>.vmr</code> files it produces are consistent with what GGG expects:</p>
+<ul>
+<li><code>zgrid_file</code>: this is the "levels" file that defines the altitude grid that GGG executes the retrieval on. <code>ginput</code> uses this for several reasons, including putting the <code>.vmr</code> file on those levels and accounting for the CO column above the top retrieval altitude. For standard TCCON GGG2020, use, this should <strong>always</strong> be the <code>ap_51_level_0_to_70km.gnd</code> file.</li>
+<li><code>base_vmr_file</code>: this is the climatological <code>.vmr</code> file included with GGG. <code>ginput</code> uses this to fill in the secondary gases. For standard TCCON GGG2020, this should <strong>always</strong> be the <code>summer_35N.vmr</code> file.</li>
+</ul>
+<p>The <code>[[data.download]]</code> subsections are more complicated.
+Each key under <code>data.download</code> represents a type of meteorology that the automation can download and provide to <code>ginput</code> as a source of met priors.
+These are arrays to support a given data product being split across multiple files.
+Here, we see that GEOS FP-IT has 3 subproducts: 3D met, 2D met, and 3D chemistry files.
+When the automation downloads the met product specified by the subsection key (here, "geosfpit" for example), it will download all the file types specified by the array entries.
+(E.g., for GEOS FP-IT, that will be the 3D met, 2D met, and 3D chemistry files.)</p>
+<p>The options within each download section are:</p>
+<ul>
+<li><code>product</code>: this will be entered into the database as the product for these files. For now, it is best if this matches the subsection key.</li>
+<li><code>data_type</code>: a string describing the type of data contained in these files, either "met" for meteorological or "chm" for chemical. Currently, this is used to keep track of subproducts (i.e., how the GEOS products are split into met and chem files).</li>
+<li><code>levels</code>: a string describing the vertical levels on which these met files are organized. For GEOS, this will be "eta", "surf", or "pres". Currently, this is used to keep track of subproducts (i.e., how the GEOS products are split into 3D and 2D files).</li>
+<li><code>url_pattern</code>: a string that, when formatted following <a href="https://docs.rs/chrono/latest/chrono/format/strftime/index.html">strftime</a> rules, resolved to the download URL for this met file type for a given time. Note the use of <code>strftime</code> formatting symbols in the examples; these can be used any where in the URL so that if, for example, the data are organized into year/month/day directories in the URL, that information can be inserted into the URL appropriately.</li>
+<li><code>basename_pattern</code>: a string that, also when formatted following <a href="https://docs.rs/chrono/latest/chrono/format/strftime/index.html">strftime</a> rules, resolves to the local file name for this file type for the given time. If omitted, this is taken as the final component of the <code>url_pattern</code>.</li>
+<li><code>file_freq_min</code>: the temporal spacing, in minutes, between the model output files. In the example, GEOS files are output every 3 hours starting at midnight UTC, so this value is set to 180 minutes. Note that there is no way to specify an "offset", so a model with output at 0100, 0700, 1300, and 1900 cannot be handled with the current version of the automation.</li>
+<li><code>earliest_date</code>: the first date, in <code>yyyy-mm-dd</code> format, for which this product is available.</li>
+<li><code>download_dir</code>: the directory to download this product to.</li>
+</ul>
+<div id="admonition-warning" class="admonition admonish-warning" role="note" aria-labelledby="admonition-warning-title">
+<div class="admonition-title">
+<div id="admonition-warning-title">
+<p>Warning</p>
+</div>
+<a class="admonition-anchor-link" href="configuration.html#admonition-warning"></a>
+</div>
+<div>
+<p><code>ginput</code> expects that files on hybrid eta levels will be in an <code>Nv</code> subdirectory, 2D files in an <code>Nx</code> subdirectory, and files on fixed pressure level files (if ever used) will be in an <code>Np</code> subdirectory.
+Therefore, your <code>download_dir</code> paths must have one of these as the terminal component.</p>
+</div>
+</div>
+<ul>
+<li><code>ginput_met_key</code>: this will be the value given to the <code>--mode</code> option for the <code>run_ginput.py mod</code> subcommand. For standard GGG2020 TCCON use, this must be either "fpit-eta" or "it-eta".</li>
+<li><code>ginput_output_subdir</code>: this is the subdirectory that <code>ginput</code> puts the <code>.mod</code> files in within its output directory. This will be "fpit" for GEOS FP-IT and "it" for GEOS IT.</li>
+<li><code>days_latency</code>: this is how many days it takes for this met product to be available. When the automation tries to download met, if it cannot find files for today - <code>days_latency</code> days, it will not consider than an error.</li>
+</ul>
+<h2 id="default-options"><a class="header" href="#default-options">Default options</a></h2>
+<p>This section controls which met data and ginput version are used by default for requests for priors in different date ranges.
+An example is:</p>
+<pre><code class="language-toml">[[default_options]]
+start_date = '2000-01-01'
+end_date = '2024-04-01'
+ginput = 'v1.0.6'
+met = 'geosfpit'
+
+[[default_options]]
+start_date = '2024-04-01'
+end_date = '2100-01-01'
+ginput = 'v1.2.0'
+met = 'geosit'
+</code></pre>
+<p>In each section, <code>start_date</code> and <code>end_date</code> give the first and last date this section applies to.
+(<code>end_date</code> is exclusive.)
+<code>ginput</code> must then be the key for one of the subsections in <code>[execution.ginput]</code> and <code>met</code> one of the subsections within <code>[[data.download]]</code>.
+In the example above, requests for priors covering 1 Jan 2000 to 31 Mar 2024 will use ginput v1.0.6 and GEOS FP-IT met data.
+Requests for priors covering 1 Apr 2024 and later will use ginput v1.2.0 and GEOS IT met data.</p>
+<h2 id="email"><a class="header" href="#email">Email</a></h2>
+<p>This section controls email-related aspects, including both who to email in certain circumstances and how to send emails.
+An example is:</p>
+<pre><code class="language-toml">[email]
+from_address = 'noreply@test.com'
+admin_emails = ['flynn@tron.com', 'sheridan@babylon5.eps']
+report_emails = ['test@test.net']
+std_site_req_emails = ['reviewer1@rev.net', 'reviewer2@rev.net']
+extra_submitters = ['gucamelee@test.net']
+
+[email.backend]
+type = 'Internal'
+
+[email.backend.smtp.TlsPassword]
+host = 'smtp.gmail.com'
+user = 'netrc'
+password = 'netrc'
+</code></pre>
+<p>In the first section, the options are:</p>
+<ul>
+<li><code>from_address</code>: the address to send emails from, if allowed to set that.</li>
+<li><code>admin_emails</code>: a list of emails to which to send administrative-related emails, usually error reports.</li>
+<li><code>report_emails</code>: a list of emails to which to send the daily/weekly reports.</li>
+<li><code>std_site_req_emails</code>: a list of emails to which to send summaries of requests to be added as a standard site (via a command line tool).</li>
+<li><code>extra_submitters</code>: a list of emails to add to the list of people to send bulk emails to that do not have their email in the database of past jobs.</li>
+</ul>
+<p>The <code>[email.backend]</code> section controls how emails are sent.
+The <code>type</code> key can have one of the following four values:</p>
+<ul>
+<li>"Internal": sends emails by directly connecting to an SMTP server.</li>
+<li>"Mailx": calls the <code>mailx</code> command line client to send an email.</li>
+<li>"Mock": simply prints the email to the logs (intended for development)</li>
+<li>"Testing": stores the email in a queue to be inspected later (intended for testing)</li>
+</ul>
+<p>These have their own sub-options.</p>
+<h3 id="internal"><a class="header" href="#internal">Internal</a></h3>
+<p>If there are no additional options specified, this will establish an unencrypted connection to a local SMTP server.
+Otherwise, if the <code>[email.backend.smtp.TlsPassword]</code> section is defined, it uses those settings to connect to a remote server.
+In that case, you must specify:</p>
+<ul>
+<li><code>host</code>: the SMTP host to connect to,</li>
+<li><code>user</code>: the username to authenticate with, and</li>
+<li><code>password</code>: the password to authenticate with.</li>
+</ul>
+<p>If user and/or password are the string "netrc", then this will read that value from an entry in your user's <code>~/.netrc</code> file with a machine name that matches the <code>host</code> value.
+For the example above using <code>smtp.gmail.com</code> that would look like:</p>
+<pre><code>machine smtp.gmail.com
+login TestUser
+password CorrectHorseBatteryStaple
+</code></pre>
+<p>(with the actual username and password in place of the examples here).</p>
+<h3 id="mailx"><a class="header" href="#mailx">Mailx</a></h3>
+<p>The only option here is <code>exec</code>, which is the path to the <code>mailx</code> program.
+If omitted, the automation will look for <code>mail</code> on your PATH.</p>
+<h3 id="mock"><a class="header" href="#mock">Mock</a></h3>
+<p>This has no additional settings.</p>
+<h3 id="testing"><a class="header" href="#testing">Testing</a></h3>
+<p>This has no additional settings.</p>
+<h2 id="timing"><a class="header" href="#timing">Timing</a></h2>
+<p>This section controls when each of the automation actions are run by the service program.
+An example is:</p>
+<pre><code class="language-toml">[timing]
+disable_met_download = false
+met_download_hours = 6
+
+disable_job = false
+job_start_seconds = 60
+status_report_seconds = 60
+lut_regen_days = 1
+lut_regen_at = '00:00:00'
+delete_expired_jobs_hours = 12
+delete_expired_jobs_offset_minutes = 15
+
+disable_std_site_gen = false
+std_site_gen_hours = 24
+std_site_gen_offset_minutes = 180
+std_site_tar_minutes = 30
+std_site_json_hours = 1
+
+disable_reports = false
+</code></pre>
+<p>These options can be divided into groups for met download, job execution, standard site generation, and reports:</p>
+<h3 id="met-download"><a class="header" href="#met-download">Met download</a></h3>
+<ul>
+<li><code>disable_met_download</code>: set to <code>true</code> to prevent the service from downloading met data</li>
+<li><code>met_download_hours</code>: how often the service will try to download met data. In the example, it will try every six hours, so 00:00, 06:00, 12:00, and 18:00.</li>
+</ul>
+<h3 id="job-execution"><a class="header" href="#job-execution">Job execution</a></h3>
+<ul>
+<li><code>disable_job</code>: set to <code>true</code> to prevent running <code>ginput</code> jobs.</li>
+<li><code>job_start_seconds</code>: how many seconds between times when the service checks for user-uploaded input files. This should be reasonably frequent to avoid collisions between input files with the same names.</li>
+<li><code>status_report_seconds</code>: how many seconds between times when the service checks for user-uploaded status request files. This should also be reasonably frequent.</li>
+<li><code>lut_regen_days</code>: how often the service will run a special job to regenerate certain look up tables <code>ginput</code> uses. These should be updated at least once per month. Running the job only has <code>ginput</code> check if they do need updated; if the tables are complete, this job will exit quickly. Therefore, running this every day is safest.</li>
+<li><code>lut_regen_at</code>: the time, in <code>HH:MM:SS</code> format, at which the special job to regenerate those <code>ginput</code> look up tables will run.</li>
+<li><code>delete_expired_jobs_hours</code>: how often, in hours, the service will delete tarballs for jobs ready to be cleaned up.</li>
+<li><code>delete_expired_jobs_offset_minutes</code>: the offset from the top of the hour in minutes at which the service will delete expired jobs' tarballs. Setting this to e.g., 15 when <code>delete_expired_jobs_hours</code> is 1 would run this task at 00:15, 01:15, etc.</li>
+</ul>
+<h3 id="standard-sites-1"><a class="header" href="#standard-sites-1">Standard sites</a></h3>
+<ul>
+<li><code>disable_std_site_gen</code>: set to <code>true</code> to prevent tasks needed to generate standard sites' priors. Note that producing those priors relies on job execution, so setting <code>disable_job = true</code> will also prevent standard sites' priors from being created. (Settings <code>disable_jobs = true</code> and <code>disable_std_site_gen = false</code> is not recommended.)</li>
+<li><code>std_site_gen_hours</code>: how often the service will submit jobs to create priors for the standard sites.</li>
+<li><code>std_site_gen_offset_minutes</code>: how many minutes from midnight to offset the first run of standard site submission.</li>
+<li><code>std_site_tar_minuts</code>: how often to run a task to make tarballs of the standard sites' priors from the regular job output.</li>
+<li><code>std_site_json_hours</code>: how often to create the grouped and flat JSON files with site coordinates.</li>
+</ul>
+<h3 id="reports"><a class="header" href="#reports">Reports</a></h3>
+<ul>
+<li><code>disable_reports</code>: set to <code>true</code> to prevent the service from sending daily and weekly reports.</li>
+<li><code>daily_report_time</code>: local time, in <code>HH:MM:SS</code> format, to send daily reports of jobs currently running. The default, if omitted, is midnight.</li>
+<li><code>weekly_report_time</code>: local time, in <code>HH:MM:SS</code> format, to send weekly reports of all jobs completed in the past week. The default, if omitted, is midnight.</li>
+</ul>
+<h2 id="blacklist"><a class="header" href="#blacklist">Blacklist</a></h2>
+<p>The configuration can include a blacklist of users who are no longer permitted
+to request priors.
+This is primarily for users that abuse the system and request a large volume of
+priors without a good reason to do so.
+(For example, a COCCON maintainer who needs to reprocess many sites' data with a
+new PROFFAST version is expected to request a large volume of priors, but someone
+attempting to produce a grid of priors for comparison with a model for their own
+research can be blacklisted.)</p>
+<p>In the code, a blacklist entry is modeled by the <code>orm::config::BlacklistEntry</code> struct.
+In the configuration file, a blacklist entry will look like so:</p>
+<pre><code class="language-toml">[[blacklist]]
+identifier = { type = "SubmitterEmail", submitter = "did_not_read_the_wiki@sorry.com" }
+silent = true
+reason = "ignored the restrictions on use given at https://tccon-wiki.caltech.edu/Main/ObtainingGinputData"
+</code></pre>
+<p>Each entry must contain all three fields:</p>
+<ul>
+<li><code>identifier</code> (more details below) specifies the user to which this entry applies.</li>
+<li><code>silent</code> specifies whether the user receives an email (<code>false</code>) or not (<code>true</code>) indicating
+that their request has been blocked.</li>
+<li><code>reason</code> is a string recording why the user has been blocked. When <code>silent</code> is <code>false</code>, it will
+be included in the email sent to the user. Otherwise, it is useful as a record of why this user was
+blocked.</li>
+</ul>
+<p>The identifier is modeled in code by the <code>orm::config::BlacklistIdentifier</code> enum.
+It was written as an enum in case other variants are required in the future.
+Currently, the "SubmitterEmail" type is the only one available, which will reject any
+input files with the email specified by the <code>submitter</code> field included in the input file.
+This is rather weak, as the user can specify any email.
+(The system does not check the input file email against the allowed list of FTP users.)</p>
+<div id="admonition-info" class="admonition admonish-info" role="note" aria-labelledby="admonition-info-title">
+<div class="admonition-title">
+<div id="admonition-info-title">
+<p>Info</p>
+</div>
+<a class="admonition-anchor-link" href="configuration.html#admonition-info"></a>
+</div>
+<div>
+<p>The blacklist is expected to be deprecated in the future, as it is essentially defining
+permissions for jobs submitted via the FTP site. Work is underway to replace this with
+a more modern and robust web form and API system, which will include a proper permission
+system.</p>
+</div>
+</div>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>
