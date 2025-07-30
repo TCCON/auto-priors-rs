@@ -65,5 +65,12 @@ Until/unless we make this repository public, the best way to view the book is lo
 
 ## Notes during development
 
-This project uses [sqlx](https://crates.io/crates/sqlx) to interact with the database. Most of the queries are checked at compile time with its `query!` and `query_as!` macros. This requires that the MySQL server be running on your computer, and that the database specified in the `.env` file's `DATABASE_URL` variable exist with the proper tables. The `cargo sqlx` commands in step 7 of the setup will take care of the second requirement. If your MySQL server doesn't start automatically, then you will get many errors about "unable to connect to database" when compiling or in your code editor. If that happens, just start the MySQL server. For Macs, the command is probably `mysql.server start`. For other systems, consult the documentation for your MySQL server.
+This project uses [sqlx](https://crates.io/crates/sqlx) to interact with the database.
+Most of the queries are checked at compile time with its `query!` and `query_as!` macros.
+This requires that the MySQL server be running on your computer, and that the database specified in the `.env` file's `DATABASE_URL` variable exist with the proper tables.
+The `cargo sqlx` commands in step 7 of the setup will take care of the second requirement.
+If your MySQL server doesn't start automatically, then you will get many errors about "unable to connect to database" when compiling or in your code editor.
+If that happens, just start the MySQL server.
+For Macs, the command is probably either `mysql.server start` or `mariadbd`.
+For other systems, consult the documentation for your MySQL server.
 
