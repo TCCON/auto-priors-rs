@@ -36,6 +36,7 @@ DATABASE_URL="mysql://tccon:****@localhost/priors"
 
 7. Initialize the database. From the repo root, run `cargo sqlx database create` then `cargo sqlx migrate run --source core-orm/migrations/`. 
 8. Compile the project; from the repo root, run `cargo build`. If successful, the `tccon-priors-cli` and `tccon-priors-service` executables will be produced in `./target/debug`.
+    - Note, for deployment, you should use `cargo build --release` and find the executables under `./target/release` instead, as their will have much better optimization.
 9. Create a default configuration file. Assuming you want the file written to `auto-priors.toml`, the command to run from the repo root is `./target/debug/tccon-priors-cli config gen auto-priors.toml`. Modify this file as needed.
 10. Add the path to your new config file to the `.env` file. Assuming the config file created in step 9 is at the path `/home/tccon/auto-priors-rs/auto-priors.toml`, add the following line to the `.env` file:
 
