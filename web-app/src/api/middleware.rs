@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use axum::response::IntoResponse;
 use axum::{
-    debug_middleware,
     extract::{Request, State},
     http::{HeaderMap, StatusCode},
     middleware::Next,
@@ -19,38 +18,41 @@ use orm::{
     MySqlConn,
 };
 
-use crate::{AppState, AppStateRef};
+use crate::AppState;
 
-// #[debug_middleware]
+// Note: the middleware functions cannot use crate::AppStateRef because, according to Gemini,
+// the type alias hides the `State` extractor in such a way that axum cannot figure out how
+// to convert a reference to the router's state into the State extractor.
+
 pub(crate) async fn api_has_query_perm(
-    State(state): AppStateRef,
+    State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     request: Request,
     next: Next,
 ) -> Response {
-    api_has_perm(state, headers, Permission::Query, request, next).await
+    api_has_perm(&state, headers, Permission::Query, request, next).await
 }
 
 pub(crate) async fn api_has_submit_perm(
-    state: Arc<AppState>,
+    State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     request: Request,
     next: Next,
 ) -> Response {
-    api_has_perm(state, headers, Permission::Submit, request, next).await
+    api_has_perm(&state, headers, Permission::Submit, request, next).await
 }
 
 pub(crate) async fn api_has_download_perm(
-    state: Arc<AppState>,
+    State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     request: Request,
     next: Next,
 ) -> Response {
-    api_has_perm(state, headers, Permission::Download, request, next).await
+    api_has_perm(&state, headers, Permission::Download, request, next).await
 }
 
 async fn api_has_perm(
-    state: Arc<AppState>,
+    state: &AppState,
     headers: HeaderMap,
     perm: Permission,
     request: Request,

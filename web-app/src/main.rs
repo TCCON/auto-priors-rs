@@ -29,6 +29,7 @@ use crate::api::middleware::api_has_query_perm;
 
 type AppStateRef = State<Arc<AppState>>;
 
+#[derive(Clone)]
 struct AppState {
     pool: orm::PoolWrapper,
     root_uri: String,
@@ -114,6 +115,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/std-sites", get(std_sites::get::std_sites))
         .route("/met-data", get(met_data::get::met_data));
 
+    let api_routes = set_up_api(shared_state.clone());
+
     let unprotected_routes = Router::new()
         .route("/", get(home::get::home))
         .route("/login", post(auth_web::post::login))
@@ -124,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
     let static_server = ServeDir::new("static");
     let app = protected_routes
         .route_layer(login_required!(auth::WebBackend, login_url = "/login"))
+        .merge(api_routes)
         .merge(unprotected_routes)
         .layer(auth_layer)
         .with_state(shared_state)
@@ -136,16 +140,15 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// fn set_up_api(state: AppStateRef) -> Router {
-//     let routes_without_middleware = Router::new().route(
-//         "/api/v1/check-query",
-//         get(api::check::get::check_api_access),
-//     );
+fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
+    let routes_without_middleware = Router::new().route(
+        "/api/v1/check-query",
+        get(api::check::get::check_api_access),
+    );
 
-//     let routes_with_state = routes_without_middleware.with_state::<AppStateRef>(state.clone());
+    let routes_with_middleware = routes_without_middleware.route_layer(
+        axum::middleware::from_fn_with_state(state.clone(), api_has_query_perm),
+    );
 
-//     let layer = axum::middleware::from_fn_with_state(state, api_has_query_perm);
-//     let query_routes = routes_with_state.layer(layer);
-
-//     todo!()
-// }
+    routes_with_middleware
+}
