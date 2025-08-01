@@ -81,7 +81,7 @@ impl ContextWithSidebar for LoginContext {
 }
 
 pub(crate) mod get {
-    use axum::extract::State;
+    use axum::{extract::State, response::Html};
 
     use crate::{server_error, AppStateRef};
 
@@ -90,14 +90,16 @@ pub(crate) mod get {
     pub(crate) async fn login(
         Query(NextUrl { next }): Query<NextUrl>,
         State(state): AppStateRef,
-    ) -> Result<String, StatusCode> {
+    ) -> Result<Html<String>, StatusCode> {
         // let mut context = make_base_context("Login", "login");
         // context.insert("has_next", &next.is_some());
         // context.insert("next_url", &next.unwrap_or_default());
         // let page_source = TEMPLATES.render("login.html", &context).unwrap();
         // Ok(Html(page_source))
 
-        server_error(LoginContext::new(state.root_uri.clone(), None, next).render())
+        let context = LoginContext::new(state.root_uri.clone(), None, next);
+        let raw = server_error(context.render())?;
+        Ok(Html(raw))
     }
 
     pub(crate) async fn logout(mut auth_session: AuthSession) -> impl IntoResponse {

@@ -56,7 +56,7 @@ impl ContextWithSidebar for StdSitesContext {
 
 pub(crate) mod get {
     use askama::Template;
-    use axum::{extract::State, http::StatusCode};
+    use axum::{extract::State, http::StatusCode, response::Html};
 
     use crate::{auth::AuthSession, server_error, AppStateRef};
 
@@ -65,8 +65,9 @@ pub(crate) mod get {
     pub(crate) async fn std_sites(
         State(state): AppStateRef,
         session: AuthSession,
-    ) -> Result<String, StatusCode> {
+    ) -> Result<Html<String>, StatusCode> {
         let context = StdSitesContext::new(state.root_uri.clone(), session.user);
-        server_error(context.render())
+        let raw = server_error(context.render())?;
+        Ok(Html(raw))
     }
 }

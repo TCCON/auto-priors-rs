@@ -161,7 +161,7 @@ impl ContextWithSidebar for MetDataContext {
 
 pub(crate) mod get {
     use askama::Template;
-    use axum::{extract::State, http::StatusCode, Form};
+    use axum::{extract::State, http::StatusCode, response::Html, Form};
 
     use crate::{auth::AuthSession, load_automation_config, server_error, AppStateRef};
 
@@ -177,7 +177,7 @@ pub(crate) mod get {
         State(state): AppStateRef,
         session: AuthSession,
         Form(met_dates): Form<MetDatesForm>,
-    ) -> Result<String, StatusCode> {
+    ) -> Result<Html<String>, StatusCode> {
         let today = chrono::Local::now().date_naive();
         let start_date = met_dates
             .start_date
@@ -195,7 +195,7 @@ pub(crate) mod get {
         )
         .await;
         let context = server_error(res)?;
-        let html = server_error(context.render())?;
-        Ok(html)
+        let raw = server_error(context.render())?;
+        Ok(Html(raw))
     }
 }
