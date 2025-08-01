@@ -13,6 +13,7 @@ use axum::{
     response::Response,
 };
 use jsonwebtoken::DecodingKey;
+use orm::error::ApiAuthError;
 use orm::{
     auth::{api::authenticate_refresh_token, Permission},
     MySqlConn,
@@ -72,8 +73,33 @@ async fn api_has_perm(
     match key_has_perm(&mut conn, token, &state.decoding_key, perm).await {
         Ok(true) => (),
         Ok(false) => return StatusCode::FORBIDDEN.into_response(),
-        Err(e) => {
-            log::error!("Error while checking API permissions: {e}");
+        Err(ApiAuthError::TokenExpiredOnServer) | Err(ApiAuthError::TokenInvalidExpired) => {
+            let resp = Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .body("ERROR: Token has expired".into())
+                .expect("Response must be of valid construction");
+            return resp;
+        }
+        Err(ApiAuthError::TokenInvalidOther(_)) => {
+            let resp = Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .body("ERROR: Token is invalid".into())
+                .expect("Response must be of valid construction");
+            return resp;
+        }
+        Err(ApiAuthError::TokenNotFound) => {
+            let resp = Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .body("ERROR: Token is not associated with a user".into())
+                .expect("Response must be of valid construction");
+            return resp;
+        }
+        Err(ApiAuthError::SqlError(e)) => {
+            log::error!("An SQL error occurred while validating a user API token: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        Err(ApiAuthError::Other(e)) => {
+            log::error!("An unexpected error occurred while validating a user API token: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     }
@@ -87,7 +113,7 @@ fn get_token_from_header<'h>(headers: &'h HeaderMap) -> Result<&'h str, Response
     } else {
         let resp = Response::builder()
             .status(StatusCode::UNAUTHORIZED)
-            .body("Request must contain an 'Authorization' header".into())
+            .body("ERROR: Request must contain an 'Authorization' header".into())
             .expect("Response must be of valid construction");
         return Err(resp);
     };
@@ -97,7 +123,7 @@ fn get_token_from_header<'h>(headers: &'h HeaderMap) -> Result<&'h str, Response
     } else {
         let resp = Response::builder()
             .status(StatusCode::UNAUTHORIZED)
-            .body("Request 'Authorization' header must be a valid UTF-8 string".into())
+            .body("ERROR: Request 'Authorization' header must be a valid UTF-8 string".into())
             .expect("Response must be of valid construction");
         return Err(resp);
     };
@@ -108,17 +134,17 @@ fn get_token_from_header<'h>(headers: &'h HeaderMap) -> Result<&'h str, Response
         let resp = Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .body(
-                "Request 'Authorization' value must be a scheme and token, separated by a space"
+                "ERROR: Request 'Authorization' value must be a scheme and token, separated by a space"
                     .into(),
             )
             .expect("Response must be of valid construction");
         return Err(resp);
     };
 
-    if scheme.trim() != "Bearer " {
+    if scheme.trim() != "Bearer" {
         let resp = Response::builder()
             .status(StatusCode::UNAUTHORIZED)
-            .body("Request 'Authorization' header must have the 'Bearer' scheme".into())
+            .body("ERROR: Request 'Authorization' header must have the 'Bearer' scheme".into())
             .expect("Response must be of valid construction");
         return Err(resp);
     }
@@ -131,7 +157,7 @@ async fn key_has_perm(
     token: &str,
     decoding_key: &DecodingKey,
     perm: Permission,
-) -> anyhow::Result<bool> {
+) -> Result<bool, ApiAuthError> {
     let user_perms = authenticate_refresh_token(conn, token, decoding_key).await?;
     Ok(user_perms.has_perm(&perm))
 }
