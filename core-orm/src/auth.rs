@@ -11,7 +11,7 @@ use crate::{MySqlConn, PoolWrapper};
 
 pub mod api;
 
-pub type AuthSession = axum_login::AuthSession<Backend>;
+pub type AuthSession = axum_login::AuthSession<WebBackend>;
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
@@ -25,7 +25,7 @@ impl User {
     pub async fn load_from_db(
         conn: &mut MySqlConn,
         username: &str,
-    ) -> Result<Option<Self>, AuthError> {
+    ) -> Result<Option<Self>, WebAuthError> {
         let opt_user = sqlx::query_as!(
             Self,
             "SELECT id,username,email,password FROM v_auth_user WHERE username = ?",
@@ -80,18 +80,18 @@ pub struct Credentials {
 }
 
 #[derive(Debug, Clone)]
-pub struct Backend {
+pub struct WebBackend {
     pool: PoolWrapper,
 }
 
-impl Backend {
+impl WebBackend {
     pub fn new(pool: PoolWrapper) -> Self {
-        Backend { pool }
+        WebBackend { pool }
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum AuthError {
+pub enum WebAuthError {
     #[error(transparent)]
     SqlError(#[from] sqlx::Error),
     #[error(transparent)]
@@ -100,7 +100,7 @@ pub enum AuthError {
     HashError(String),
 }
 
-impl From<djangohashers::HasherError> for AuthError {
+impl From<djangohashers::HasherError> for WebAuthError {
     fn from(value: djangohashers::HasherError) -> Self {
         let s = format!("{value:?}");
         Self::HashError(s)
@@ -108,10 +108,10 @@ impl From<djangohashers::HasherError> for AuthError {
 }
 
 #[async_trait]
-impl AuthnBackend for Backend {
+impl AuthnBackend for WebBackend {
     type User = User;
     type Credentials = Credentials;
-    type Error = AuthError;
+    type Error = WebAuthError;
 
     async fn authenticate(
         &self,

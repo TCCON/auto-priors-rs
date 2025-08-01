@@ -7,6 +7,7 @@ use axum::{
     Router,
 };
 use axum_login::{login_required, AuthManagerLayerBuilder};
+use jsonwebtoken::{DecodingKey, EncodingKey};
 use log::{debug, error, info};
 use tower_http::services::ServeDir;
 
@@ -14,6 +15,7 @@ use orm;
 use orm::auth;
 use orm::auth::api as auth_api;
 
+mod api;
 mod auth_web;
 mod home;
 mod jobs;
@@ -23,11 +25,15 @@ mod templates_common;
 
 use tower_sessions::cookie::time::Duration;
 
+use crate::api::middleware::api_has_query_perm;
+
 type AppStateRef = State<Arc<AppState>>;
 
 struct AppState {
     pool: orm::PoolWrapper,
     root_uri: String,
+    decoding_key: DecodingKey,
+    encoding_key: EncodingKey,
 }
 
 impl AppState {
@@ -39,7 +45,19 @@ impl AppState {
             Err(e) => return Err(e.into()),
         };
 
-        Ok(Self { pool, root_uri })
+        let config_file = std::env::var_os(orm::config::CFG_FILE_ENV_VAR);
+        let config = orm::config::load_config_file_or_default(config_file)?;
+        info!("Loaded config file");
+
+        let (encoding_key, decoding_key) =
+            auth::load_jwt_hmac_secret(&config.auth.hmac_secret_file)?;
+
+        Ok(Self {
+            pool,
+            root_uri,
+            decoding_key,
+            encoding_key,
+        })
     }
 
     pub(crate) fn clone_pool(&self) -> orm::PoolWrapper {
@@ -85,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
     let session_layer = tower_sessions::SessionManagerLayer::new(session_store)
         .with_expiry(tower_sessions::Expiry::OnInactivity(Duration::days(1)))
         .with_signed(key);
-    let backend = auth::Backend::new(pool);
+    let backend = auth::WebBackend::new(pool);
     let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
     let protected_routes = Router::new()
@@ -105,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
     // TODO: static directory configuration
     let static_server = ServeDir::new("static");
     let app = protected_routes
-        .route_layer(login_required!(auth::Backend, login_url = "/login"))
+        .route_layer(login_required!(auth::WebBackend, login_url = "/login"))
         .merge(unprotected_routes)
         .layer(auth_layer)
         .with_state(shared_state)
@@ -116,4 +134,33 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+// fn set_up_api(state: AppStateRef) -> Router {
+//     let query_routes = Router::<AppStateRef>::new()
+//         .route(
+//             "/api/v1/check-query",
+//             get(api::check::get::check_api_access),
+//         )
+//         .with_state(state.clone())
+//         .route_layer(axum::middleware::from_fn_with_state(
+//             state,
+//             api::middleware::api_has_query_perm,
+//         ));
+
+//     todo!()
+// }
+
+fn set_up_api(state: AppStateRef) -> Router {
+    let routes_without_middleware = Router::new().route(
+        "/api/v1/check-query",
+        get(api::check::get::check_api_access),
+    );
+
+    let routes_with_state = routes_without_middleware.with_state::<AppStateRef>(state.clone());
+
+    let layer = axum::middleware::from_fn_with_state(state, api_has_query_perm);
+    let query_routes = routes_with_state.layer(layer);
+
+    todo!()
 }

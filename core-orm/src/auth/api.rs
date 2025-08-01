@@ -1,4 +1,8 @@
-use crate::{auth::Permission, error::ApiAuthError, MySqlConn};
+use crate::{
+    auth::{PermSet, Permission},
+    error::ApiAuthError,
+    MySqlConn,
+};
 use anyhow::Context;
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header};
@@ -41,7 +45,7 @@ use crate::auth::User;
 //    need to be able to send emails warning of expired tokens.
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct RefreshClaims {
+pub struct RefreshClaims {
     /// The token issuer (this will be us)
     iss: String,
 
@@ -155,7 +159,7 @@ pub async fn authenticate_refresh_token(
     conn: &mut MySqlConn,
     token: &str,
     decode_key: &DecodingKey,
-) -> Result<(), ApiAuthError> {
+) -> Result<PermSet, ApiAuthError> {
     // First validate the token itself - if not signed or otherwise invalid, auth fails
     let val = jsonwebtoken::Validation::default();
     let res = jsonwebtoken::decode::<RefreshClaims>(token, decode_key, &val);
@@ -180,8 +184,10 @@ pub async fn authenticate_refresh_token(
         .await?
         .ok_or_else(|| ApiAuthError::TokenNotFound)?;
 
-    // TODO: If auth succeeds, return permissions associated with this user.
-    Ok(())
+    let perms = PermSet::load_from_db(conn, &user)
+        .await
+        .map_err(|e| ApiAuthError::Other(e.to_string()))?;
+    Ok(perms)
 }
 
 /// Add a new permission for the given user to the database.
