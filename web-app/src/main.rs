@@ -137,30 +137,15 @@ async fn main() -> anyhow::Result<()> {
 }
 
 // fn set_up_api(state: AppStateRef) -> Router {
-//     let query_routes = Router::<AppStateRef>::new()
-//         .route(
-//             "/api/v1/check-query",
-//             get(api::check::get::check_api_access),
-//         )
-//         .with_state(state.clone())
-//         .route_layer(axum::middleware::from_fn_with_state(
-//             state,
-//             api::middleware::api_has_query_perm,
-//         ));
+//     let routes_without_middleware = Router::new().route(
+//         "/api/v1/check-query",
+//         get(api::check::get::check_api_access),
+//     );
+
+//     let routes_with_state = routes_without_middleware.with_state::<AppStateRef>(state.clone());
+
+//     let layer = axum::middleware::from_fn_with_state(state, api_has_query_perm);
+//     let query_routes = routes_with_state.layer(layer);
 
 //     todo!()
 // }
-
-fn set_up_api(state: AppStateRef) -> Router {
-    let routes_without_middleware = Router::new().route(
-        "/api/v1/check-query",
-        get(api::check::get::check_api_access),
-    );
-
-    let routes_with_state = routes_without_middleware.with_state::<AppStateRef>(state.clone());
-
-    let layer = axum::middleware::from_fn_with_state(state, api_has_query_perm);
-    let query_routes = routes_with_state.layer(layer);
-
-    todo!()
-}

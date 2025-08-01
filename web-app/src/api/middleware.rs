@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use askama_axum::IntoResponse;
+use axum::response::IntoResponse;
 use axum::{
     debug_middleware,
     extract::{Request, State},
@@ -21,7 +21,7 @@ use orm::{
 
 use crate::{AppState, AppStateRef};
 
-#[debug_middleware]
+// #[debug_middleware]
 pub(crate) async fn api_has_query_perm(
     State(state): AppStateRef,
     headers: HeaderMap,

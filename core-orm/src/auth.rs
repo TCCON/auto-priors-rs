@@ -107,7 +107,6 @@ impl From<djangohashers::HasherError> for WebAuthError {
     }
 }
 
-#[async_trait]
 impl AuthnBackend for WebBackend {
     type User = User;
     type Credentials = Credentials;

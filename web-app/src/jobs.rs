@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use askama_axum::Template;
+use askama::Template;
 use chrono::NaiveDate;
 use itertools::{izip, Itertools};
 
@@ -574,7 +574,7 @@ impl SubmitJobForm {
 }
 
 pub(crate) mod get {
-    use askama_axum::IntoResponse;
+    use askama::Template;
     use axum::{extract::State, http::StatusCode};
 
     use crate::{auth::AuthSession, load_automation_config, server_error, AppStateRef};
@@ -584,7 +584,7 @@ pub(crate) mod get {
     pub(crate) async fn job_queue(
         State(state): AppStateRef,
         session: AuthSession,
-    ) -> Result<impl IntoResponse, StatusCode> {
+    ) -> Result<String, StatusCode> {
         let res = JobQueueContext::new_from_db(
             state.root_uri.clone(),
             session.user,
@@ -600,13 +600,14 @@ pub(crate) mod get {
         )
         .await;
         let context = server_error(res)?;
-        Ok(context)
+        let html = server_error(context.render())?;
+        Ok(html)
     }
 
     pub(crate) async fn job_download(
         State(state): AppStateRef,
         auth_session: AuthSession,
-    ) -> Result<impl IntoResponse, StatusCode> {
+    ) -> Result<String, StatusCode> {
         let user = if let Some(u) = auth_session.user {
             u
         } else {
@@ -624,20 +625,23 @@ pub(crate) mod get {
             user: Some(user),
             user_jobs,
         };
-        Ok(context)
+
+        let html = server_error(context.render())?;
+        Ok(html)
     }
 
     pub(crate) async fn submit_job(
         State(state): AppStateRef,
         session: AuthSession,
-    ) -> Result<impl IntoResponse, StatusCode> {
+    ) -> Result<String, StatusCode> {
         let context = SubmitJobContext::new(state.root_uri.clone(), session.user);
-        Ok(context)
+        let html = server_error(context.render())?;
+        Ok(html)
     }
 }
 
 pub(crate) mod post {
-    use askama_axum::IntoResponse;
+    use askama::Template;
     use axum::{extract::State, http::StatusCode, Form};
 
     use crate::{auth::AuthSession, load_automation_config, server_error, AppStateRef};
@@ -648,7 +652,7 @@ pub(crate) mod post {
         State(state): AppStateRef,
         session: AuthSession,
         Form(job_req): Form<SubmitJobForm>,
-    ) -> Result<impl IntoResponse, StatusCode> {
+    ) -> Result<String, StatusCode> {
         let user_email = if let Some(user) = &session.user {
             user.email.clone()
         } else {
@@ -670,7 +674,8 @@ pub(crate) mod post {
                     session.user,
                     problems,
                 );
-                Ok(context)
+                let html = server_error(context.render())?;
+                Ok(html)
             }
         }
     }
