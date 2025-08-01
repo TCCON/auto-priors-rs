@@ -198,7 +198,7 @@ pub async fn add_user_permission(
     conn: &mut MySqlConn,
     user: &User,
     perm: &Permission,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let perm_id = perm
         .get_id(conn)
         .await?
@@ -206,8 +206,10 @@ pub async fn add_user_permission(
 
     if !user_has_perm(conn, user, perm_id).await? {
         add_permission(conn, user, perm_id).await?;
+        Ok(true)
+    } else {
+        Ok(false)
     }
-    Ok(())
 }
 
 async fn user_has_perm(conn: &mut MySqlConn, user: &User, perm_id: i32) -> sqlx::Result<bool> {

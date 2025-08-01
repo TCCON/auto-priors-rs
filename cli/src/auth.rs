@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use clap::{Args, Subcommand};
 use orm::{
     auth::{api::add_user_permission, PermSet, Permission, User},
@@ -15,6 +17,7 @@ pub struct AuthCli {
 pub enum AuthActions {
     MakeAdmin(MakeUserAdminCli),
     ShowPerms(ShowUserPermsCli),
+    EditPerms(ModifyUserPermissionsCli),
 }
 
 /// Give a user the ADMIN permissions
@@ -70,6 +73,54 @@ pub async fn show_user_perms<S: AsRef<str>>(
             println!("{}: {perms}", user.username);
         } else {
             println!("User {} not found", name.as_ref());
+        }
+    }
+    Ok(())
+}
+
+/// Add or remove web permissions for a user
+#[derive(Debug, Args)]
+pub struct ModifyUserPermissionsCli {
+    /// The user to modify
+    username: String,
+    /// Which permission to add or remove: ADMIN, QUERY, SUBMIT, or DOWNLOAD
+    permission_tag: String,
+    /// Use this flag to delete the permission instead of add it
+    #[clap(short, long)]
+    delete: bool,
+}
+
+pub async fn modify_user_permissions_cli(
+    conn: &mut MySqlConn,
+    cli: ModifyUserPermissionsCli,
+) -> anyhow::Result<()> {
+    let perm = Permission::from_str(&cli.permission_tag)
+        .map_err(|e| anyhow::anyhow!("Unknown permission tag '{}'", cli.permission_tag))?;
+    modify_user_permissions(conn, &cli.username, &perm, cli.delete).await
+}
+
+pub async fn modify_user_permissions(
+    conn: &mut MySqlConn,
+    username: &str,
+    perm: &Permission,
+    delete: bool,
+) -> anyhow::Result<()> {
+    let user = User::load_from_db(conn, username)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("No user named '{username}' found"))?;
+    if delete {
+        let had_perm = orm::auth::api::delete_user_permission(conn, &user, perm).await?;
+        if had_perm {
+            log::info!("Removed {perm} from user {username}");
+        } else {
+            log::info!("User {username} did not have permission {perm}, no change to database");
+        }
+    } else {
+        let added_perm = orm::auth::api::add_user_permission(conn, &user, perm).await?;
+        if added_perm {
+            log::info!("Added {perm} to user {username}");
+        } else {
+            log::info!("User {username} already had permission {perm}, no change to database");
         }
     }
     Ok(())

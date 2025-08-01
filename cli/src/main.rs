@@ -432,6 +432,13 @@ async fn main() -> anyhow::Result<()> {
             let mut conn = db.get_connection().await?;
             auth::show_user_perms_cli(&mut conn, subargs).await?;
         }
+
+        Commands::Auth(AuthCli {
+            command: AuthActions::EditPerms(subargs),
+        }) => {
+            let mut conn = db.get_connection().await?;
+            auth::modify_user_permissions_cli(&mut conn, subargs).await?;
+        }
     };
 
     Ok(())

@@ -25,7 +25,7 @@ mod templates_common;
 
 use tower_sessions::cookie::time::Duration;
 
-use crate::api::middleware::api_has_query_perm;
+use crate::api::middleware::{api_has_download_perm, api_has_query_perm, api_has_submit_perm};
 
 type AppStateRef = State<Arc<AppState>>;
 
@@ -141,14 +141,35 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
-    let routes_without_middleware = Router::new().route(
-        "/api/v1/check-query",
-        get(api::check::get::check_api_access),
-    );
+    let query_routes = Router::new()
+        .route(
+            "/api/v1/check-query",
+            get(api::check::get::check_api_access),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            api_has_query_perm,
+        ));
 
-    let routes_with_middleware = routes_without_middleware.route_layer(
-        axum::middleware::from_fn_with_state(state.clone(), api_has_query_perm),
-    );
+    let submit_routes = Router::new()
+        .route(
+            "/api/v1/check-submit",
+            get(api::check::get::check_api_access),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            api_has_submit_perm,
+        ));
 
-    routes_with_middleware
+    let download_routes = Router::new()
+        .route(
+            "/api/v1/check-download",
+            get(api::check::get::check_api_access),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            api_has_download_perm,
+        ));
+
+    query_routes.merge(submit_routes).merge(download_routes)
 }
