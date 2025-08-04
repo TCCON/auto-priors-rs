@@ -1015,7 +1015,7 @@ async fn handle_status_request(
 
     let sub_date = Local::now().date_naive() - Duration::days(31);
 
-    let jobs = crate::jobs::Job::get_jobs_for_user_submitted_after(conn, &buf, sub_date).await?;
+    let jobs = crate::jobs::Job::get_jobs_for_user(conn, &buf, Some(sub_date), None).await?;
 
     let job_report = if jobs.is_empty() {
         format!("There were no jobs submitted by {buf} in the last 31 days.")

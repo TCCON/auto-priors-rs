@@ -21,6 +21,13 @@ use sqlx::{self, Acquire, FromRow, Type};
 use tabled::Tabled;
 use tokio::task::JoinHandle;
 
+/// The default minimum date to use in ORM methods that optionally limit by submit time.
+/// This is needed because [`NaiveDate::MIN`] produces a value outside the value range for MySQL.
+const DEFAULT_MIN_SUB_DATE: NaiveDate = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+/// The default maximum date to use in ORM methods that optionally limit by submit time
+/// This is needed because [`NaiveDate::MAX`] produces a value outside the value range for MySQL.
+const DEFAULT_MAX_SUB_DATE: NaiveDate = NaiveDate::from_ymd_opt(2100, 1, 1).unwrap();
+
 use crate::{
     config::{Config, EmailConfig},
     error::{JobAddError, JobError, JobPriorityError, JobResult},
@@ -918,30 +925,49 @@ impl Job {
         Ok(jobs?)
     }
 
-    pub async fn get_jobs_for_user(conn: &mut MySqlConn, user: &str) -> anyhow::Result<Vec<Job>> {
-        let jobs: Result<Vec<Job>, _> =
-            sqlx::query_as!(QJob, "SELECT * FROM Jobs WHERE email = ?", user)
-                .fetch_all(conn)
-                .await?
-                .into_iter()
-                .map(|q| q.try_into())
-                .collect();
+    pub async fn get_jobs_for_user(
+        conn: &mut MySqlConn,
+        user: &str,
+        submitted_after: Option<NaiveDate>,
+        submitted_before: Option<NaiveDate>,
+    ) -> anyhow::Result<Vec<Job>> {
+        let submitted_after = submitted_after.unwrap_or(DEFAULT_MIN_SUB_DATE);
+        let submitted_before = submitted_before.unwrap_or(DEFAULT_MAX_SUB_DATE);
+        let jobs: Result<Vec<Job>, _> = sqlx::query_as!(
+            QJob,
+            "SELECT * FROM Jobs WHERE email = ? AND submit_time >= ? AND submit_time < ?",
+            user,
+            submitted_after,
+            submitted_before
+        )
+        .fetch_all(conn)
+        .await?
+        .into_iter()
+        .map(|q| q.try_into())
+        .collect();
 
         Ok(jobs?)
     }
 
-    pub async fn get_jobs_for_user_submitted_after(
+    pub async fn get_active_jobs_for_user_submitted_between(
         conn: &mut MySqlConn,
         user: &str,
-        submitted_after: NaiveDate,
+        submitted_after: Option<NaiveDate>,
+        submitted_before: Option<NaiveDate>,
     ) -> anyhow::Result<Vec<Job>> {
+        let submitted_after = submitted_after.unwrap_or(DEFAULT_MIN_SUB_DATE);
+        let submitted_before = submitted_before.unwrap_or(DEFAULT_MAX_SUB_DATE);
         let jobs: Result<Vec<Job>, _> = sqlx::query_as!(
             QJob,
-            "SELECT * FROM Jobs WHERE email = ? AND submit_time >= ?",
+            "SELECT * FROM Jobs WHERE email = ? AND submit_time >= ? AND submit_time < ? AND (state = ? OR state = ? OR state = ? OR state = ?)",
             user,
-            submitted_after.and_hms_opt(0, 0, 0).unwrap()
-        )
-        .fetch_all(conn)
+            submitted_after,
+            submitted_before,
+            JobState::Pending,
+            JobState::Running,
+            JobState::Complete,
+            JobState::Errored
+        ).fetch_all(conn)
         .await?
         .into_iter()
         .map(|q| q.try_into())

@@ -198,7 +198,7 @@ async fn get_user_jobs(
     let all_emails = user.all_associated_emails(conn).await?;
     let mut jobs = vec![];
     for email in all_emails.iter() {
-        let these_jobs = orm::jobs::Job::get_jobs_for_user(conn, email).await?;
+        let these_jobs = orm::jobs::Job::get_jobs_for_user(conn, email, None, None).await?;
         jobs.extend(these_jobs.into_iter());
     }
     let mut ready_jobs = vec![];
@@ -308,18 +308,16 @@ struct JobQueueContext {
 
 impl JobQueueContext {
     async fn new_from_db(
-        root_uri: String,
         user: Option<User>,
         state: std::sync::Arc<AppState>,
         columns: &[&str],
     ) -> anyhow::Result<Self> {
         let mut conn = state.pool.get_connection().await?;
-        let config = crate::load_automation_config()?;
-        let jobs_list = make_queue_jobs_list(&mut conn, &config).await?;
+        let jobs_list = make_queue_jobs_list(&mut conn, &state.config).await?;
         log::debug!("jobs_list.len() = {}", jobs_list.len());
         let queue_table = make_jobs_queue_html(&jobs_list, columns)?;
         Ok(Self {
-            root_uri,
+            root_uri: state.root_uri.clone(),
             user,
             queue_table,
         })
@@ -577,7 +575,7 @@ pub(crate) mod get {
     use askama::Template;
     use axum::{extract::State, http::StatusCode, response::Html};
 
-    use crate::{auth::AuthSession, load_automation_config, server_error, AppStateRef};
+    use crate::{auth::AuthSession, server_error, AppStateRef};
 
     use super::{get_user_jobs, JobDownloadContext, JobQueueContext, SubmitJobContext};
 
@@ -586,7 +584,6 @@ pub(crate) mod get {
         session: AuthSession,
     ) -> Result<Html<String>, StatusCode> {
         let res = JobQueueContext::new_from_db(
-            state.root_uri.clone(),
             session.user,
             state,
             &[
@@ -615,11 +612,10 @@ pub(crate) mod get {
         };
 
         let mut conn = server_error(state.pool.get_connection().await)?;
-        let config = server_error(load_automation_config())?;
         let after = chrono::Local::now().naive_local() - chrono::TimeDelta::weeks(2);
 
         // TODO: verify that running/pending, errored, and cleaned jobs show up correctly.
-        let user_jobs = server_error(get_user_jobs(&mut conn, &config, &user, after).await)?;
+        let user_jobs = server_error(get_user_jobs(&mut conn, &state.config, &user, after).await)?;
         let context = JobDownloadContext {
             root_uri: state.root_uri.clone(),
             user: Some(user),
@@ -644,7 +640,7 @@ pub(crate) mod post {
     use askama::Template;
     use axum::{extract::State, http::StatusCode, response::Html, Form};
 
-    use crate::{auth::AuthSession, load_automation_config, server_error, AppStateRef};
+    use crate::{auth::AuthSession, server_error, AppStateRef};
 
     use super::{SubmitJobContext, SubmitJobForm};
 
@@ -660,9 +656,10 @@ pub(crate) mod post {
         };
 
         let mut conn = server_error(state.pool.get_connection().await)?;
-        let config = server_error(load_automation_config())?;
 
-        let res = job_req.to_input_job(user_email, &mut conn, &config).await;
+        let res = job_req
+            .to_input_job(user_email, &mut conn, &state.config)
+            .await;
 
         match res {
             // need to decouple blacklist and other final conversion logic from

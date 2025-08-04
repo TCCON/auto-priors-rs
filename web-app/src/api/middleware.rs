@@ -12,12 +12,8 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use jsonwebtoken::DecodingKey;
+use orm::auth::{api::authenticate_refresh_token, Permission};
 use orm::error::ApiAuthError;
-use orm::{
-    auth::{api::authenticate_refresh_token, Permission},
-    MySqlConn,
-};
 
 use crate::AppState;
 
@@ -56,7 +52,7 @@ async fn api_has_perm(
     state: &AppState,
     headers: HeaderMap,
     perm: Permission,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
     let token = match get_token_from_header(&headers) {
@@ -70,9 +66,10 @@ async fn api_has_perm(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
 
-    match key_has_perm(&mut conn, token, &state.decoding_key, perm).await {
-        Ok(true) => (),
-        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+    let res = authenticate_refresh_token(&mut conn, token, &state.decoding_key).await;
+
+    let (user, perm_set) = match res {
+        Ok((user, perm_set)) => (user, perm_set),
         Err(ApiAuthError::TokenExpiredOnServer) | Err(ApiAuthError::TokenInvalidExpired) => {
             let resp = Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
@@ -102,7 +99,14 @@ async fn api_has_perm(
             log::error!("An unexpected error occurred while validating a user API token: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
+    };
+
+    if !perm_set.has_perm(&perm) {
+        return StatusCode::FORBIDDEN.into_response();
     }
+
+    request.extensions_mut().insert(user);
+    request.extensions_mut().insert(perm_set);
 
     next.run(request).await
 }
@@ -150,14 +154,4 @@ fn get_token_from_header<'h>(headers: &'h HeaderMap) -> Result<&'h str, Response
     }
 
     Ok(token.trim())
-}
-
-async fn key_has_perm(
-    conn: &mut MySqlConn,
-    token: &str,
-    decoding_key: &DecodingKey,
-    perm: Permission,
-) -> Result<bool, ApiAuthError> {
-    let user_perms = authenticate_refresh_token(conn, token, decoding_key).await?;
-    Ok(user_perms.has_perm(&perm))
 }

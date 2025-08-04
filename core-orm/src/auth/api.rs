@@ -159,7 +159,7 @@ pub async fn authenticate_refresh_token(
     conn: &mut MySqlConn,
     token: &str,
     decode_key: &DecodingKey,
-) -> Result<PermSet, ApiAuthError> {
+) -> Result<(User, PermSet), ApiAuthError> {
     // First validate the token itself - if not signed or otherwise invalid, auth fails
     let val = jsonwebtoken::Validation::default();
     let res = jsonwebtoken::decode::<RefreshClaims>(token, decode_key, &val);
@@ -187,7 +187,7 @@ pub async fn authenticate_refresh_token(
     let perms = PermSet::load_from_db(conn, &user)
         .await
         .map_err(|e| ApiAuthError::Other(e.to_string()))?;
-    Ok(perms)
+    Ok((user, perms))
 }
 
 /// Add a new permission for the given user to the database.

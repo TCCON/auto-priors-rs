@@ -1,7 +1,6 @@
 use std::{collections::HashSet, fmt::Display, io::Read, path::Path, str::FromStr};
 
 use anyhow::Context;
-use async_trait::async_trait;
 use axum_login::{AuthUser, AuthnBackend, UserId};
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
@@ -174,7 +173,9 @@ pub fn load_jwt_hmac_secret(file: &Path) -> anyhow::Result<(EncodingKey, Decodin
     Ok((encoding, decoding))
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, strum::Display, strum::EnumString, strum::IntoStaticStr)]
+#[derive(
+    Debug, Clone, Copy, Hash, PartialEq, Eq, strum::Display, strum::EnumString, strum::IntoStaticStr,
+)]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum Permission {
     Admin,
@@ -194,6 +195,7 @@ impl Permission {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct PermSet(HashSet<Permission>);
 
 impl PermSet {

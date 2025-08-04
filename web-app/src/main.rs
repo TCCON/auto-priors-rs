@@ -11,9 +11,8 @@ use jsonwebtoken::{DecodingKey, EncodingKey};
 use log::{debug, error, info};
 use tower_http::services::ServeDir;
 
-use orm;
 use orm::auth;
-use orm::auth::api as auth_api;
+use orm::{self, config::Config};
 
 mod api;
 mod auth_web;
@@ -32,6 +31,7 @@ type AppStateRef = State<Arc<AppState>>;
 #[derive(Clone)]
 struct AppState {
     pool: orm::PoolWrapper,
+    config: Config,
     root_uri: String,
     decoding_key: DecodingKey,
     encoding_key: EncodingKey,
@@ -55,6 +55,7 @@ impl AppState {
 
         Ok(Self {
             pool,
+            config,
             root_uri,
             decoding_key,
             encoding_key,
@@ -91,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let address = "127.0.0.1:8080";
 
+    // TODO: add root URI to configuration
     let state = AppState::new()
         .await
         .expect("Could not set up shared state");
@@ -143,8 +145,20 @@ async fn main() -> anyhow::Result<()> {
 fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
     let query_routes = Router::new()
         .route(
-            "/api/v1/check-query",
+            "/api/v1/query/check",
             get(api::check::get::check_api_access),
+        )
+        .route(
+            "/api/v1/query/all-jobs",
+            get(api::query::get::query_all_jobs),
+        )
+        .route(
+            "/api/v1/query/active-jobs",
+            get(api::query::get::query_active_jobs),
+        )
+        .route(
+            "/api/v1/query/job-status/{job_id}",
+            get(api::query::get::query_job),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -153,7 +167,7 @@ fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
 
     let submit_routes = Router::new()
         .route(
-            "/api/v1/check-submit",
+            "/api/v1/check/submit",
             get(api::check::get::check_api_access),
         )
         .route_layer(axum::middleware::from_fn_with_state(
@@ -163,7 +177,7 @@ fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
 
     let download_routes = Router::new()
         .route(
-            "/api/v1/check-download",
+            "/api/v1/check/download",
             get(api::check::get::check_api_access),
         )
         .route_layer(axum::middleware::from_fn_with_state(

@@ -1,9 +1,8 @@
 use std::io::Read;
-use std::str::FromStr;
 
 use clap::{Args, Subcommand};
 use orm::auth::api::{authenticate_refresh_token, generate_refresh_token};
-use orm::auth::{load_jwt_hmac_secret, Permission, User};
+use orm::auth::{load_jwt_hmac_secret, User};
 use orm::config::Config;
 use orm::MySqlConn;
 
