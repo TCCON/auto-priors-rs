@@ -656,7 +656,6 @@ pub async fn add_jobs_from_input_files(
     conn: &mut crate::MySqlConn,
     config: &Config,
     input_files: &[PathBuf],
-    save_dir: &Path,
     mover: &mut InputFileCleanupHandler,
 ) -> anyhow::Result<()> {
     let mut jobs = vec![];
@@ -719,12 +718,6 @@ pub async fn add_jobs_from_input_files(
                 unmoved_input_file_errors.push(e);
             }
         } else {
-            let save_tarball = if job.is_egi {
-                crate::jobs::TarChoice::Egi
-            } else {
-                crate::jobs::TarChoice::Yes
-            };
-
             // If so configured, split up the input job into shorter jobs
             let date_ranges = if let Some(ndays) = config.execution.job_split_into_days {
                 utils::split_date_range_by_days(job.start_date, job.end_date, ndays.into())
@@ -733,27 +726,20 @@ pub async fn add_jobs_from_input_files(
             };
 
             let mut results = vec![];
-            let delete_offset = chrono::Duration::hours(config.execution.hours_to_keep.into());
-            let delete_time = chrono::Local::now().naive_local() + delete_offset;
             for (sub_start, sub_end) in date_ranges {
-                let this_res = crate::jobs::Job::add_job_from_args_with_options(
+                let this_res = crate::jobs::Job::add_job_from_request(
                     conn,
+                    config,
                     job.site_id.clone(),
                     sub_start,
                     sub_end,
-                    save_dir.to_owned(),
                     Some(job.email.clone()),
                     job.lat.clone(),
                     job.lon.clone(),
-                    &config.execution.submitted_job_queue,
                     Some(job.mod_fmt),
                     Some(job.vmr_fmt),
                     Some(job.map_fmt),
-                    None,
-                    Some(delete_time),
-                    Some(save_tarball),
-                    job.met_key.as_deref(),
-                    job.ginput_key.as_deref(),
+                    job.is_egi,
                 )
                 .await;
                 results.push(this_res);

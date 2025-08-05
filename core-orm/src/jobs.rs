@@ -1479,6 +1479,48 @@ impl Job {
         Ok(new_id as i32)
     }
 
+    pub async fn add_job_from_request(
+        conn: &mut MySqlConn,
+        config: &Config,
+        site_id: Vec<String>,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        email: Option<String>,
+        lat: Vec<Option<f32>>,
+        lon: Vec<Option<f32>>,
+        mod_fmt: Option<ModFmt>,
+        vmr_fmt: Option<VmrFmt>,
+        map_fmt: Option<MapFmt>,
+        is_egi: bool,
+    ) -> Result<i32, JobAddError> {
+        let delete_offset = chrono::Duration::hours(config.execution.hours_to_keep.into());
+        let delete_time = chrono::Local::now().naive_local() + delete_offset;
+
+        let save_tarball = if is_egi {
+            crate::jobs::TarChoice::Egi
+        } else {
+            crate::jobs::TarChoice::Yes
+        };
+        Job::add_job_from_args(
+            conn,
+            site_id,
+            start_date,
+            end_date,
+            config.execution.output_path.clone(),
+            email,
+            lat,
+            lon,
+            &config.execution.submitted_job_queue,
+            mod_fmt,
+            vmr_fmt,
+            map_fmt,
+            None,
+            Some(delete_time),
+            Some(save_tarball),
+        )
+        .await
+    }
+
     /// Add a job with extra options, such as the met key and ginput key.
     ///
     /// Note that this DOES NOT check that the values of met_key and ginput_key are valid.

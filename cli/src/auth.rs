@@ -95,7 +95,7 @@ pub async fn modify_user_permissions_cli(
     cli: ModifyUserPermissionsCli,
 ) -> anyhow::Result<()> {
     let perm = Permission::from_str(&cli.permission_tag)
-        .map_err(|e| anyhow::anyhow!("Unknown permission tag '{}'", cli.permission_tag))?;
+        .map_err(|_| anyhow::anyhow!("Unknown permission tag '{}'", cli.permission_tag))?;
     modify_user_permissions(conn, &cli.username, &perm, cli.delete).await
 }
 

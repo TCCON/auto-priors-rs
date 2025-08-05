@@ -128,7 +128,7 @@ pub(crate) struct JobQueryDates {
 pub(crate) struct ApiDisplayJob {
     job_id: i32,
     state: JobState,
-    sites: Vec<ApiDispJobSite>,
+    sites: Vec<super::ApiJobSite>,
     start_date: NaiveDate,
     end_date: NaiveDate,
     email: Option<String>,
@@ -140,14 +140,6 @@ pub(crate) struct ApiDisplayJob {
     submit_time: NaiveDateTime,
     complete_time: Option<NaiveDateTime>,
     download_url: Option<String>,
-}
-
-/// Inner structure to serialize the locations requested for a job
-#[derive(Debug, Serialize)]
-pub(crate) struct ApiDispJobSite {
-    site_id: String,
-    lat: Option<f32>,
-    lon: Option<f32>,
 }
 
 impl ApiDisplayJob {
@@ -167,7 +159,7 @@ impl ApiDisplayJob {
             .site_id
             .into_iter()
             .enumerate()
-            .map(|(i, sid)| ApiDispJobSite {
+            .map(|(i, sid)| super::ApiJobSite {
                 site_id: sid,
                 lat: value.lat[i],
                 lon: value.lon[i],

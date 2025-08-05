@@ -167,9 +167,10 @@ fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
 
     let submit_routes = Router::new()
         .route(
-            "/api/v1/check/submit",
+            "/api/v1/submit/check",
             get(api::check::get::check_api_access),
         )
+        .route("/api/v1/jobs/submit", post(api::jobs::post::submit_job))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api_has_submit_perm,
@@ -177,7 +178,7 @@ fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
 
     let download_routes = Router::new()
         .route(
-            "/api/v1/check/download",
+            "/api/v1/download/check",
             get(api::check::get::check_api_access),
         )
         .route_layer(axum::middleware::from_fn_with_state(
