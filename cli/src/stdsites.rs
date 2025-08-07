@@ -1,24 +1,28 @@
-use std::{collections::HashSet, path::{Path, PathBuf}};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
-use chrono::{NaiveDate, Duration};
-use clap::{self, Subcommand, Args};
+use chrono::{Duration, NaiveDate};
+use clap::{self, Args, Subcommand};
 use itertools::Itertools;
 use log::warn;
-use orm::{stdsitejobs,MySqlConn, siteinfo::StdSite, utils::DateIterator};
+use orm::{siteinfo::StdSite, stdsitejobs, utils::DateIterator, MySqlConn};
+use sqlx::Connection;
 
 /// Manage jobs for the standard sites
 #[derive(Debug, Args)]
 pub struct StdSiteJobCli {
     #[clap(subcommand)]
-    pub command: StdSiteJobActions
+    pub command: StdSiteJobActions,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum StdSiteJobActions {
     /// Print a summary of standard site jobs
     Print(PrintStdJobsSummaryCli),
-    
-    /// Update the standard site jobs table: add rows for new site-days possible 
+
+    /// Update the standard site jobs table: add rows for new site-days possible
     UpdateTable(UpdateTableCli),
 
     /// Add jobs to generate standard sites' priors for days in need of priors
@@ -43,18 +47,18 @@ pub enum StdSiteJobActions {
     TarSpecialRun(SpecialRunTarCli),
 }
 
-/// Update the standard site jobs table: add rows for new site-days possible 
+/// Update the standard site jobs table: add rows for new site-days possible
 #[derive(Debug, Args)]
 pub struct UpdateTableCli {
-    #[clap(short='b', long)]
-    not_before: Option<NaiveDate>
+    #[clap(short = 'b', long)]
+    not_before: Option<NaiveDate>,
 }
 
 #[derive(Debug, Args)]
 pub struct FlagForRegenCli {
     /// Site ID to flag. Can provide this argument multiple times to flag multiple
     /// sites. Either this or --all-sites is required, but cannot have both.
-    #[clap(short='s', long)]
+    #[clap(short = 's', long)]
     site_id: Vec<String>,
 
     /// Flag all sites for regen. Either this or --site-id is required, but cannot have both.
@@ -65,34 +69,43 @@ pub struct FlagForRegenCli {
     start_date: NaiveDate,
 
     /// Date after the last date to flag; if not given, only START_DATE is flagged
-    end_date: Option<NaiveDate>
+    end_date: Option<NaiveDate>,
 }
 
-pub async fn update_std_site_job_table_cli(conn: &mut MySqlConn, config: &orm::config::Config, args: UpdateTableCli) -> anyhow::Result<()> {
+pub async fn update_std_site_job_table_cli(
+    conn: &mut MySqlConn,
+    config: &orm::config::Config,
+    args: UpdateTableCli,
+) -> anyhow::Result<()> {
     update_std_site_job_table(conn, config, args.not_before).await
 }
 
-pub async fn update_std_site_job_table(conn: &mut MySqlConn, config: &orm::config::Config, not_before: Option<NaiveDate>) -> anyhow::Result<()> {
-    stdsitejobs::StdSiteJob::update_std_site_job_table(
-        conn, 
-        config,
-        not_before
-    ).await?;
+pub async fn update_std_site_job_table(
+    conn: &mut MySqlConn,
+    config: &orm::config::Config,
+    not_before: Option<NaiveDate>,
+) -> anyhow::Result<()> {
+    stdsitejobs::StdSiteJob::update_std_site_job_table(conn, config, not_before).await?;
     Ok(())
 }
 
-pub async fn add_jobs_for_pending_rows(conn: &mut MySqlConn, config: &orm::config::Config) -> anyhow::Result<()> {
+pub async fn add_jobs_for_pending_rows(
+    conn: &mut MySqlConn,
+    config: &orm::config::Config,
+) -> anyhow::Result<()> {
     stdsitejobs::StdSiteJob::add_jobs_for_pending_rows(conn, config).await
 }
 
-pub async fn make_std_site_tarballs(conn: &mut MySqlConn, config: &orm::config::Config) -> anyhow::Result<()> {
+pub async fn make_std_site_tarballs(
+    conn: &mut MySqlConn,
+    config: &orm::config::Config,
+) -> anyhow::Result<()> {
     stdsitejobs::StdSiteJob::make_standard_site_tarballs(conn, config).await
 }
 
-
 pub enum SitesToFlag {
     Some(Vec<String>),
-    All
+    All,
 }
 
 pub async fn flag_for_regen_cli(conn: &mut MySqlConn, args: FlagForRegenCli) -> anyhow::Result<()> {
@@ -107,7 +120,12 @@ pub async fn flag_for_regen_cli(conn: &mut MySqlConn, args: FlagForRegenCli) -> 
     flag_for_regen(conn, args.start_date, args.end_date, sites).await
 }
 
-pub async fn flag_for_regen(conn: &mut MySqlConn, start_date: NaiveDate, end_date: Option<NaiveDate>, sites: SitesToFlag) -> anyhow::Result<()> {
+pub async fn flag_for_regen(
+    conn: &mut MySqlConn,
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>,
+    sites: SitesToFlag,
+) -> anyhow::Result<()> {
     let end_date = end_date.unwrap_or_else(|| start_date + Duration::days(1));
     let site_ids = if let SitesToFlag::Some(sids) = sites {
         sids
@@ -116,12 +134,17 @@ pub async fn flag_for_regen(conn: &mut MySqlConn, start_date: NaiveDate, end_dat
     };
 
     for sid in site_ids {
-        stdsitejobs::StdSiteJob::set_regen_flag_by_site_info(conn, &sid, start_date, Some(end_date)).await?;
+        stdsitejobs::StdSiteJob::set_regen_flag_by_site_info(
+            conn,
+            &sid,
+            start_date,
+            Some(end_date),
+        )
+        .await?;
     }
 
     Ok(())
 }
-
 
 /// Print a table summarizing the progress of generating standard site priors
 #[derive(Debug, Args)]
@@ -129,13 +152,16 @@ pub struct PrintStdJobsSummaryCli {
     /// First date to print in the table. If not given, defaults to 7 days ago.
     #[clap(short = 's', long)]
     start_date: Option<NaiveDate>,
-    
+
     /// Date after the last one to print. If not given, defaults to today.
     #[clap(short = 'e', long)]
     end_date: Option<NaiveDate>,
 }
 
-pub async fn print_std_jobs_summary_cli(conn: &mut MySqlConn, args: PrintStdJobsSummaryCli) -> anyhow::Result<()> {
+pub async fn print_std_jobs_summary_cli(
+    conn: &mut MySqlConn,
+    args: PrintStdJobsSummaryCli,
+) -> anyhow::Result<()> {
     let start_date = if let Some(sd) = args.start_date {
         sd
     } else {
@@ -145,15 +171,18 @@ pub async fn print_std_jobs_summary_cli(conn: &mut MySqlConn, args: PrintStdJobs
     print_std_jobs_summary(conn, start_date, args.end_date).await
 }
 
-
-pub async fn print_std_jobs_summary(conn: &mut MySqlConn, start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<()> {
+pub async fn print_std_jobs_summary(
+    conn: &mut MySqlConn,
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>,
+) -> anyhow::Result<()> {
     let end_date = end_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
     let mut summaries = vec![];
     for date in DateIterator::new_one_range(start_date, end_date) {
         let this_summary = stdsitejobs::StdSiteJob::summarize_date(conn, date).await?;
         summaries.push(this_summary);
     }
-    
+
     println!("{}", orm::utils::to_std_table(summaries));
 
     Ok(())
@@ -167,7 +196,7 @@ pub async fn print_std_jobs_summary(conn: &mut MySqlConn, start_date: NaiveDate,
 pub struct SpecialRunCli {
     /// A comma-separated list of site IDs for which to do the special run.
     /// If this is not given, then all sites active at any point during the
-    /// requested time period will be run. 
+    /// requested time period will be run.
     #[clap(long)]
     site_ids: Option<String>,
 
@@ -208,10 +237,18 @@ pub struct SpecialRunCli {
     end_date: NaiveDate,
 }
 
-
-pub async fn special_std_site_run_cli(conn: &mut MySqlConn, config: &orm::config::Config, args: SpecialRunCli) -> anyhow::Result<()> {
-    let site_ids = args.site_ids.map(|ids| ids.split(',').map(|s| s.to_owned()).collect_vec());
-    let queue = args.queue.as_deref().unwrap_or_else(|| &config.execution.submitted_job_queue);
+pub async fn special_std_site_run_cli(
+    conn: &mut MySqlConn,
+    config: &orm::config::Config,
+    args: SpecialRunCli,
+) -> anyhow::Result<()> {
+    let site_ids = args
+        .site_ids
+        .map(|ids| ids.split(',').map(|s| s.to_owned()).collect_vec());
+    let queue = args
+        .queue
+        .as_deref()
+        .unwrap_or_else(|| &config.execution.submitted_job_queue);
     special_std_site_run(
         conn,
         config,
@@ -224,7 +261,8 @@ pub async fn special_std_site_run_cli(conn: &mut MySqlConn, config: &orm::config
         args.start_date,
         args.end_date,
         queue,
-    ).await
+    )
+    .await
 }
 
 pub async fn special_std_site_run(
@@ -240,19 +278,20 @@ pub async fn special_std_site_run(
     end_date: NaiveDate,
     queue: &str,
 ) -> anyhow::Result<()> {
-
     // Check that our met and ginput keys are defined in the config and the met data we need is available
     if let Some(met) = met_key {
         let met_cfgs = config.get_met_configs(met)?;
         for date in orm::utils::DateIterator::new_one_range(start_date, end_date) {
-            let state = orm::met::MetFile::is_date_complete_for_config_set(conn, date, met_cfgs).await?;
+            let state =
+                orm::met::MetFile::is_date_complete_for_config_set(conn, date, met_cfgs).await?;
             if !state.is_complete() {
                 anyhow::bail!("Required met not available for {date}");
             }
         }
     } else {
         for date in orm::utils::DateIterator::new_one_range(start_date, end_date) {
-            let state = orm::met::MetFile::is_date_complete_for_default_mets(conn, config, date).await?;
+            let state =
+                orm::met::MetFile::is_date_complete_for_default_mets(conn, config, date).await?;
             if !state.is_complete() {
                 anyhow::bail!("Required met not available for {date}");
             }
@@ -260,17 +299,21 @@ pub async fn special_std_site_run(
     }
 
     if let Some(ginput) = ginput_key {
-        config.execution.ginput.get(ginput)
-        .ok_or_else(|| anyhow::anyhow!("No ginput key name '{ginput}"))?;
+        config
+            .execution
+            .ginput
+            .get(ginput)
+            .ok_or_else(|| anyhow::anyhow!("No ginput key name '{ginput}"))?;
     }
 
-    
     // Now submit the job or jobs if we're breaking it up into multiple jobs to speed things up.
     let job_dates = special_job_date_ranges(start_date, end_date, split_days.map(|d| d as i64));
-    let (site_ids, site_lats, site_lons) = special_job_locations(conn, start_date, end_date, site_ids).await?;
+    let (site_ids, site_lats, site_lons) =
+        special_job_locations(conn, start_date, end_date, site_ids).await?;
     for (start, end) in job_dates {
+        let mut transaction = conn.begin().await?;
         let new_job_id = orm::jobs::Job::add_job_from_args_with_options(
-            conn, 
+            &mut transaction,
             site_ids.clone(),
             start,
             end,
@@ -286,15 +329,21 @@ pub async fn special_std_site_run(
             None,
             Some(orm::jobs::TarChoice::No),
             met_key,
-            ginput_key
-        ).await?;
+            ginput_key,
+        )
+        .await?;
+        transaction.commit().await?;
 
         println!("Submitted job {new_job_id} for dates {start} to {end}");
     }
     Ok(())
 }
 
-fn special_job_date_ranges(start_date: NaiveDate, end_date: NaiveDate, split_days: Option<i64>) -> Vec<(NaiveDate, NaiveDate)> {
+fn special_job_date_ranges(
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    split_days: Option<i64>,
+) -> Vec<(NaiveDate, NaiveDate)> {
     if let Some(num_days) = split_days {
         orm::utils::split_date_range_by_days(start_date, end_date, num_days)
     } else {
@@ -302,35 +351,44 @@ fn special_job_date_ranges(start_date: NaiveDate, end_date: NaiveDate, split_day
     }
 }
 
-async fn special_job_locations(conn: &mut MySqlConn, start_date: NaiveDate, end_date: NaiveDate, site_ids: Option<Vec<String>>) -> anyhow::Result<(Vec<String>, Vec<Option<f32>>, Vec<Option<f32>>)> {
+async fn special_job_locations(
+    conn: &mut MySqlConn,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    site_ids: Option<Vec<String>>,
+) -> anyhow::Result<(Vec<String>, Vec<Option<f32>>, Vec<Option<f32>>)> {
     let site_ids = if let Some(sids) = site_ids {
         sids
     } else {
         let mut sids = HashSet::new();
-        for (idate, date) in orm::utils::DateIterator::new_one_range(start_date, end_date).enumerate() {
-            let active_site_info = orm::siteinfo::SiteInfo::get_site_info_for_date(conn, date, true).await?;
-            
+        for (idate, date) in
+            orm::utils::DateIterator::new_one_range(start_date, end_date).enumerate()
+        {
+            let active_site_info =
+                orm::siteinfo::SiteInfo::get_site_info_for_date(conn, date, true).await?;
+
             // Because we rely on the default location defined for the sites, if a site does not have an entry for some dates
             // in the current range, that will cause a crash when the job goes to start. So we need to take only the subset of
             // sites that have a location defined for all dates in this range.
             if idate == 0 {
                 for info in active_site_info {
-                    sids.insert(info.site_id.expect("Foreign key for standard site ID should match"));
+                    sids.insert(
+                        info.site_id
+                            .expect("Foreign key for standard site ID should match"),
+                    );
                 }
             } else {
-                let this_sid_set = HashSet::from_iter(
-                    active_site_info.into_iter()
-                    .map(|info| info.site_id.expect("Foreign key for standard site ID should match"))
-                );
+                let this_sid_set = HashSet::from_iter(active_site_info.into_iter().map(|info| {
+                    info.site_id
+                        .expect("Foreign key for standard site ID should match")
+                }));
 
                 let common = Vec::from_iter(sids.intersection(&this_sid_set).cloned());
-                let to_remove = sids.clone().into_iter()
-                    .filter(|sid| !common.contains(sid));
+                let to_remove = sids.clone().into_iter().filter(|sid| !common.contains(sid));
                 for sid in to_remove {
                     warn!("{sid} does not have a location defined for all dates in {start_date} to {end_date}, it will be skipped in the corresponding job.");
                     sids.remove(&sid);
                 }
-                
             }
         }
         Vec::from_iter(sids.into_iter())
@@ -342,61 +400,83 @@ async fn special_job_locations(conn: &mut MySqlConn, start_date: NaiveDate, end_
     Ok((site_ids, lat, lon))
 }
 
-
 /// Make tarballs of special standard site runs
 #[derive(Debug, Args)]
 pub struct SpecialRunTarCli {
     /// Root directory to put the tarballs under. Note that this is required.
-    #[clap(short='o', long)]
+    #[clap(short = 'o', long)]
     tar_root_dir: PathBuf,
 
     /// Pass this argument to keep the original job output directory, rather than
     /// cleaning it up.
-    #[clap(short='k', long)]
+    #[clap(short = 'k', long)]
     keep_output: bool,
 
     /// The job ID numbers of jobs that we want to tar up.
     job_ids: Vec<i32>,
 }
 
-pub async fn tar_special_jobs_cli(conn: &mut MySqlConn, config: &orm::config::Config, args: SpecialRunTarCli) -> anyhow::Result<()> {
-    tar_special_jobs(conn, config, &args.job_ids, &args.tar_root_dir, args.keep_output).await
+pub async fn tar_special_jobs_cli(
+    conn: &mut MySqlConn,
+    config: &orm::config::Config,
+    args: SpecialRunTarCli,
+) -> anyhow::Result<()> {
+    tar_special_jobs(
+        conn,
+        config,
+        &args.job_ids,
+        &args.tar_root_dir,
+        args.keep_output,
+    )
+    .await
 }
 
-pub async fn tar_special_jobs(conn: &mut MySqlConn, config: &orm::config::Config, job_ids: &[i32], tar_root_dir: &Path, keep_output: bool) -> anyhow::Result<()> {
+pub async fn tar_special_jobs(
+    conn: &mut MySqlConn,
+    config: &orm::config::Config,
+    job_ids: &[i32],
+    tar_root_dir: &Path,
+    keep_output: bool,
+) -> anyhow::Result<()> {
     for jid in job_ids {
         let mut job = orm::jobs::Job::get_job_with_id(conn, *jid).await?;
 
         for site_id in job.site_id.iter() {
             // For each site, get its desired tarball format
-            let site_info = if let Some(sid) = orm::siteinfo::StdSite::get_by_site_id(conn, site_id).await? {
+            let site_info = if let Some(sid) =
+                orm::siteinfo::StdSite::get_by_site_id(conn, site_id).await?
+            {
                 sid
             } else {
                 log::warn!("Site {site_id} is not in the standard sites table; cannot make a tarball for it");
                 continue;
             };
-            
-            site_info.output_structure.make_std_site_tarball(tar_root_dir, site_id, &job, config)?;
+
+            site_info.output_structure.make_std_site_tarball(
+                tar_root_dir,
+                site_id,
+                &job,
+                config,
+            )?;
         }
 
         if !keep_output {
             job.set_cleaned(conn).await?;
         }
     }
-    
+
     Ok(())
 }
 
-
 /// Add existing standard site tarballs to the database.
-/// 
+///
 /// If standard site tarballs exist without a corresponding entry in the StdSiteJobs
 /// table, use this command to add them. It takes one or more paths to existing
 /// standard site tarballs, then checks to see if the corresponding site/date pairs
 /// have entries in the StdSiteJobs table. If not, and if it can find a job in the
 /// standard sites queue that could have produced this file (i.e. includes that site
 /// and date), then that tarball will be entered into the StdSiteJobs table.
-/// 
+///
 /// Note that if there is already an entry in the StdSiteJobs table for the site/date
 /// of a given tarball that is in any state other than "job needed", that tarball will
 /// NOT be added. This protects against messing up the database by "completing" a standard
@@ -404,11 +484,14 @@ pub async fn tar_special_jobs(conn: &mut MySqlConn, config: &orm::config::Config
 #[derive(Debug, Args)]
 pub struct UseExistingTarsCli {
     /// The existing ??_ggg_inputs_????????.tgz tarballs to put into the database.
-    tarballs: Vec<PathBuf>
+    tarballs: Vec<PathBuf>,
 }
 
-pub async fn use_existing_tars_cli(conn: &mut MySqlConn, config: &orm::config::Config, args: UseExistingTarsCli) -> anyhow::Result<()> {
-    stdsitejobs::StdSiteJob::add_extant_files_to_std_site_records(
-        conn, config, &args.tarballs,
-    ).await
+pub async fn use_existing_tars_cli(
+    conn: &mut MySqlConn,
+    config: &orm::config::Config,
+    args: UseExistingTarsCli,
+) -> anyhow::Result<()> {
+    stdsitejobs::StdSiteJob::add_extant_files_to_std_site_records(conn, config, &args.tarballs)
+        .await
 }

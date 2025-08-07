@@ -21,6 +21,10 @@ use sqlx::{self, Acquire, FromRow, Type};
 use tabled::Tabled;
 use tokio::task::JoinHandle;
 
+mod requests;
+
+pub use requests::RequestSite;
+
 /// The default minimum date to use in ORM methods that optionally limit by submit time.
 /// This is needed because [`NaiveDate::MIN`] produces a value outside the value range for MySQL.
 const DEFAULT_MIN_SUB_DATE: NaiveDate = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
@@ -1479,20 +1483,29 @@ impl Job {
         Ok(new_id as i32)
     }
 
+    ///
     pub async fn add_job_from_request(
         conn: &mut MySqlConn,
         config: &Config,
-        site_id: Vec<String>,
+        sites: Vec<requests::RequestSite>,
         start_date: NaiveDate,
         end_date: NaiveDate,
         email: Option<String>,
-        lat: Vec<Option<f32>>,
-        lon: Vec<Option<f32>>,
         mod_fmt: Option<ModFmt>,
         vmr_fmt: Option<VmrFmt>,
         map_fmt: Option<MapFmt>,
+        reanalysis: Option<&str>,
         is_egi: bool,
-    ) -> Result<i32, JobAddError> {
+    ) -> Result<Vec<i32>, JobAddError> {
+        let res = requests::check_and_transform_request_params(
+            conn, config, sites, start_date, end_date, reanalysis,
+        )
+        .await;
+
+        let finalized_values = match res {
+            Ok(vals) => vals,
+            Err(reasons) => return Err(JobAddError::InvalidRequest(reasons)),
+        };
         let delete_offset = chrono::Duration::hours(config.execution.hours_to_keep.into());
         let delete_time = chrono::Local::now().naive_local() + delete_offset;
 
@@ -1501,31 +1514,53 @@ impl Job {
         } else {
             crate::jobs::TarChoice::Yes
         };
-        Job::add_job_from_args(
-            conn,
-            site_id,
-            start_date,
-            end_date,
-            config.execution.output_path.clone(),
-            email,
-            lat,
-            lon,
-            &config.execution.submitted_job_queue,
-            mod_fmt,
-            vmr_fmt,
-            map_fmt,
-            None,
-            Some(delete_time),
-            Some(save_tarball),
-        )
-        .await
+
+        // If so configured, split up the input job into shorter jobs
+        let date_ranges = if let Some(ndays) = config.execution.job_split_into_days {
+            utils::split_date_range_by_days(start_date, end_date, ndays.into())
+        } else {
+            vec![(start_date, end_date)]
+        };
+
+        let mut all_job_ids = vec![];
+        let mut trans = conn.begin().await.unwrap();
+        for (sub_start, sub_end) in date_ranges {
+            let this_jid = Job::add_job_from_args_with_options(
+                &mut trans,
+                finalized_values.site_ids.clone(),
+                sub_start,
+                sub_end,
+                config.execution.output_path.clone(),
+                email.clone(),
+                finalized_values.lats.clone(),
+                finalized_values.lons.clone(),
+                &config.execution.submitted_job_queue,
+                mod_fmt,
+                vmr_fmt,
+                map_fmt,
+                None,
+                Some(delete_time),
+                Some(save_tarball),
+                finalized_values.met_key.as_deref(),
+                finalized_values.ginput_key.as_deref(),
+            )
+            .await?;
+            all_job_ids.push(this_jid);
+        }
+        trans.commit().await.unwrap();
+
+        Ok(all_job_ids)
     }
 
     /// Add a job with extra options, such as the met key and ginput key.
     ///
     /// Note that this DOES NOT check that the values of met_key and ginput_key are valid.
+    ///
+    /// Unlike the other `add_jobs_*` methods, this takes an SQL transaction, rather than a
+    /// regular connection. It is the callers responsibility to call `transaction.commit()`
+    /// after this function returns to finish adding the job to the database.
     pub async fn add_job_from_args_with_options(
-        conn: &mut MySqlConn,
+        transaction: &mut sqlx::Transaction<'_, sqlx::MySql>,
         site_id: Vec<String>,
         start_date: NaiveDate,
         end_date: NaiveDate,
@@ -1543,9 +1578,8 @@ impl Job {
         met_key: Option<&str>,
         ginput_key: Option<&str>,
     ) -> Result<i32, JobAddError> {
-        let mut transaction = conn.begin().await?;
         let job_id = Self::add_job_from_args(
-            &mut transaction,
+            &mut **transaction,
             site_id,
             start_date,
             end_date,
@@ -1565,7 +1599,7 @@ impl Job {
 
         if let Some(met) = met_key {
             sqlx::query!("UPDATE Jobs SET met_key = ? WHERE job_id = ?", met, job_id)
-                .execute(&mut *transaction)
+                .execute(&mut **transaction)
                 .await?;
         }
 
@@ -1575,11 +1609,10 @@ impl Job {
                 ginput,
                 job_id
             )
-            .execute(&mut *transaction)
+            .execute(&mut **transaction)
             .await?;
         }
 
-        transaction.commit().await?;
         Ok(job_id)
     }
 

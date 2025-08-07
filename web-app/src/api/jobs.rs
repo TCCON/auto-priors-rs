@@ -2,7 +2,7 @@ use axum::{http::StatusCode, response::IntoResponse};
 use chrono::NaiveDate;
 use orm::{
     error::JobAddError,
-    jobs::{MapFmt, ModFmt, VmrFmt},
+    jobs::{MapFmt, ModFmt, RequestSite, VmrFmt},
 };
 use serde::{Deserialize, Serialize};
 
@@ -13,10 +13,12 @@ pub(crate) mod post {
         extract::{self, State},
         Extension,
     };
-    use itertools::Itertools;
     use orm::{auth::User, jobs::Job};
 
-    use crate::{api::jobs::ApiJobRequest, AppState};
+    use crate::{
+        api::jobs::{ApiJobRequest, ApiJobResult},
+        AppState,
+    };
 
     pub(crate) async fn submit_job(
         State(state): State<Arc<AppState>>,
@@ -27,14 +29,6 @@ pub(crate) mod post {
             return super::ApiJobRequestResponse::RequestError(super::RequestError::NoSites);
         }
 
-        let site_lats = job_request.sites.iter().map(|site| site.lat).collect_vec();
-        let site_lons = job_request.sites.iter().map(|site| site.lon).collect_vec();
-        let site_ids = job_request
-            .sites
-            .into_iter()
-            .map(|site| site.site_id)
-            .collect_vec();
-
         let res = state.clone_pool().get_connection().await;
         let mut conn = match res {
             Ok(c) => c,
@@ -43,22 +37,21 @@ pub(crate) mod post {
         let res = Job::add_job_from_request(
             &mut conn,
             &state.config,
-            site_ids,
+            job_request.sites,
             job_request.start_date,
             job_request.end_date,
             Some(user.email),
-            site_lats,
-            site_lons,
             job_request.mod_fmt,
             job_request.vmr_fmt,
             job_request.map_fmt,
+            job_request.reanalysis.as_deref(),
             job_request.is_egi,
         )
         .await;
 
         match res {
-            Ok(job_id) => super::ApiJobRequestResponse::Success(super::ApiJobResult { job_id }),
-            Err(e) => e.into(),
+            Ok(job_ids) => super::ApiJobRequestResponse::Success(ApiJobResult { job_ids }),
+            Err(e) => super::ApiJobRequestResponse::from(e),
         }
     }
 }
@@ -67,19 +60,24 @@ pub(crate) mod post {
 pub(crate) struct ApiJobRequest {
     start_date: NaiveDate,
     end_date: NaiveDate,
-    sites: Vec<super::ApiJobSite>,
+    sites: Vec<RequestSite>,
     // #[serde(default)] // TODO: update database and job completion code to handle multiple emails
     // alternate_emails: Vec<String>,
+    #[serde(default)]
     mod_fmt: Option<ModFmt>,
+    #[serde(default)]
     vmr_fmt: Option<VmrFmt>,
+    #[serde(default)]
     map_fmt: Option<MapFmt>,
+    #[serde(default)]
+    reanalysis: Option<String>,
     #[serde(default)]
     is_egi: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ApiJobResult {
-    job_id: i32,
+    job_ids: Vec<i32>,
 }
 
 pub(crate) enum ApiJobRequestResponse {
@@ -103,19 +101,10 @@ impl IntoResponse for ApiJobRequestResponse {
 
 impl From<JobAddError> for ApiJobRequestResponse {
     fn from(value: JobAddError) -> Self {
-        match value {
-            JobAddError::DifferentNumSidLatLon {
-                n_sid: _,
-                n_lat: _,
-                n_lon: _,
-            } => Self::RequestError(value.into()),
-            JobAddError::HalfNullCoord => Self::RequestError(value.into()),
-            JobAddError::UnknownStdSid(items) => {
-                Self::RequestError(JobAddError::UnknownStdSid(items).into())
-            }
-            JobAddError::InvalidUtf(_) => Self::RequestError(value.into()),
-            JobAddError::SqlError(error) => Self::ServerError(error.into()),
-            JobAddError::SerializationError(error) => Self::ServerError(error.into()),
+        if value.is_server_error() {
+            Self::ServerError(value.into())
+        } else {
+            Self::RequestError(value.into())
         }
     }
 }

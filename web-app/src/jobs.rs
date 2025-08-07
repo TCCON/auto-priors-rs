@@ -485,12 +485,7 @@ pub(crate) struct SubmitJobForm {
 }
 
 impl SubmitJobForm {
-    async fn to_input_job(
-        self,
-        user_email: String,
-        conn: &mut MySqlConn,
-        config: &orm::config::Config,
-    ) -> Result<InputJob, Vec<String>> {
+    fn to_input_job(self, user_email: String) -> Result<InputJob, Vec<String>> {
         let mut errors = vec![];
         // First we need to extract the site IDs and coordinates from the hash map.
         // Because we don't know how many locations there are, their form entries
@@ -555,7 +550,7 @@ impl SubmitJobForm {
         builder.with_map_fmt(self.map_fmt);
         builder.with_confirmation(self.confirmation.is_some()); // checkboxes are dumb are just aren't included in the form if not checked
 
-        let job = match builder.finalize(conn, config).await {
+        let job = match builder.finalize() {
             Ok(j) => j,
             Err(problems) => {
                 errors.extend(problems);
@@ -655,11 +650,9 @@ pub(crate) mod post {
             return Err(StatusCode::UNAUTHORIZED);
         };
 
-        let mut conn = server_error(state.pool.get_connection().await)?;
-
-        let res = job_req
-            .to_input_job(user_email, &mut conn, &state.config)
-            .await;
+        // TODO: this should probably use the API job instead, so I can remove the input
+        // file code in the future. May need a rework of the form to mimic the site structure.
+        let res = job_req.to_input_job(user_email);
 
         match res {
             // need to decouple blacklist and other final conversion logic from

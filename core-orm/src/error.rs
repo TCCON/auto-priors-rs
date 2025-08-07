@@ -126,9 +126,30 @@ pub enum JobAddError {
     },
     HalfNullCoord,
     UnknownStdSid(Vec<String>),
+    InvalidRequest(Vec<String>),
     InvalidUtf(&'static str),
     SqlError(sqlx::Error),
     SerializationError(serde_json::Error),
+}
+
+impl JobAddError {
+    /// Returns `true` if this error represents a server problem, `false`
+    /// if it is a problem with the user's request.
+    pub fn is_server_error(&self) -> bool {
+        match self {
+            JobAddError::DifferentNumSidLatLon {
+                n_sid: _,
+                n_lat: _,
+                n_lon: _,
+            } => false,
+            JobAddError::HalfNullCoord => false,
+            JobAddError::UnknownStdSid(_) => false,
+            JobAddError::InvalidRequest(_) => false,
+            JobAddError::InvalidUtf(_) => false,
+            JobAddError::SqlError(_) => true,
+            JobAddError::SerializationError(_) => true,
+        }
+    }
 }
 
 impl Display for JobAddError {
@@ -152,6 +173,13 @@ impl Display for JobAddError {
                     f,
                     "The site {s} {sids} do not have standard lat/lons associated with them"
                 )
+            }
+            JobAddError::InvalidRequest(reasons) => {
+                writeln!(f, "Request was invalid because:")?;
+                for r in reasons {
+                    writeln!(f, "{r}")?;
+                }
+                Ok(())
             }
             JobAddError::InvalidUtf(field) => write!(f, "Could not convert {field} to UTF string"),
             JobAddError::SqlError(e) => write!(f, "Error during SQL operation: {e}"),

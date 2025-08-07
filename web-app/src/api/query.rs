@@ -1,6 +1,6 @@
 use chrono::{NaiveDate, NaiveDateTime};
 use itertools::Itertools;
-use orm::jobs::{Job, JobState, MapFmt, ModFmt, VmrFmt};
+use orm::jobs::{Job, JobState, MapFmt, ModFmt, RequestSite, VmrFmt};
 use serde::{Deserialize, Serialize};
 
 use crate::api::download::download_url_for_job;
@@ -128,7 +128,7 @@ pub(crate) struct JobQueryDates {
 pub(crate) struct ApiDisplayJob {
     job_id: i32,
     state: JobState,
-    sites: Vec<super::ApiJobSite>,
+    sites: Vec<RequestSite>,
     start_date: NaiveDate,
     end_date: NaiveDate,
     email: Option<String>,
@@ -159,7 +159,7 @@ impl ApiDisplayJob {
             .site_id
             .into_iter()
             .enumerate()
-            .map(|(i, sid)| super::ApiJobSite {
+            .map(|(i, sid)| RequestSite {
                 site_id: sid,
                 lat: value.lat[i],
                 lon: value.lon[i],

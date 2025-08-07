@@ -985,22 +985,13 @@ impl UserRequestConfig {
     pub fn check_met_request(
         &self,
         key: &str,
-        request_start: Option<NaiveDate>,
-        request_end: Option<NaiveDate>,
+        request_start: NaiveDate,
+        request_end: NaiveDate,
     ) -> Result<&AllowedRequestMet, String> {
         let met = self
             .allowed_mets
             .get(key)
             .ok_or_else(|| format!("'{key}' is not a valid met"))?;
-
-        if request_start.is_none() || request_end.is_none() {
-            // Requests must provide start and end dates, so if either is None, this is a malformed
-            // request. It's not this function's job to check that.
-            return Ok(met);
-        }
-
-        let request_start = request_start.unwrap();
-        let request_end = request_end.unwrap();
 
         match crate::utils::DateRangeOverlap::classify(
             met.start_date,

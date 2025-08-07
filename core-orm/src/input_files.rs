@@ -10,13 +10,12 @@ use std::{
 use anyhow::Context;
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use itertools::Itertools;
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 
 use crate::{
     config::{BlacklistEntry, BlacklistIdentifier, Config},
     error::JobAddError,
-    jobs::{MapFmt, ModFmt, VmrFmt},
-    met::CheckMetAvailableError,
+    jobs::{MapFmt, ModFmt, RequestSite, VmrFmt},
     utils::{self, BuilderValue},
 };
 
@@ -44,20 +43,6 @@ impl FailedParsingError {
         let problems = self.reasons.join(&full_join);
         return format!("{prefix}{problems}");
     }
-
-    fn new_for_database_error(
-        input_file: PathBuf,
-        email: String,
-        nfailures: usize,
-        njobs: usize,
-    ) -> Self {
-        let reasons = vec![format!("There was an error while adding this request to the database ({nfailures} of {njobs} component jobs failed). You may try submitting this job again; if it continues to fail, please report this problem")];
-        Self {
-            reasons: reasons,
-            input_file,
-            email: Some(email),
-        }
-    }
 }
 
 impl From<std::io::Error> for FailedParsingError {
@@ -66,60 +51,6 @@ impl From<std::io::Error> for FailedParsingError {
             reasons: vec![format!("Could not open file due to: {e}")],
             input_file: PathBuf::new(),
             email: None,
-        }
-    }
-}
-
-#[derive(Debug)]
-enum MissingMetError {
-    CouldNotCheck(anyhow::Error),
-    MissingDates(Vec<NaiveDate>),
-    UnsupportedDate(Vec<NaiveDate>),
-}
-
-impl MissingMetError {
-    fn to_problem(self) -> String {
-        match self {
-            MissingMetError::CouldNotCheck(_) => {
-                // don't use Display impl here; don't want to expose inner errors to an email
-                "There was an error while verifying that the met data required for your request. Please try resubmitting. If the error persists, contact the adminstrators of the GGG priors automation.".to_string()
-            }
-            MissingMetError::MissingDates(_) => {
-                format!("Your request could not be fulfilled: {self}. If you believe this should not be the case, contact the GGG priors automation administrators.")
-            }
-            MissingMetError::UnsupportedDate(_) => {
-                format!("Your request could not be fulfilled: {self}. Please review the TCCON wiki (https://tccon-wiki.caltech.edu/Main/ObtainingGinputData) for supported date ranges.")
-            }
-        }
-    }
-}
-
-impl From<anyhow::Error> for MissingMetError {
-    fn from(value: anyhow::Error) -> Self {
-        Self::CouldNotCheck(value)
-    }
-}
-
-impl Display for MissingMetError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MissingMetError::CouldNotCheck(e) => write!(
-                f,
-                "error occurred while checking met availability for job request: {e}"
-            ),
-            MissingMetError::MissingDates(dates) => {
-                let n = dates.len();
-                let date_str = dates.iter().map(|d| d.to_string()).join(", ");
-                write!(
-                    f,
-                    "met data was unavailable for {n} of the dates requested: {date_str}"
-                )
-            }
-            MissingMetError::UnsupportedDate(dates) => {
-                let n = dates.len();
-                let date_str = dates.iter().map(|d| d.to_string()).join(", ");
-                write!(f, "{n} of the requested dates are not supported (likely due to lack of met data): {date_str}")
-            }
         }
     }
 }
@@ -138,19 +69,10 @@ pub struct InputJob {
     is_egi: bool,
     confirmation: bool,
     reanalysis: Option<String>,
-
-    // Fields that must be set during parsing but which
-    // are not provided by the user
-    met_key: Option<String>,
-    ginput_key: Option<String>,
 }
 
 impl InputJob {
-    async fn from_file(
-        input_file: &Path,
-        conn: &mut crate::MySqlConn,
-        config: &Config,
-    ) -> Result<Self, FailedParsingError> {
+    fn from_file(input_file: &Path) -> Result<Self, FailedParsingError> {
         let f = std::fs::File::open(input_file)?;
 
         let mut builder = InputJobBuilder::default();
@@ -178,7 +100,7 @@ impl InputJob {
         let email = builder.email.clone();
 
         // Go ahead and try to make the final job - that way any error returned includes all of the problems.
-        match builder.finalize(conn, config).await {
+        match builder.finalize() {
             Ok(input_job) => {
                 if problems.len() == 0 {
                     return Ok(input_job);
@@ -196,6 +118,22 @@ impl InputJob {
             input_file: input_file.to_owned(),
             email: email,
         });
+    }
+
+    fn make_sites_vec(&self) -> Vec<RequestSite> {
+        let mut sites = vec![];
+        for (sid, lat, lon) in itertools::izip!(
+            self.site_id.iter(),
+            self.lat.iter().copied(),
+            self.lon.iter().copied()
+        ) {
+            sites.push(RequestSite {
+                site_id: sid.to_owned(),
+                lat,
+                lon,
+            });
+        }
+        sites
     }
 
     fn field_order() -> Vec<&'static str> {
@@ -286,21 +224,12 @@ pub struct InputJobBuilder {
 }
 
 impl InputJobBuilder {
-    pub async fn finalize(
-        self,
-        conn: &mut crate::MySqlConn,
-        config: &Config,
-    ) -> Result<InputJob, Vec<String>> {
+    /// Convert the builder into a job, checking that the user provided the
+    /// necessary information. Note that additional checks for correct values
+    /// are done when the job is added to the database.
+    pub fn finalize(self) -> Result<InputJob, Vec<String>> {
         let mut errors = vec![];
         let mut site_id_missing = false;
-
-        let (met_key, ginput_key) = match self.get_met_and_ginput_keys(config) {
-            Ok(keys) => keys,
-            Err(msg) => {
-                errors.push(msg);
-                (None, None)
-            }
-        };
 
         let site_ids = match self.site_id {
             utils::BuilderValue::Unset => {
@@ -315,10 +244,6 @@ impl InputJobBuilder {
             }
             utils::BuilderValue::Set(sids) => sids,
         };
-
-        if site_ids.iter().any(|sid| sid.len() != 2) {
-            errors.push("site IDs be all be two characters".to_string());
-        }
 
         let (site_ids, lats, lons) = if site_id_missing {
             (
@@ -337,74 +262,24 @@ impl InputJobBuilder {
             }
         };
 
-        // Verify that the lats and lons are in the valid ranges.
-        for (sid, lat) in site_ids.iter().zip(lats.iter()) {
-            if lat.is_some_and(|v| v < -90.0 || v > 90.0) {
-                errors.push(format!(
-                    "Latitude for site {sid} is outside the allowed range of -90 to +90"
-                ));
-            }
-        }
-
-        for (sid, lon) in site_ids.iter().zip(lons.iter()) {
-            if lon.is_some_and(|v| v < -180.0 || v > 180.0) {
-                errors.push(format!(
-                    "Longitude for site {sid} is outside the allowed range of -180 to +180"
-                ));
-            }
-        }
-
         // An email is required.
         let email = self.email.unwrap_or_else(|| {
             errors.push("missing field email".to_owned());
             String::new()
         });
 
-        let user = if email.is_empty() {
-            "UNKNOWN USER"
+        let start_date = if let Some(sd) = self.start_date {
+            sd
         } else {
-            &email
+            errors.push("missing field start_date".to_owned());
+            NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
         };
 
-        let (start_date, end_date) = if let (Some(start), Some(end)) =
-            (self.start_date, self.end_date)
-        {
-            // Check that the request asks for at least one day
-            if start >= end {
-                errors.push(format!(
-                    "End date ({end}) must be at least one day after the start date ({start})"
-                ));
-            }
-
-            // Check that the user's job isn't too long, unless missing start/end dates was one of the problems
-            // encountered in the input file
-            if let Some(max_days) = config.execution.job_max_days {
-                let job_ndays = (end - start).num_days();
-                if job_ndays > max_days as i64 {
-                    info!("Rejecting job from {user} because it requests too many days: {job_ndays} requested vs. {max_days} allowed");
-                    errors.push(format!("Too many days requested: {job_ndays} requested but the maximum allowed is {max_days}"));
-                }
-            }
-            // Confirm that the required met files are available, unless missing start/end dates
-            // was one of the problems encountered in the input file
-            if let Err(e) = check_met_available(conn, config, start, end).await {
-                error!("Error occurred while checking met file availability for request by '{user}': {e:?}");
-                errors.push(e.to_problem());
-            }
-
-            (start, end)
+        let end_date = if let Some(ed) = self.end_date {
+            ed
         } else {
-            let sd = self.start_date.unwrap_or_else(|| {
-                errors.push("missing field start_date".to_owned());
-                NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
-            });
-
-            let ed = self.end_date.unwrap_or_else(|| {
-                errors.push("missing field end_date".to_owned());
-                NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
-            });
-
-            (sd, ed)
+            errors.push("missing field end_date".to_owned());
+            NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
         };
 
         if !errors.is_empty() {
@@ -424,33 +299,9 @@ impl InputJobBuilder {
             is_egi: self.is_egi.unwrap_or_default(),
             confirmation: self.confirmation.unwrap_or(true),
             reanalysis: self.reanalysis,
-            met_key: met_key,
-            ginput_key: ginput_key,
         };
 
         Ok(input_job)
-    }
-
-    fn get_met_and_ginput_keys(
-        &self,
-        config: &Config,
-    ) -> Result<(Option<String>, Option<String>), String> {
-        // Check if the user requested a met other than the default and, if so, whether
-        // it is a valid key and if the dates are okay.
-        if let Some(key) = self.reanalysis.as_deref() {
-            match config
-                .requests
-                .check_met_request(key, self.start_date, self.end_date)
-            {
-                Ok(met) => Ok((
-                    Some(met.met_key.to_string()),
-                    Some(met.ginput_key.to_string()),
-                )),
-                Err(msg) => Err(msg),
-            }
-        } else {
-            Ok((None, None))
-        }
     }
 
     fn is_field_set(&self, field: &str) -> bool {
@@ -673,7 +524,7 @@ pub async fn add_jobs_from_input_files(
             continue;
         }
 
-        match InputJob::from_file(&input_file, conn, config).await {
+        match InputJob::from_file(&input_file) {
             Ok(job) => {
                 jobs.push(job);
                 successful_input_files.push(input_file);
@@ -718,125 +569,87 @@ pub async fn add_jobs_from_input_files(
                 unmoved_input_file_errors.push(e);
             }
         } else {
-            // If so configured, split up the input job into shorter jobs
-            let date_ranges = if let Some(ndays) = config.execution.job_split_into_days {
-                utils::split_date_range_by_days(job.start_date, job.end_date, ndays.into())
-            } else {
-                vec![(job.start_date, job.end_date)]
+            let request_result = crate::jobs::Job::add_job_from_request(
+                conn,
+                config,
+                job.make_sites_vec(),
+                job.start_date,
+                job.end_date,
+                Some(job.email.clone()),
+                Some(job.mod_fmt),
+                Some(job.vmr_fmt),
+                Some(job.map_fmt),
+                job.reanalysis.as_deref(),
+                job.is_egi,
+            )
+            .await;
+
+            let job_ids = match request_result {
+                Ok(jids) => jids,
+                Err(JobAddError::InvalidRequest(reasons)) => {
+                    let err = FailedParsingError {
+                        reasons,
+                        input_file: infile.clone(),
+                        email: Some(job.email.clone()),
+                    };
+                    email_user_for_failed_parsing(err, config);
+                    continue;
+                }
+                Err(e) => {
+                    if e.is_server_error() {
+                        log::error!("Server error while processing input file request: {e:?}");
+                        let err = FailedParsingError {
+                            reasons: vec!["A server error occurred".to_string()],
+                            input_file: infile.clone(),
+                            email: Some(job.email.clone()),
+                        };
+                        email_user_for_failed_parsing(err, config);
+                        continue;
+                    } else {
+                        let err = FailedParsingError {
+                            reasons: vec![e.to_string()],
+                            input_file: infile.clone(),
+                            email: Some(job.email.clone()),
+                        };
+                        email_user_for_failed_parsing(err, config);
+                        continue;
+                    }
+                }
             };
 
-            let mut results = vec![];
-            for (sub_start, sub_end) in date_ranges {
-                let this_res = crate::jobs::Job::add_job_from_request(
-                    conn,
-                    config,
-                    job.site_id.clone(),
-                    sub_start,
-                    sub_end,
-                    Some(job.email.clone()),
-                    job.lat.clone(),
-                    job.lon.clone(),
-                    Some(job.mod_fmt),
-                    Some(job.vmr_fmt),
-                    Some(job.map_fmt),
-                    job.is_egi,
-                )
-                .await;
-                results.push(this_res);
-            }
+            let njobs = job_ids.len();
 
-            let njobs = results.len();
-            let mut job_ids = vec![];
-            let mut parsing_error_reasons = vec![];
-            let mut errored = false;
-            let mut added_unknown_sid_error = false;
-            for res in results {
-                match res {
-                    Ok(new_id) => {
-                        // Successfully added the job to the database, so move the file and email the user a confirmation
-                        // Moving the file might still error, so handle that internally
-                        info!("Added job {new_id} from file {}", infile.display());
-                        job_ids.push(new_id);
-                    }
-                    Err(JobAddError::UnknownStdSid(site_ids)) => {
-                        if !added_unknown_sid_error {
-                            // If the file was split into multiple jobs, this error would
-                            // occur for all of them, but we only want to include it in the
-                            // email once (hence the extra boolean).
-                            let this_reason = format!(
-                                "Site ID{} '{}' {}, you must provide latitude and longitude",
-                                if site_ids.len() == 1 { "" } else { "s" },
-                                site_ids.join("', '"),
-                                if site_ids.len() == 1 {
-                                    "is not a known standard site"
-                                } else {
-                                    "are not known standard sites"
-                                },
-                            );
-                            parsing_error_reasons.push(this_reason);
-                            added_unknown_sid_error = true;
-                        }
-                        errored = true;
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Error adding job from input file {} to database: {e:?}",
-                            infile.display()
-                        );
-                        errored = true;
-                    }
-                }
-            }
-
-            if !errored {
-                let job_id_string = if job_ids.len() == 0 {
-                    "?????????".to_string()
-                } else if job_ids.len() == 1 {
-                    format!("{:09}", job_ids[0])
-                } else {
-                    format!(
-                        "{:09}-{:09}",
-                        job_ids[0],
-                        job_ids.last().copied().unwrap_or_default()
-                    )
-                };
-                let dest_file = config
-                    .execution
-                    .success_input_file_dir
-                    .join(format!("job_{job_id_string}_input_file.txt"));
-
-                if let Err(e) = mover.move_file(&infile, Some(&dest_file)) {
-                    unmoved_input_file_errors.push(e);
-                }
-
-                if job.confirmation {
-                    debug!(
-                        "Sending confirmation email for input file {}",
-                        infile.display()
-                    );
-                    confirm_successful_parsing(&job, config, infile, njobs);
-                } else {
-                    debug!(
-                        "Confirmation email declined for input file {}",
-                        infile.display()
-                    );
-                }
-            } else if !parsing_error_reasons.is_empty() {
-                let parsing_err = FailedParsingError {
-                    reasons: parsing_error_reasons,
-                    input_file: infile.to_path_buf(),
-                    email: Some(job.email),
-                };
-                email_user_for_failed_parsing(parsing_err, config);
+            let job_id_string = if job_ids.len() == 0 {
+                "?????????".to_string()
+            } else if job_ids.len() == 1 {
+                format!("{:09}", job_ids[0])
             } else {
-                let nfailures = njobs - job_ids.len();
-                let parsing_err = FailedParsingError::new_for_database_error(
-                    infile.to_path_buf(),
-                    job.email,
-                    nfailures,
-                    njobs,
+                format!(
+                    "{:09}-{:09}",
+                    job_ids[0],
+                    job_ids.last().copied().unwrap_or_default()
+                )
+            };
+            let dest_file = config
+                .execution
+                .success_input_file_dir
+                .join(format!("job_{job_id_string}_input_file.txt"));
+
+            if let Err(e) = mover.move_file(&infile, Some(&dest_file)) {
+                unmoved_input_file_errors.push(e);
+            }
+
+            if job.confirmation {
+                debug!(
+                    "Sending confirmation email for input file {}",
+                    infile.display()
                 );
-                email_user_for_failed_parsing(parsing_err, config);
+                confirm_successful_parsing(&job, config, infile, njobs);
+            } else {
+                debug!(
+                    "Confirmation email declined for input file {}",
+                    infile.display()
+                );
             }
         }
     }
@@ -1028,45 +841,6 @@ async fn handle_status_request(
         .send_mail(&[&buf], None, None, subject, &job_report)?;
 
     Ok(())
-}
-
-async fn check_met_available(
-    conn: &mut crate::MySqlConn,
-    config: &Config,
-    start_date: NaiveDate,
-    end_date: NaiveDate,
-) -> Result<(), MissingMetError> {
-    let mut missing_dates = vec![];
-    let mut unsupported_dates = vec![];
-
-    for date in utils::DateIterator::new_one_range(start_date, end_date) {
-        let (missing, unsupported) = match crate::met::MetFile::is_date_complete_for_default_mets(
-            conn, config, date,
-        )
-        .await
-        {
-            Ok(state) => (!state.is_complete(), false),
-            Err(CheckMetAvailableError::NoDefaultsDefined(_)) => (true, true),
-            Err(CheckMetAvailableError::Other(e)) => return Err(e.into()),
-        };
-
-        if missing {
-            missing_dates.push(date);
-        }
-
-        if unsupported {
-            unsupported_dates.push(date);
-        }
-    }
-
-    if !unsupported_dates.is_empty() {
-        // Unsupported dates take precedence over missing, since these will never be available
-        Err(MissingMetError::UnsupportedDate(unsupported_dates))
-    } else if !missing_dates.is_empty() {
-        Err(MissingMetError::MissingDates(missing_dates))
-    } else {
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
