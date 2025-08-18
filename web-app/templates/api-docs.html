@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="body-text">
+    <h1>{{ Self::subtitle(self) }}</h1>
+    <ul>
+        <li><a href="#authenticating">Authenticating</a></li>
+        <li><a href="#query-endpoints">Query endpoints</a></li>
+        <ul>
+            <li><a href="#active-jobs">active-jobs</a></li>
+            <li><a href="#all-jobs">all-jobs</a></li>
+            <li><a href="#job-status">job-status</a></li>
+        </ul>
+        <li><a href="#jobs-endpoints">Job submission</a></li>
+        <ul>
+            <li><a href="#submit">submit</a></li>
+        </ul>
+    </ul>
+
+    <!-- **************
+         Authenticating
+         ************** -->
+
+    <h2 id="authenticating">Authenticating</h2>
+    <p>
+        All the API endpoints for this site require that you authenticate your request.
+        This requires that you have a token, which can be obtained from the <a href="/token-management">token management
+            page</a>.
+        For the rest of the documentation, we will assume that your token is saved to the file
+        <code>~/.priors-api-key</code>.
+    </p>
+
+    <div class="important-title">Important</div>
+    <div class="important">
+        Your tokens grant you access to the API, just like a username and password.
+        Protect them just like you would your passwords: do not share them or send them between computer unencrypted
+        (e.g., through email).
+        If you need to copy a token from one computer to another, use something like <code>scp</code> or
+        <code>rsync</code> (over SSH).
+    </div>
+
+    <!-- ***************
+         Query endpoints
+         *************** -->
+
+    <h2 id="query-endpoints">Query endpoints</h2>
+    <h3 id="active-jobs">active-jobs</h3>
+
+    <p><b>URL:</b> <code>/api/v1/query/active-jobs</code></p>
+    <p><b>Description:</b> Return a JSON structure containing all the active jobs associated with your user. An
+        <i>active</i> job is one that is pending, running, or completed.
+    </p>
+    <p><b>URL Parameters:</b> None</p>
+    <p><b>Request type:</b> GET</p>
+    <p><b>Request body:</b> Nothing</p>
+    <p><b>Returns:</b> A JSON list with information about each job.</p>
+    <p><b>Example:</b></p>
+
+    <p>cURL:</p>
+    <pre class="code-box">
+{{ Self::curl_get_example(self, "/api/v1/query/active-jobs") }}
+    </pre>
+
+    <p>Python:</p>
+    <pre class="code-box">
+{{ Self::py_get_example(self, "/api/v1/query/active-jobs") }}
+    </pre>
+
+    <p>Output:</p>
+    <pre class="code-box">
+[
+    {
+        "job_id": 56676,
+        "state": "Pending",
+        "sites": [
+            {
+                "site_id": "aa",
+                "lat": 12.34,
+                "lon": -56.78
+            }
+        ],
+        "start_date": "2025-01-01",
+        "end_date": "2025-01-02",
+        "email": "test@example.com",
+        "met_key": null,
+        "ginput_key": null,
+        "mod_fmt": "Text",
+        "vmr_fmt": "Text",
+        "map_fmt": "Text",
+        "submit_time": "2025-08-04T23:08:01",
+        "complete_time": null,
+        "download_url": null
+    },
+    {
+        "job_id": 56677,
+        "state": "Pending",
+        "sites": [
+            {
+                "site_id": "wg",
+                "lat": null,
+                "lon": null
+            }
+        ],
+        "start_date": "2023-01-01",
+        "end_date": "2023-01-02",
+        "email": "test@example.com",
+        "met_key": null,
+        "ginput_key": null,
+        "mod_fmt": "Text",
+        "vmr_fmt": "Text",
+        "map_fmt": "Text",
+        "submit_time": "2025-08-07T09:46:12",
+        "complete_time": null,
+        "download_url": null
+    }
+]
+    </pre>
+
+    <h3 id="all-jobs">all-jobs</h3>
+    <p><b>URL:</b> <code>/api/v1/query/all-jobs</code></p>
+    <p><b>Description:</b> Return a JSON structure containing all jobs associated with your user, including ones already
+        deleted from the server.
+    </p>
+    <p><b>URL Parameters:</b> None.</p>
+    <p><b>Request type:</b> GET</p>
+    <p><b>Request body:</b> Nothing</p>
+    <p><b>Returns:</b> A JSON list with information about each job.</p>
+    <p><b>Example:</b></p>
+    <p>cURL:</p>
+    <pre class="code-box">
+{{ Self::curl_get_example(self, "/api/v1/query/all-jobs") }}
+    </pre>
+
+    <p>Python:</p>
+    <pre class="code-box">
+{{ Self::py_get_example(self, "/api/v1/query/all-jobs") }}
+    </pre>
+
+    <p>Output: same structure as <a href="#active-jobs">active-jobs</a>, but including jobs previously deleted from the
+        server.</p>
+
+
+    <h3 id="job-status">job-status</h3>
+    <p><b>URL:</b> <code>/api/v1/query/job-status/{JOB_ID}</code></p>
+    <p><b>Description:</b> Return a JSON structure containing information about a single job, specified by its ID.
+    <p><b>URL Parameters:</b></p>
+    <ul>
+        <li><code>JOB_ID</code>: the numeric ID of the job. This can be found with the <a
+                href="#active-jobs">active-jobs</a> or <a href="#all-jobs">all-jobs</a> endpoints, or from the return
+            value
+            from a successful <a href="#submit">submit-job</a> request.</li>
+    </ul>
+    <p><b>Request type:</b> GET</p>
+    <p><b>Request body:</b> Nothing</p>
+    <p><b>Returns:</b> A JSON structure with information about the selected job. If the given job ID does not exist or
+        is
+        not a job for your user, the returned value will be <code>null</code>.</p>
+    <p><b>Example:</b></p>
+    <p>cURL:</p>
+    <pre class="code-box">
+{{ Self::curl_get_example(self, "/api/v1/query/job-status/1") }}
+    </pre>
+
+    <p>Python:</p>
+    <pre class="code-box">
+{{ Self::py_get_example(self, "/api/v1/query/job-status/1") }}
+    </pre>
+
+    <p>Output:</p>
+    <pre>
+{
+  "job_id": 1,
+  "state": "Pending",
+  "sites": [
+    {
+      "site_id": "aa",
+      "lat": 12.34,
+      "lon": 56.78
+    }
+  ],
+  "start_date": "2023-01-01",
+  "end_date": "2023-01-02",
+  "email": "test@example.com",
+  "met_key": null,
+  "ginput_key": null,
+  "mod_fmt": "Text",
+  "vmr_fmt": "Text",
+  "map_fmt": "Text",
+  "submit_time": "2025-08-07T09:46:12",
+  "complete_time": null,
+  "download_url": null
+}
+    </pre>
+
+    <!-- ************
+         Jobs control
+         ************ -->
+
+    <h2 id="jobs-endpoints">Jobs endpoints</h2>
+    <h3 id="submit">submit</h3>
+
+    <p><b>URL:</b> <code>/api/v1/jobs/submit</code></p>
+    <p><b>Description:</b> Submit a request to generate priors for a custom location.
+    <p><b>URL Parameters:</b> None</p>
+    <p><b>Request type:</b> POST</p>
+    <p><b>Request body:</b> A JSON structure with the following fields:</p>
+    <ul>
+        <li><code>start_date</code>: the first date to produce priors for, in YYYY-MM-DD format</li>
+        <li><code>end_date</code>: the date after the last date to produce priors for, in YYYY-MM-DD format</li>
+        <li><code>sites</code>: a list of structures with keys "site_id" (two character site ID), "lat" (latitude in
+            range -90 to +90), and "lon" (longitude in range -180 to +180). This defined where to generate priors.
+            Multiple locations can be specified.</li>
+        <li><code>mod_fmt</code> (optional): what format to generate <code>.mod</code> files in. Allowed values are
+            "text" and "none". "text" is default.</li>
+        <li><code>vmr_fmt</code> (optional): what format to generate <code>.vmr</code> files in. Allowed values are
+            "text" and "none". "text" is default.</li>
+        <li><code>map_fmt</code> (optional): what format to generate <code>.map</code> files in. Allowed values are
+            "text", "netcdf", "textandnc", and "none". "text" is default.</li>
+        <li><code>reanalysis</code> (optional): what set of input data to use when generating the priors. More
+            information TBD.</li>
+        <li><code>is_egi</code> (optional): a boolean indicating if this request is from EGI. Setting to
+            <code>true</code> alters the output file name to aid EGI in finding the output. Requests manually
+            submitted should not use this field.
+        </li>
+    </ul>
+    <p>A minimal example of the request body:</p>
+
+    <pre>
+{
+    "start_date": "2025-01-01",
+    "end_date": "2025-01-02",
+    "sites": [
+        {
+            "site_id": "aa",
+            "lat": 12.34,
+            "lon": -56.78
+        }
+    ]
+}
+    </pre>
+
+    <p>An example input with two sites and adjusting the requested file formats:</p>
+
+    <pre>
+{
+    "start_date": "2025-01-01",
+    "end_date": "2025-01-02",
+    "sites": [
+        {
+            "site_id": "aa",
+            "lat": 12.34,
+            "lon": -56.78
+        },
+        {
+            "site_id": "bb",
+            "lat": -43.21,
+            "lon": 87.65
+        }
+    ],
+    "mod_fmt": "none",
+    "vmr_fmt": "none",
+    "map_fmt": "netcdf"
+}
+    </pre>
+
+    <p><b>Returns:</b> A JSON structure with three fields:</p>
+    <ul>
+        <li><code>successful</code>: a boolean indicating if the request was added to the queue</li>
+        <li><code>job_ids</code>: a list of the job IDs that were submitted to the queue for this request. If the
+            request failed, this will be <code>null</code>.</li>
+        <li><code>error_reason</code>: a string giving the reason(s) that the request was rejected or otherwise failed
+            to be added to the queue. If the request succeeded, this will be <code>null</code>.</li>
+    </ul>
+
+    <p><b>Example:</b></p>
+    <p>cURL:</p>
+    <pre class="code-box">{{ Self::curl_post_example(self, "/api/v1/jobs/submit", "application/json", "{\"start_date\": \"2023-01-01\", \"end_date\": \"2023-01-02\", \"sites\": [{\"site_id\": \"aa\", \"lat\": 12.34, \"lon\": -56.78}]}") }}
+    </pre>
+
+    <p>Python:</p>
+    <pre
+        class="code-box">{{ Self::py_post_json_example(self, "/api/v1/jobs/submit", "{\n    \"start_date\": \"2023-01-01\",\n    \"end_date\": \"2023-01-02\",\n    \"sites\": [\n        {\n            \"site_id\": \"aa\",\n            \"lat\": 12.34,\n            \"lon\": -56.78\n        }\n    ]\n}") }}</pre>
+
+    <p>Successful output:</p>
+    <pre class="code-box">{
+    "successful": true,
+    "job_ids": [56678],
+    "error_reason": null
+}</pre>
+
+    <p>Bad request output:</p>
+    <p>If your request is received but cannot be fulfilled for some reason, you will get bad a "Bad Request" (status
+        code 400). The JSON returned will provide more information in this case.</p>
+    <pre class="code-box">{
+    "successful": false,
+    "job_ids": null,
+    "error_reason": "Request was invalid because:\nYour request could not be fulfilled: met data was unavailable for 1 of the dates requested: 2025-01-01. If you believe this should not be the case, contact the GGG priors automation administrators.\n"
+}</pre>
+</div>
+{% endblock content %}

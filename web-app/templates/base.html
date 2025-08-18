@@ -1,38 +1,44 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <meta charset="utf-8"/>
-        <link rel="stylesheet" href='{{ Self::uri(self, "/static/main.css") }}'>
-        <title>GGG priors manager - {{ Self::subtitle(self) }}</title>
-    </head>
-    <body>
-        <div class="sidebar">
-            {% if let Some(name) = Self::username(self) %}
-            <div>Hello, {{ name }}.</div>
-            {% else %}
-            <div><a href='{{ Self::uri(self, "login") }}'>Login</a></div>
-            {% endif %}
 
-            {% let page_id = Self::page_id(self) %}
-            {% let link = Self::sblink(self, "/", "Home", page_id, "home") %}
-            <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
-            
-            {% let link = Self::sblink_default_id(self, "/submit-job", "Submit job", page_id) %}
-            <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
-            
-            {% let link = Self::sblink_default_id(self, "/job-queue", "Job queue", page_id) %}
-            <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
-            
-            {% let link = Self::sblink_default_id(self, "/job-downloads", "Job status & downloads", page_id) %}
-            <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
+<head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href='{{ Self::uri(self, "/static/main.css") }}'>
+    <title>GGG priors manager - {{ Self::subtitle(self) }}</title>
+</head>
 
-            {% let link = Self::sblink_default_id(self, "/std-sites", "Standard sites", page_id) %}
-            <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
-            
-            {% let link = Self::sblink_default_id(self, "/met-data", "Met data", page_id) %}
-            <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
-        </div>
+<body>
+    <div class="sidebar">
+        {% if let Some(name) = Self::username(self) %}
+        <div>Hello, {{ name }}.</div>
+        {% else %}
+        <div><a href='{{ Self::uri(self, "login") }}'>Login</a></div>
+        {% endif %}
 
-        {% block content %}{% endblock content %}
-    </body>
+        {% let page_id = Self::page_id(self) %}
+        {% let link = Self::sblink(self, "/", "Home", page_id, "home") %}
+        <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
+
+        {% let link = Self::sblink_default_id(self, "/submit-job", "Submit job", page_id) %}
+        <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
+
+        {% let link = Self::sblink_default_id(self, "/job-queue", "Job queue", page_id) %}
+        <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
+
+        {% let link = Self::sblink_default_id(self, "/job-downloads", "Job status & downloads", page_id) %}
+        <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
+
+        {% let link = Self::sblink_default_id(self, "/std-sites", "Standard sites", page_id) %}
+        <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
+
+        {% let link = Self::sblink_default_id(self, "/met-data", "Met data", page_id) %}
+        <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
+
+        {% let link = Self::sblink_default_id(self, "/api-docs", "API docs", page_id) %}
+        <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
+    </div>
+
+    {% block content %}{% endblock content %}
+</body>
+
 </html>

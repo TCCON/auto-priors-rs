@@ -50,7 +50,9 @@ pub(crate) mod post {
         .await;
 
         match res {
-            Ok(job_ids) => super::ApiJobRequestResponse::Success(ApiJobResult { job_ids }),
+            Ok(job_ids) => {
+                super::ApiJobRequestResponse::Success(ApiJobResult::new_success(job_ids))
+            }
             Err(e) => super::ApiJobRequestResponse::from(e),
         }
     }
@@ -77,7 +79,27 @@ pub(crate) struct ApiJobRequest {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ApiJobResult {
-    job_ids: Vec<i32>,
+    successful: bool,
+    job_ids: Option<Vec<i32>>,
+    error_reason: Option<String>,
+}
+
+impl ApiJobResult {
+    fn new_success(job_ids: Vec<i32>) -> Self {
+        Self {
+            successful: true,
+            job_ids: Some(job_ids),
+            error_reason: None,
+        }
+    }
+
+    fn new_failure<R: ToString>(reason: R) -> Self {
+        Self {
+            successful: false,
+            job_ids: None,
+            error_reason: Some(reason.to_string()),
+        }
+    }
 }
 
 pub(crate) enum ApiJobRequestResponse {
@@ -90,10 +112,18 @@ impl IntoResponse for ApiJobRequestResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
             ApiJobRequestResponse::Success(res) => axum::response::Json(res).into_response(),
-            ApiJobRequestResponse::RequestError(request_error) => request_error.into_response(),
+            ApiJobRequestResponse::RequestError(request_error) => {
+                let res = ApiJobResult::new_failure(request_error);
+                let mut resp = axum::response::Json(res).into_response();
+                *resp.status_mut() = StatusCode::BAD_REQUEST;
+                resp
+            }
             ApiJobRequestResponse::ServerError(err) => {
                 log::error!("Error occurred while processing job submission request: {err:?}");
-                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                let res = ApiJobResult::new_failure("Internal server error");
+                let mut resp = axum::response::Json(res).into_response();
+                *resp.status_mut() = StatusCode::BAD_REQUEST;
+                resp
             }
         }
     }
