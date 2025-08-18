@@ -1,4 +1,7 @@
 {
+    "rust-analyzer.server.extraEnv": {
+        "DATABASE_URL": ""
+    },
     "rust-analyzer.cargo.unsetTest": [
         "core",
         "tokio",
