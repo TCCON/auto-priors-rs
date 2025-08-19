@@ -12,7 +12,8 @@ pub(crate) mod get {
         http::{HeaderName, StatusCode},
         Extension,
     };
-    use orm::{auth::User, jobs::Job};
+    use chrono::NaiveDate;
+    use orm::{auth::User, jobs::Job, stdsitejobs::StdSiteJob};
 
     use crate::{api::download::user_can_access_job, server_error, AppState};
 
@@ -80,6 +81,43 @@ pub(crate) mod get {
             Ok((headers, body))
         } else {
             Err(StatusCode::BAD_REQUEST)
+        }
+    }
+
+    /// Return a .tgz file with standard site output to the user.
+    ///
+    /// # Success
+    /// Returns a response containing the file stream
+    ///
+    /// # Failure
+    /// Returns the following status codes on failure:
+    /// - `BAD_REQUEST` (400) is returned if there if there is no entry in the standard site job table
+    ///   for the given site ID and date
+    /// - `NO_CONTENT` (204) is returned if the tarfile field in the database was null. This usually means
+    ///   that the job has not been finished yet.
+    pub(crate) async fn download_std_site_output(
+        State(state): State<Arc<AppState>>,
+        Path((site_id, date)): Path<(String, NaiveDate)>,
+    ) -> Result<([(HeaderName, String); 2], Body), StatusCode> {
+        let mut conn = server_error(state.pool.get_connection().await)?;
+
+        // Unlike the user-submitted jobs, we allow anyone to download the standard site files
+        // since the site locations are well-known.
+        let site_job = server_error(
+            StdSiteJob::get_std_job_for_site_on_date(&mut conn, &site_id, date).await,
+        )?
+        .ok_or(StatusCode::BAD_REQUEST)?;
+
+        let tar_file = site_job.tarfile.ok_or(StatusCode::NO_CONTENT)?;
+        if tar_file.extension().is_some_and(|ext| ext == "tgz") {
+            // Standard sites should ALWAYS be tarballs; if not, then that is a server error.
+            let content_type = "application/gzip".to_string();
+            let headers = super::make_download_headers(&tar_file, content_type)?;
+            let body = super::make_download_body(&tar_file).await?;
+            Ok((headers, body))
+        } else {
+            log::error!("Standard site '{site_id}' on {date} had a 'tar' file with an unexpected extension, file was '{}'", tar_file.display());
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }

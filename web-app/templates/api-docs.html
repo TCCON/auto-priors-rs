@@ -21,6 +21,7 @@
         <li><a href="#downloading">Downloading</a></li>
         <ul>
             <li><a href="#download-job">job</a></li>
+            <li><a href="#download-site">stdsite</a></li>
         </ul>
     </ul>
 
@@ -343,5 +344,36 @@
 
     <p>Python:</p>
     <pre class="code-box">{{ Self::py_download_example(self, "/api/v1/download/job/1") }}</pre>
+
+
+    <h3 id="download-site">job</h3>
+    <p><b>URL:</b> <code>/api/v1/download/stdsite/{SITE_ID}/{DATE}</code></p>
+    <p><b>Description:</b> Return the gzipped tarball the priors for the given site on the given date, if available.
+    <p><b>URL Parameters:</b></p>
+    <ul>
+        <li><code>SITE_ID</code>: the two-character site or campaign ID, e.g. "pa" for Park Falls.</li>
+        <li><code>DATE</code>: the UTC date for which you want the priors, in YYYY-MM-DD format, e.g. "2020-01-02" for 2
+            Jan 2020.</li>
+    </ul>
+    <p><b>Request type:</b> GET</p>
+    <p><b>Request body:</b> Nothing</p>
+    <p><b>Returns on success:</b> the gzipped tarball as a file stream
+    <p><b>Status code meanings:</b></p>
+    <ul>
+        <li><code>OK</code> (200) - success, file will be transmitted</li>
+        <li><code>BAD_REQUEST</code> (400) - either the site ID is incorrect, the date is in the incorrect format, or
+            that date is has not been entered into the table of dates for that site yet. If the date is recent (within
+            about one day), the request may succeed if send again later. Otherwise, this could mean the date is outside
+            the range of dates for which this site has priors generated.</li>
+        <li><code>NO_CONTENT</code> (204) - the output file does not exist yet, but will in the future.</li>
+    </ul>
+
+    <p><b>Example:</b></p>
+    <p>cURL:</p>
+    <pre
+        class="code-box">{{ Self::curl_get_args_example(self, "/api/v1/download/stdsite/pa/2025-08-01", "--output pa_20250801_priors.tgz") }}</pre>
+
+    <p>Python:</p>
+    <pre class="code-box">{{ Self::py_download_example(self, "/api/v1/download/stdsite/pa/2025-08-01") }}</pre>
 </div>
 {% endblock content %}

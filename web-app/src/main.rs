@@ -186,6 +186,10 @@ fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
             "/api/v1/download/job/{job_id}",
             get(api::download::get::download_job_output),
         )
+        .route(
+            "/api/v1/download/stdsite/{site_id}/{date}",
+            get(api::download::get::download_std_site_output),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api_has_download_perm,
