@@ -21,16 +21,18 @@ impl ApiDocsContext {
         Self { root_uri, user }
     }
 
-    #[allow(unused)] // used in template
     pub(crate) fn curl_get_example(&self, path: &str) -> String {
+        self.curl_get_args_example(path, "")
+    }
+
+    pub(crate) fn curl_get_args_example(&self, path: &str, args: &str) -> String {
         let path = path.trim_start_matches("/");
         format!(
-            r#"curl -H "Authorization: Bearer $(cat ~/.priors-api-key)" {}/{path}"#,
+            r#"curl -H "Authorization: Bearer $(cat ~/.priors-api-key)" {}/{path} {args}"#,
             self.root_uri
         )
     }
 
-    #[allow(unused)] // used in template
     pub(crate) fn curl_post_example(
         &self,
         path: &str,
@@ -68,6 +70,29 @@ with open(Path("~/.priors-api-key").expanduser()) as f:
 
 headers = {{"Authorization": f"Bearer {{jwt}}"}}
 result = requests.get("{root}/{path}", headers=headers")"#
+        )
+    }
+
+    pub(crate) fn py_download_example(&self, path: &str) -> String {
+        let root = &self.root_uri;
+        let path = path.trim_start_matches("/");
+        format!(
+            r#"from pathlib import Path
+import requests
+
+with open(Path("~/.priors-api-key").expanduser()) as f:
+    # .strip() ensures no training newline, which can cause invalid header errors
+    jwt = f.read().strip()
+
+headers = {{"Authorization": f"Bearer {{jwt}}"}}
+
+# This approach downloads the whole file at once, which is usually fine
+# since the tarballs are fairly small (just over than 0.1 MB for a single 
+# site and date). If you need to download in chunks, see the requests
+# stream option: https://requests.readthedocs.io/en/latest/user/advanced/#body-content-workflow
+result = requests.get("{root}/{path}", headers=headers)
+with open('priors.tgz', 'wb') as f:
+    f.write(result.content)"#
         )
     }
 

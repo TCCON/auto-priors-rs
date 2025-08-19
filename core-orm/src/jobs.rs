@@ -2189,6 +2189,7 @@ impl InnerGinputRunner for ShellGinputRunner {
         simulation_delay: Option<u32>,
     ) -> JobResult<()> {
         let args_file = run_arg_file(&ginput_args.save_path, ginput_args.start_date);
+        log::debug!("Creating argument file at {}", args_file.display());
         let args_file_h =
             std::fs::File::create(&args_file).map_err(|e| JobError::RunDirectoryError(e))?;
         serde_json::to_writer_pretty(args_file_h, &ginput_args)?;
@@ -2252,6 +2253,10 @@ impl InnerGinputRunner for ShellGinputRunner {
             ginput_dir
         };
 
+        log::debug!(
+            "Logs from ginput LUT regen run will be in {}",
+            lut_log_dir.display()
+        );
         let log_file = std::fs::File::create(lut_log_dir.join("automation_lut_regen.out"))
             .map_err(|e| JobError::RunDirectoryError(e))?;
         let log_stdout = Stdio::from(log_file);
@@ -2261,7 +2266,10 @@ impl InnerGinputRunner for ShellGinputRunner {
         let log_stderr = Stdio::from(log_file);
 
         // Finally we can run the job
-
+        log::debug!(
+            "Running LUT regen with ginput at {}",
+            self.run_ginput_path.display()
+        );
         let status = tokio::process::Command::new(&self.run_ginput_path)
             .arg("auto")
             .arg("regen-lut")
@@ -2269,7 +2277,13 @@ impl InnerGinputRunner for ShellGinputRunner {
             .stderr(log_stderr)
             .status()
             .await
-            .map_err(|e| JobError::RunDirectoryError(e))?;
+            .map_err(|e| {
+                log::error!(
+                    "Error occurred running '{} auto regen-lut': {e}",
+                    self.run_ginput_path.display()
+                );
+                JobError::RunDirectoryError(e)
+            })?;
 
         if status.success() {
             Ok(())
@@ -2680,15 +2694,7 @@ fn get_ftp_path(output: &Path, config: &Config) -> anyhow::Result<url::Url> {
     let output = output
         .canonicalize()
         .context("Cannot get canonical representation of output path")?;
-    let output = output.strip_prefix(&ftp_root).with_context(|| {
-        format!(
-            "Could not make output {} relative to FTP root {}",
-            output.display(),
-            ftp_root.display()
-        )
-    })?;
-
-    get_ftp_path_from_dirs(output, server, ftp_root)
+    get_ftp_path_from_dirs(&output, server, ftp_root)
 }
 
 pub fn get_ftp_path_from_dirs(
