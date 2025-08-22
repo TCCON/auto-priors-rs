@@ -2,17 +2,18 @@ use std::env;
 
 use anyhow::Context;
 #[cfg(feature = "container-tests")]
-use testcontainers_modules::{testcontainers::runners::AsyncRunner, testcontainers::core::ContainerAsync, mariadb};
+use testcontainers_modules::{
+    mariadb, testcontainers::core::ContainerAsync, testcontainers::runners::AsyncRunner,
+};
 
 use crate::PoolWrapper;
 
 static TEST_DB_ENV_VARS: [&'static str; 2] = ["PRIORS_TEST_DATABASE_URL", "TEST_DATABASE_URL"];
 
-
 pub enum TestDb {
     Persistent(String),
     #[cfg(feature = "container-tests")]
-    Container(ContainerAsync<mariadb::Mariadb>, String)
+    Container(ContainerAsync<mariadb::Mariadb>, String),
 }
 
 impl TestDb {
@@ -33,9 +34,9 @@ impl TestDb {
 
     #[cfg(not(feature = "container-tests"))]
     async fn new_container() -> anyhow::Result<Self> {
-        panic!("Must compile tests with --feature=container-tests to use testcontainers");
+        panic!("Must compile tests with --features=container-tests to use testcontainers");
     }
-    
+
     fn db_url(&self) -> &str {
         match self {
             Self::Persistent(url) => url,
@@ -67,31 +68,35 @@ async fn get_test_db() -> anyhow::Result<TestDb> {
         // Prefer to use test containers to avoid messing up persistent databases
         // and to let tests run on GitHub
         let container = TestDb::new_container().await?;
-        log::debug!("Using database URL {} provided by test container", container.db_url());
+        log::debug!(
+            "Using database URL {} provided by test container",
+            container.db_url()
+        );
         Ok(container)
     } else {
         // First, try the regular environmental variables
         for key in TEST_DB_ENV_VARS {
             if let Ok(val) = env::var(key) {
                 log::debug!("Using database URL {val} from the environmental variable {key}");
-                return Ok(TestDb::new_persistent(val))
+                return Ok(TestDb::new_persistent(val));
             }
         }
 
         // If we can't find the URL in existing environmental variables, try using dotenv.
-        let env_path = dotenv::dotenv().context("No database URL defined in existing environmental variables, and no .env file found.")?;
+        let env_path = dotenv::dotenv().context(
+            "No database URL defined in existing environmental variables, and no .env file found.",
+        )?;
         for key in TEST_DB_ENV_VARS {
             if let Ok(val) = dotenv::var(key) {
                 let epd = env_path.display();
                 log::debug!("Using database URL {val} from the variable {key} in {epd}");
-                return Ok(TestDb::new_persistent(val))
+                return Ok(TestDb::new_persistent(val));
             }
         }
 
-        return Err(anyhow::anyhow!("Unable to find database URL."))
+        return Err(anyhow::anyhow!("Unable to find database URL."));
     }
 }
-
 
 /// Open a pool of connections to the test database.
 ///
@@ -108,7 +113,7 @@ async fn get_test_db() -> anyhow::Result<TestDb> {
 /// database, whereas when using a non-container database, it may hold existing
 /// data. Setting this to `true` will result in a database with all the tables
 /// created but empty. In most cases, this argument should be `true`.
-/// 
+///
 /// Since we can use test containers, and the container is cleaned up when the
 /// variable holding it goes out of scope, this returns a `TestDb` instance as
 /// well. That variable should be held until the pool is no longer needed.
@@ -123,7 +128,6 @@ async fn get_test_db() -> anyhow::Result<TestDb> {
 /// This will return an error if the connection to the database could not be established,
 /// or if applying the migrations failed.
 pub async fn open_test_database(reset_db: bool) -> anyhow::Result<(PoolWrapper, TestDb)> {
-    
     let test_db = get_test_db().await?;
     let db_url = test_db.db_url();
     println!("db_url = {db_url}");
@@ -137,3 +141,4 @@ pub async fn open_test_database(reset_db: bool) -> anyhow::Result<(PoolWrapper, 
 
     Ok((pool, test_db))
 }
+
