@@ -1,4 +1,7 @@
-use std::env;
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 #[cfg(feature = "container-tests")]
@@ -9,6 +12,7 @@ use testcontainers_modules::{
 use crate::PoolWrapper;
 
 static TEST_DB_ENV_VARS: [&'static str; 2] = ["PRIORS_TEST_DATABASE_URL", "TEST_DATABASE_URL"];
+static TEST_FILE_DIR_VAR: &'static str = "PRIORS_TEST_FILE_ROOT";
 
 pub enum TestDb {
     Persistent(String),
@@ -141,3 +145,165 @@ pub async fn open_test_database(reset_db: bool) -> anyhow::Result<(PoolWrapper, 
 
     Ok((pool, test_db))
 }
+
+pub fn make_dummy_config(scratch_root: PathBuf) -> anyhow::Result<crate::config::Config> {
+    let s = include_str!("test_config.toml");
+    let mut cfg: crate::config::Config = toml::from_str(s)?;
+
+    cfg.execution.ftp_download_root = scratch_root.clone();
+    for (_, dl_cfgs) in cfg.data.download.iter_mut() {
+        for dl_cfg in dl_cfgs.iter_mut() {
+            dl_cfg.download_dir = scratch_root.join(dl_cfg.levels.standard_subdir());
+        }
+    }
+
+    cfg.execution.success_input_file_dir = scratch_root.join("input_success");
+    cfg.execution.failure_input_file_dir = scratch_root.join("input_failure");
+
+    Ok(cfg)
+}
+
+pub fn make_dummy_config_with_temp_dirs(
+    prefix: &str,
+) -> anyhow::Result<(crate::config::Config, TestRootDir)> {
+    let test_dir =
+        TestRootDir::new(prefix).with_context(|| "Failed to make parent temporary directory")?;
+    let cfg = make_dummy_config(test_dir.path().to_owned())?;
+    for (_, dl_cfgs) in cfg.data.download.iter() {
+        for dl_cfg in dl_cfgs.iter() {
+            std::fs::create_dir_all(dl_cfg.download_dir.clone()).with_context(|| {
+                "Failed to create a subdirectory for one of the file sets to download"
+            })?;
+        }
+    }
+
+    std::fs::create_dir_all(&cfg.execution.success_input_file_dir).with_context(|| {
+        "Failed to create the subdirectory for successful input files to be moved to"
+    })?;
+    std::fs::create_dir_all(&cfg.execution.failure_input_file_dir).with_context(|| {
+        "Failed to create the subdirectory for failed input files to be moved to"
+    })?;
+
+    Ok((cfg, test_dir))
+}
+
+#[derive(Debug)]
+pub enum TestRootDir {
+    Temporary(tempdir::TempDir),
+    Persistent(PathBuf),
+}
+
+impl TestRootDir {
+    pub fn path(&self) -> &Path {
+        match self {
+            TestRootDir::Temporary(temp) => temp.path(),
+            TestRootDir::Persistent(p) => p.as_ref(),
+        }
+    }
+
+    pub fn new(prefix: &str) -> anyhow::Result<Self> {
+        if let Some(root) = get_env_var(TEST_FILE_DIR_VAR) {
+            Self::new_persistent(&root, prefix)
+        } else {
+            Self::new_temporary(prefix)
+        }
+    }
+
+    fn new_temporary(prefix: &str) -> anyhow::Result<Self> {
+        let temp_dir = tempdir::TempDir::new(prefix)?;
+        Ok(Self::Temporary(temp_dir))
+    }
+
+    fn new_persistent(root: &str, prefix: &str) -> anyhow::Result<Self> {
+        let p = PathBuf::from(root).join(prefix);
+        std::fs::create_dir_all(&p)?;
+        Ok(Self::Persistent(p))
+    }
+}
+
+fn get_env_var(varname: &str) -> Option<String> {
+    if let Ok(val) = env::var(varname) {
+        return Some(val);
+    }
+
+    if let Ok(val) = dotenv::var(varname) {
+        return Some(val);
+    }
+
+    None
+}
+
+/// Execute a multi-statement SQL file on the database behind a connections.
+///
+/// This macro takes two inputs: a literal string path to the SQL file to read
+/// from and a connection to the database to execute on. The connection must be
+/// able to be passed to the `execute` method from [`sqlx`] as `&mut conn`.
+///
+/// The path given as the first argument should follow the [`include_str!`] rules
+/// for relative paths, i.e. it will be interpreted relative to the file in which
+/// it is written. The contents of the file are read and split on semicolons, and
+/// each element of the split passed as a statement to [`sqlx::query`] so long as
+/// the statement is not all whitespace. This prevents passing empty commands
+/// to the database, which usually causes an error.
+///
+/// # Panics
+/// Any errors in SQL will cause a panic. The panic message will include the original
+/// SQL message plus which statement (not line number) in the file caused it. The
+/// statement index will be 1-based.
+#[macro_export]
+macro_rules! multiline_sql {
+    ($path:literal, $conn:ident) => {
+        use anyhow::Context;
+        let read_sql = include_str!($path);
+        for (i, statement) in read_sql.split(';').enumerate() {
+            if !statement.trim().is_empty() {
+                sqlx::query(statement.trim())
+                    .execute(&mut *$conn)
+                    .await
+                    .with_context(|| format!("Error in or around statement {}", i + 1))
+                    .unwrap();
+            }
+        }
+    };
+}
+
+/// Execute a file containing multiple SQL statements to initialize the test database.
+///
+/// This does exactly the same thing as [`multiline_sql!`], except that this opens a
+/// connection to the test database itself (resetting it in the process, i.e. passes
+/// `true` to [`open_test_database`]). The connection acquired will be returned from
+/// this macro.
+///
+/// See [`multiline_sql!`] for information on how the SQL from the file is passed to
+/// the database. If you need control over how the connection to the database is
+///
+/// # Panics
+/// In addition to the panics that occur for [`multiline_sql!`], this will panic if
+/// it could not open or connect to the test database.
+///
+/// # Returns
+/// Returns a connection to the database which can be used to run further queries
+/// and a [`TestDb`] instance. **Note:** it is intended that this [`TestDb`] value
+/// be kept alive through the duration of the test. Because it holds the test container
+/// instance, when it is dropped, the container should be cleaned up.
+#[macro_export]
+macro_rules! multiline_sql_init {
+    ($path:literal) => {{
+        let (pool, test_db) = orm::test_utils::open_test_database(true)
+            .await
+            .expect("Failed to open test database");
+        let mut conn = pool
+            .get_connection()
+            .await
+            .expect("Failed to acquire connection to database");
+        multiline_sql!($path, conn);
+        (conn, test_db)
+    }};
+}
+
+// Per https://stackoverflow.com/a/31749071 this is necessary to
+// use macros across modules
+#[allow(unused_imports)]
+pub use multiline_sql;
+#[allow(unused_imports)]
+pub use multiline_sql_init;

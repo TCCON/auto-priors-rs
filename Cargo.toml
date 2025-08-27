@@ -24,6 +24,7 @@ sqlx = { version = "0.7", features = [
     "chrono",
 ] }
 tabled = "0.14.0"
+tempdir = "0.3"
 testcontainers-modules = { version = "0.6.1", features = [
     "mariadb",
     "blocking",

@@ -8,7 +8,7 @@ use orm::{
     input_files,
     jobs::{Job, MapFmt, ModFmt, TarChoice, VmrFmt},
     siteinfo::{SiteInfo, SiteType, StdSite},
-    test_utils::open_test_database,
+    test_utils::{make_dummy_config_with_temp_dirs, open_test_database},
     MySqlConn,
 };
 use tccon_priors_cli::met_download;
@@ -26,8 +26,8 @@ async fn test_successful_input_files() {
     let (pool, _test_db) = open_test_database(true)
         .await
         .expect("Could not open database");
-    let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("priors-test")
-        .expect("Failed to make test configuration");
+    let (config, _tmp_dir) =
+        make_dummy_config_with_temp_dirs("priors-test").expect("Failed to make test configuration");
     let mut conn = pool
         .get_connection()
         .await
@@ -124,8 +124,8 @@ async fn test_failed_input_files() {
     let (pool, _test_db) = open_test_database(true)
         .await
         .expect("Could not open database");
-    let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("priors-test")
-        .expect("Failed to make test configuration");
+    let (config, _tmp_dir) =
+        make_dummy_config_with_temp_dirs("priors-test").expect("Failed to make test configuration");
     let mut conn = pool
         .get_connection()
         .await
@@ -214,8 +214,8 @@ async fn test_blacklisted_input_files() {
     let (pool, _test_db) = open_test_database(true)
         .await
         .expect("Could not open database");
-    let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("priors-test")
-        .expect("Failed to make test configuration");
+    let (config, _tmp_dir) =
+        make_dummy_config_with_temp_dirs("priors-test").expect("Failed to make test configuration");
     let mut conn = pool
         .get_connection()
         .await
