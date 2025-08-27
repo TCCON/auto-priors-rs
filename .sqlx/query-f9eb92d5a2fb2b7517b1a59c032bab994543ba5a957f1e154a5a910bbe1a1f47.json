@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE Jobs SET delete_time = ? WHERE job_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f9eb92d5a2fb2b7517b1a59c032bab994543ba5a957f1e154a5a910bbe1a1f47"
+}

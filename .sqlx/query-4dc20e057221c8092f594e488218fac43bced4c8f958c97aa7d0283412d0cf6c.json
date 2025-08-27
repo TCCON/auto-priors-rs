@@ -1,0 +1,245 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT * FROM Jobs",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "state",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 4
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "site_id",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 4294967295
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "start_date",
+        "type_info": {
+          "type": "Date",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "end_date",
+        "type_info": {
+          "type": "Date",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "lat",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 4294967295
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "lon",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 4294967295
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "email",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "delete_time",
+        "type_info": {
+          "type": "Datetime",
+          "flags": "BINARY",
+          "char_set": 63,
+          "max_size": 19
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "priority",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "queue",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL",
+          "char_set": 224,
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "met_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "char_set": 224,
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "ginput_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "char_set": 224,
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "save_dir",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "save_tarball",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL",
+          "char_set": 63,
+          "max_size": 4
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "mod_fmt",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 32
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "vmr_fmt",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 32
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "map_fmt",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 32
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "submit_time",
+        "type_info": {
+          "type": "Datetime",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 19
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "complete_time",
+        "type_info": {
+          "type": "Datetime",
+          "flags": "BINARY",
+          "char_set": 63,
+          "max_size": 19
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "output_file",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "char_set": 224,
+          "max_size": 262140
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "4dc20e057221c8092f594e488218fac43bced4c8f958c97aa7d0283412d0cf6c"
+}

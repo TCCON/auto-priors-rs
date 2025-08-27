@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE StdSiteJobs SET state = ? WHERE date = ? AND state = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "5517a9146b7c9f1bc965fdcb69ddf1cf52e98102ebb32d3934d6c5894b1abeb1"
+}

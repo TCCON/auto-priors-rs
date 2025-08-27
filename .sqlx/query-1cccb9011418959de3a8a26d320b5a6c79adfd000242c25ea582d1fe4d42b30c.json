@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO StdSiteInfo(id, site, location, latitude, longitude, start_date, end_date, comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "1cccb9011418959de3a8a26d320b5a6c79adfd000242c25ea582d1fe4d42b30c"
+}

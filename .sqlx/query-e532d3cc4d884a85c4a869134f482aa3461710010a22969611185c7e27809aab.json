@@ -1,0 +1,69 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT * FROM StdSiteList WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "site_id",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | UNIQUE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 8
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "site_type",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | ENUM",
+          "char_set": 224,
+          "max_size": 28
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "output_structure",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | ENUM",
+          "char_set": 224,
+          "max_size": 48
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e532d3cc4d884a85c4a869134f482aa3461710010a22969611185c7e27809aab"
+}

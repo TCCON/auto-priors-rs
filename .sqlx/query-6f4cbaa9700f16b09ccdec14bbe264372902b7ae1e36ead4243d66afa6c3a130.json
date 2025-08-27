@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT DISTINCT(product) FROM MetFiles WHERE filedate >= ? AND filedate < ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "product",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 32
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6f4cbaa9700f16b09ccdec14bbe264372902b7ae1e36ead4243d66afa6c3a130"
+}

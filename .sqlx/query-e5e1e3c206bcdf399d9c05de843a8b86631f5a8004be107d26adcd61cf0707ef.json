@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM MetFiles",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "e5e1e3c206bcdf399d9c05de843a8b86631f5a8004be107d26adcd61cf0707ef"
+}

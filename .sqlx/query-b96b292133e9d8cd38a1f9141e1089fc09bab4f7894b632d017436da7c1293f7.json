@@ -1,0 +1,124 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT * FROM v_StdSiteInfo WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "site",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "location",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "latitude",
+        "type_info": {
+          "type": "Float",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 12
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "longitude",
+        "type_info": {
+          "type": "Float",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 12
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "start_date",
+        "type_info": {
+          "type": "Date",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "end_date",
+        "type_info": {
+          "type": "Date",
+          "flags": "BINARY",
+          "char_set": 63,
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "comment",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "char_set": 224,
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "site_id",
+        "type_info": {
+          "type": "String",
+          "flags": "UNIQUE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 8
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 128
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b96b292133e9d8cd38a1f9141e1089fc09bab4f7894b632d017436da7c1293f7"
+}

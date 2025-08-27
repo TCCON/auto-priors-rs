@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM StdSiteInfo WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "fa088f35faab8f5389ab3a75759f829af9f48b2c8e72ca95e6972740bfb80c7f"
+}

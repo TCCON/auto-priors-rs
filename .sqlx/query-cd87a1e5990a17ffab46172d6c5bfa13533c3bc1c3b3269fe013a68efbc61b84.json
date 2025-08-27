@@ -1,0 +1,36 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT perm_id,tag FROM auth_prior_user_permissions LEFT JOIN auth_prior_permissions ON auth_prior_user_permissions.perm_id = auth_prior_permissions.id WHERE user_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "perm_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tag",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 64
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "cd87a1e5990a17ffab46172d6c5bfa13533c3bc1c3b3269fe013a68efbc61b84"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE Jobs SET met_key = ? WHERE job_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "807324c7b2f00bc3cdc0210d75b3f92d868c30e124bb7a43e7f9737a38dfc800"
+}

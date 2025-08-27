@@ -1,0 +1,1 @@
+../migrations/0001_initial.up.sql

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE StdSiteInfo SET start_date = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "c42306253bc8187dc1d2df14639801129999b25fbe1daa8ee4d0798f13096c91"
+}

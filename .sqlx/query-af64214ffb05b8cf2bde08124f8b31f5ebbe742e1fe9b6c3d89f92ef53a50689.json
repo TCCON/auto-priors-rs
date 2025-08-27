@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE StdSiteList SET site_type = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "af64214ffb05b8cf2bde08124f8b31f5ebbe742e1fe9b6c3d89f92ef53a50689"
+}

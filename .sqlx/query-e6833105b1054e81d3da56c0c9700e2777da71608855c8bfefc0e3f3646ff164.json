@@ -1,0 +1,36 @@
+{
+  "db_name": "MySQL",
+  "query": "\n            SELECT COUNT(*) AS fs_penalty,email FROM Jobs\n            WHERE (state = ? OR state = ? OR state = ?) AND queue = ? AND submit_time > ?\n            GROUP BY email\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "fs_penalty",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "char_set": 63,
+          "max_size": 21
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "email",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "char_set": 224,
+          "max_size": 256
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "e6833105b1054e81d3da56c0c9700e2777da71608855c8bfefc0e3f3646ff164"
+}

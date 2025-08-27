@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE StdSiteList SET output_structure = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "47cfdc57636b09f3246dd2d1af145b49b162979b187c7a7d823eed0c560a96e5"
+}

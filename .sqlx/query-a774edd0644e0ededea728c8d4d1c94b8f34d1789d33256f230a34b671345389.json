@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE Jobs SET state = ?, output_file = ?, complete_time = ? WHERE job_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "a774edd0644e0ededea728c8d4d1c94b8f34d1789d33256f230a34b671345389"
+}

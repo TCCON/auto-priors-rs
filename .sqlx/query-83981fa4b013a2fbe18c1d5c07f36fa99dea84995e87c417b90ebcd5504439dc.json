@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT DISTINCT(queue) AS q FROM Jobs WHERE state = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "q",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL",
+          "char_set": 224,
+          "max_size": 128
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "83981fa4b013a2fbe18c1d5c07f36fa99dea84995e87c417b90ebcd5504439dc"
+}

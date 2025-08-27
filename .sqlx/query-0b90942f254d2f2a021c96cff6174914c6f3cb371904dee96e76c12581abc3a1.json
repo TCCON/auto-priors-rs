@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE StdSiteJobs SET state = ?, tarfile = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "0b90942f254d2f2a021c96cff6174914c6f3cb371904dee96e76c12581abc3a1"
+}

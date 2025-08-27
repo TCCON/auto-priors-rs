@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE Jobs SET priority = ? WHERE job_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "1b2b0ae44475c57afff26a97c87e5c55c6d4067ede295494380e1aeb63eaccc3"
+}

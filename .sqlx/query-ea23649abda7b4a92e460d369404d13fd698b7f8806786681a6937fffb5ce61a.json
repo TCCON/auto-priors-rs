@@ -1,0 +1,91 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT * From MetFiles WHERE filedate >= ? AND filedate < ? AND product = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "file_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "file_path",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "file_path_sha256",
+        "type_info": {
+          "type": "VarString",
+          "flags": "UNIQUE_KEY",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "product",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 32
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "filedate",
+        "type_info": {
+          "type": "Datetime",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 19
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "levels",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 32
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "data_type",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 32
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ea23649abda7b4a92e460d369404d13fd698b7f8806786681a6937fffb5ce61a"
+}

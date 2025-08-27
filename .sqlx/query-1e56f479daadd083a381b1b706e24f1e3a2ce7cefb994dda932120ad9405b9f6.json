@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO StdSiteList(site_id, name, site_type, output_structure) VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "1e56f479daadd083a381b1b706e24f1e3a2ce7cefb994dda932120ad9405b9f6"
+}

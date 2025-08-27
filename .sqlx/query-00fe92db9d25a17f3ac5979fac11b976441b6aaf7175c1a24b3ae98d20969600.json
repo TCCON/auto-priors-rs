@@ -1,0 +1,36 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT email,COUNT(*) AS num FROM Jobs WHERE (state = ? OR state = ?) AND complete_time >= ? AND complete_time < ? GROUP BY email",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "num",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "char_set": 63,
+          "max_size": 21
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "00fe92db9d25a17f3ac5979fac11b976441b6aaf7175c1a24b3ae98d20969600"
+}

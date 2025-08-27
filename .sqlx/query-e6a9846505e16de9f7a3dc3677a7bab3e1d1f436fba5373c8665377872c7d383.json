@@ -1,0 +1,113 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT * FROM v_StdSiteJobs WHERE site_id = ? and date = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "site",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "date",
+        "type_info": {
+          "type": "Date",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "state",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL",
+          "char_set": 63,
+          "max_size": 4
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "job",
+        "type_info": {
+          "type": "Long",
+          "flags": "MULTIPLE_KEY",
+          "char_set": 63,
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "tarfile",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "char_set": 224,
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "site_id",
+        "type_info": {
+          "type": "String",
+          "flags": "UNIQUE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 8
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "site_type",
+        "type_info": {
+          "type": "String",
+          "flags": "ENUM",
+          "char_set": 224,
+          "max_size": 28
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "output_structure",
+        "type_info": {
+          "type": "String",
+          "flags": "ENUM",
+          "char_set": 224,
+          "max_size": 48
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e6a9846505e16de9f7a3dc3677a7bab3e1d1f436fba5373c8665377872c7d383"
+}

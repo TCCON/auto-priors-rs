@@ -135,10 +135,9 @@ pub async fn open_test_database(reset_db: bool) -> anyhow::Result<(PoolWrapper, 
 
     if reset_db {
         let mut conn = pool.get_connection().await?;
-        crate::unapply_migrations(&mut conn, 0).await?;
-        crate::apply_migrations(&mut conn).await?;
+        crate::unapply_migrations(&mut conn, 0, true).await?;
+        crate::apply_migrations(&mut conn, true).await?;
     }
 
     Ok((pool, test_db))
 }
-

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM auth_prior_user_permissions WHERE user_id = ? AND perm_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f7d369e59a1540071885b790f58f06aa1e371086646487f0271fc5d7c1fef9b4"
+}
