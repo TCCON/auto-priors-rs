@@ -67,10 +67,12 @@ async fn api_has_perm(
     };
 
     let res = authenticate_refresh_token(&mut conn, token, &state.decoding_key).await;
+    log::trace!("Checking refresh token authenticity");
 
     let (user, perm_set) = match res {
         Ok((user, perm_set)) => (user, perm_set),
         Err(ApiAuthError::TokenExpiredOnServer) | Err(ApiAuthError::TokenInvalidExpired) => {
+            log::trace!("Token expired on server");
             let resp = Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .body("ERROR: Token has expired".into())
@@ -78,6 +80,7 @@ async fn api_has_perm(
             return resp;
         }
         Err(ApiAuthError::TokenInvalidOther(_)) => {
+            log::trace!("Token was invalid");
             let resp = Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .body("ERROR: Token is invalid".into())
@@ -85,6 +88,7 @@ async fn api_has_perm(
             return resp;
         }
         Err(ApiAuthError::TokenNotFound) => {
+            log::trace!("Token is not associated with a user");
             let resp = Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .body("ERROR: Token is not associated with a user".into())
@@ -102,8 +106,11 @@ async fn api_has_perm(
     };
 
     if !perm_set.has_perm(&perm) {
+        log::trace!("Token lacks permission {perm}");
         return StatusCode::FORBIDDEN.into_response();
     }
+
+    log::trace!("Token has permission {perm}");
 
     request.extensions_mut().insert(user);
     request.extensions_mut().insert(perm_set);

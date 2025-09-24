@@ -20,6 +20,20 @@ pub(crate) mod post {
         AppState,
     };
 
+    /// Submit a job request.
+    ///
+    /// This endpoint allows users to programmatically request priors be generated
+    /// for one or more locations for a given time range.
+    #[utoipa::path(
+        post,
+        path = "/api/v1/jobs/submit",
+        responses(
+            (status = StatusCode::OK, description = "Job submitted successfully", body = super::ApiJobRequestResponse),
+            (status = StatusCode::BAD_REQUEST, description = "The submission could not be processed due to incorrect parameters", body = super::ApiJobRequestResponse),
+            (status = StatusCode::INTERNAL_SERVER_ERROR, description = "The submission could not be processed due to an internal server error", body = super::ApiJobRequestResponse)
+        ),
+        request_body = ApiJobRequest
+    )]
     pub(crate) async fn submit_job(
         State(state): State<Arc<AppState>>,
         Extension(user): Extension<User>,
@@ -32,14 +46,14 @@ pub(crate) mod post {
         let res = state.clone_pool().get_connection().await;
         let mut conn = match res {
             Ok(c) => c,
-            Err(e) => return super::ApiJobRequestResponse::ServerError(e.into()),
+            Err(e) => return super::ApiJobRequestResponse::ServerError(e.to_string()),
         };
         let res = Job::add_job_from_request(
             &mut conn,
             &state.config,
             job_request.sites,
-            job_request.start_date,
-            job_request.end_date,
+            job_request.start_date.into_date(),
+            job_request.end_date.into_date(),
             Some(user.email),
             job_request.mod_fmt,
             job_request.vmr_fmt,
@@ -58,10 +72,10 @@ pub(crate) mod post {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub(crate) struct ApiJobRequest {
-    start_date: NaiveDate,
-    end_date: NaiveDate,
+    start_date: crate::api::ApiNaiveDate,
+    end_date: crate::api::ApiNaiveDate,
     sites: Vec<RequestSite>,
     // #[serde(default)] // TODO: update database and job completion code to handle multiple emails
     // alternate_emails: Vec<String>,
@@ -77,7 +91,7 @@ pub(crate) struct ApiJobRequest {
     is_egi: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub(crate) struct ApiJobResult {
     successful: bool,
     job_ids: Option<Vec<i32>>,
@@ -102,10 +116,11 @@ impl ApiJobResult {
     }
 }
 
+#[derive(Debug, utoipa::ToSchema)]
 pub(crate) enum ApiJobRequestResponse {
     Success(ApiJobResult),
     RequestError(RequestError),
-    ServerError(anyhow::Error),
+    ServerError(String),
 }
 
 impl IntoResponse for ApiJobRequestResponse {
@@ -122,7 +137,7 @@ impl IntoResponse for ApiJobRequestResponse {
                 log::error!("Error occurred while processing job submission request: {err:?}");
                 let res = ApiJobResult::new_failure("Internal server error");
                 let mut resp = axum::response::Json(res).into_response();
-                *resp.status_mut() = StatusCode::BAD_REQUEST;
+                *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
                 resp
             }
         }
@@ -132,19 +147,25 @@ impl IntoResponse for ApiJobRequestResponse {
 impl From<JobAddError> for ApiJobRequestResponse {
     fn from(value: JobAddError) -> Self {
         if value.is_server_error() {
-            Self::ServerError(value.into())
+            Self::ServerError(value.to_string())
         } else {
             Self::RequestError(value.into())
         }
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+impl From<anyhow::Error> for ApiJobRequestResponse {
+    fn from(value: anyhow::Error) -> Self {
+        Self::ServerError(format!("{value:?}"))
+    }
+}
+
+#[derive(Debug, thiserror::Error, utoipa::ToSchema)]
 pub(crate) enum RequestError {
     #[error("No sites/locations specified")]
     NoSites,
     #[error("{0}")]
-    JobAddError(#[from] JobAddError),
+    JobAddError(String),
 }
 
 impl IntoResponse for RequestError {
@@ -153,5 +174,11 @@ impl IntoResponse for RequestError {
             .status(StatusCode::BAD_REQUEST)
             .body(self.to_string().into())
             .expect("Response construction should not fail")
+    }
+}
+
+impl From<JobAddError> for RequestError {
+    fn from(value: JobAddError) -> Self {
+        Self::JobAddError(value.to_string())
     }
 }

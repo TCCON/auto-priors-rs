@@ -32,4 +32,5 @@ test-log = "0.2.16"
 thiserror = "1.0.61"
 tokio = { version = "1.41.0", features = ["full"] }
 url = { version = "2.2", features = ["serde"] }
+utoipa = "5.4.0"
 # tokio = {version = "1.31.0", features = ["full", "tracing"]}

@@ -23,6 +23,7 @@ mod std_sites;
 mod templates_common;
 
 use tower_sessions::cookie::time::Duration;
+use utoipa_axum::routes;
 
 use crate::api::middleware::{api_has_download_perm, api_has_query_perm, api_has_submit_perm};
 
@@ -177,23 +178,22 @@ fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
             api_has_submit_perm,
         ));
 
-    let download_routes = Router::new()
-        .route(
-            "/api/v1/download/check",
-            get(api::check::get::check_api_access),
-        )
-        .route(
-            "/api/v1/download/job/{job_id}",
-            get(api::download::get::download_job_output),
-        )
-        .route(
-            "/api/v1/download/stdsite/{site_id}/{date}",
-            get(api::download::get::download_std_site_output),
-        )
-        .route_layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            api_has_download_perm,
-        ));
+    let (download_routes, api) = utoipa_axum::router::OpenApiRouter::new()
+        .routes(routes!(api::download::get::download_job_output))
+        .routes(routes!(api::download::get::download_std_site_output))
+        .split_for_parts();
 
-    query_routes.merge(submit_routes).merge(download_routes)
+    let download_routes = download_routes.route_layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        api_has_download_perm,
+    ));
+
+    let doc_routes = api::documentation::DocEndpointBuilder::new(api)
+        .json_url("/api/v1/docs/json")
+        .build();
+
+    query_routes
+        .merge(submit_routes)
+        .merge(download_routes)
+        .merge(doc_routes)
 }

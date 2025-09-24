@@ -203,7 +203,7 @@ impl TryFrom<i8> for TarChoice {
 }
 
 /// An enum representing the possible output file types for the model (`.mod`) files.
-#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, utoipa::ToSchema)]
 pub enum ModFmt {
     /// Do not create `.mod` files. String representation = `"None"`.
     None,
@@ -248,7 +248,7 @@ impl FromStr for ModFmt {
 }
 
 /// An enum representing the possible output file types for the `.vmr` files.
-#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, utoipa::ToSchema)]
 pub enum VmrFmt {
     /// Do not create `.vmr` files. String representation = `"None"`.
     None,
@@ -294,7 +294,7 @@ impl FromStr for VmrFmt {
 }
 
 /// An enum representing the possible output file types for the model a priori (`.map`) files.
-#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, utoipa::ToSchema)]
 pub enum MapFmt {
     /// Do not create `.map` files. String representation = `"None"`.
     None,

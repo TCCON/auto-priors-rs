@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{config::Config, met::CheckMetAvailableError, MySqlConn};
 
 /// Inner structure to serialize the locations requested for a job
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct RequestSite {
     pub site_id: String,
     pub lat: Option<f32>,

@@ -1,7 +1,63 @@
-use axum::http::StatusCode;
-use orm::{auth::User, jobs::Job};
+use std::path::PathBuf;
 
-use crate::server_error;
+use axum::{body::Body, http::StatusCode, response::IntoResponse};
+use orm::{auth::User, jobs::Job};
+use utoipa::{
+    openapi::{Object, Schema, SchemaFormat},
+    PartialSchema,
+};
+
+use crate::{api::ApiNaiveDate, server_error};
+
+/// A type used to indicate that an API endpoint returns a gzipped TAR file.
+pub(crate) struct TgzFileStream {
+    output_file: PathBuf,
+    body: Body,
+}
+
+impl TgzFileStream {
+    async fn new(output_file: PathBuf) -> Result<Self, StatusCode> {
+        let body = make_download_body(&output_file).await?;
+        Ok(Self { output_file, body })
+    }
+}
+
+impl IntoResponse for TgzFileStream {
+    fn into_response(self) -> axum::response::Response {
+        let content_type = "application/gzip".to_string();
+        let headers = match make_download_headers(&self.output_file, content_type) {
+            Ok(headers) => headers,
+            Err(code) => return code.into_response(),
+        };
+        (headers, self.body).into_response()
+    }
+}
+
+impl utoipa::PartialSchema for TgzFileStream {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        // This schema is intended to match the recommendation at
+        // https://swagger.io/docs/specification/v3_0/describing-responses/#response-that-returns-a-file
+        let binary_string = Object::builder()
+            .schema_type(utoipa::openapi::Type::String)
+            .format(Some(SchemaFormat::KnownFormat(
+                utoipa::openapi::KnownFormat::Binary,
+            )))
+            .build();
+
+        utoipa::openapi::RefOr::T(Schema::Object(binary_string))
+    }
+}
+
+impl utoipa::ToSchema for TgzFileStream {
+    fn schemas(
+        schemas: &mut Vec<(
+            String,
+            utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>,
+        )>,
+    ) {
+        schemas.push((ApiNaiveDate::name().into(), ApiNaiveDate::schema()));
+    }
+}
 
 pub(crate) mod get {
     use std::sync::Arc;
@@ -15,7 +71,11 @@ pub(crate) mod get {
     use chrono::NaiveDate;
     use orm::{auth::User, jobs::Job, stdsitejobs::StdSiteJob};
 
-    use crate::{api::download::user_can_access_job, server_error, AppState};
+    use crate::{
+        api::download::{user_can_access_job, TgzFileStream},
+        api::ApiNaiveDate,
+        server_error, AppState,
+    };
 
     /// Return a .tgz file with job output to the user.
     ///
@@ -34,11 +94,25 @@ pub(crate) mod get {
     /// - `NO_CONTENT` (204) if the job has not completed or the output file otherwise
     ///   does not exist. A 2xx status code is used as the user request was correct but
     ///   could not be fulfilled yet.
+    #[utoipa::path(
+        get,
+        path = "/api/v1/download/job/{job_id}",
+        responses(
+            (status = StatusCode::OK, description = "Download request succeeded", body = TgzFileStream),
+            (status = StatusCode::FORBIDDEN, description = "User does not have permission to access the requested job"),
+            (status = StatusCode::GONE, description = "Output from the job was cleaned up and is no longer available"),
+            (status = StatusCode::NO_CONTENT, description = "The output from the job is not available yet (usually because the job is not yet complete).")
+        ),
+        params(
+            ("job_id" = i32, Path, description = "The ID of the job to download the output from.")
+        ),
+        tag = "download"
+    )]
     pub(crate) async fn download_job_output(
         State(state): State<Arc<AppState>>,
         Extension(user): Extension<User>,
         Path(job_id): Path<i32>,
-    ) -> Result<([(HeaderName, String); 2], Body), StatusCode> {
+    ) -> Result<TgzFileStream, StatusCode> {
         let mut conn = server_error(state.pool.get_connection().await)?;
         let res = Job::get_job_with_id(&mut conn, job_id).await;
         let job = match res {
@@ -75,10 +149,8 @@ pub(crate) mod get {
 
         if output_file.extension().is_some_and(|ext| ext == "tgz") {
             // The job has a tarball, so we can send the file.
-            let content_type = "application/gzip".to_string();
-            let headers = super::make_download_headers(&output_file, content_type)?;
-            let body = super::make_download_body(&output_file).await?;
-            Ok((headers, body))
+            let resp = TgzFileStream::new(output_file).await?;
+            Ok(resp)
         } else {
             Err(StatusCode::BAD_REQUEST)
         }
@@ -95,6 +167,20 @@ pub(crate) mod get {
     ///   for the given site ID and date
     /// - `NO_CONTENT` (204) is returned if the tarfile field in the database was null. This usually means
     ///   that the job has not been finished yet.
+    #[utoipa::path(
+        get,
+        path = "/api/v1/download/stdsite/{site_id}/{date}",
+        responses(
+            (status = StatusCode::OK, description = "Download request succeeded", body = TgzFileStream),
+            (status = StatusCode::BAD_REQUEST, description = "The site and/or date was not in the database"),
+            (status = StatusCode::NO_CONTENT, description = "The data for this site is not ready yet")
+        ),
+        params(
+            ("site_id" = String, Path, description = "The two-character site ID of the site for which to download data"),
+            ("date" = ApiNaiveDate, Path, description = "The date for which to download data, in YYYY-MM-DD format")
+        ),
+        tag = "download"
+    )]
     pub(crate) async fn download_std_site_output(
         State(state): State<Arc<AppState>>,
         Path((site_id, date)): Path<(String, NaiveDate)>,
