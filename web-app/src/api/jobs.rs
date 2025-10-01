@@ -28,11 +28,16 @@ pub(crate) mod post {
         post,
         path = "/api/v1/jobs/submit",
         responses(
-            (status = StatusCode::OK, description = "Job submitted successfully", body = super::ApiJobRequestResponse),
+            (status = StatusCode::OK, description = "Job submitted successfully", body = super::ApiJobRequestResponse, example = json!({"successful": true, "job_ids": [1], "error_reason": null})),
             (status = StatusCode::BAD_REQUEST, description = "The submission could not be processed due to incorrect parameters", body = super::ApiJobRequestResponse),
             (status = StatusCode::INTERNAL_SERVER_ERROR, description = "The submission could not be processed due to an internal server error", body = super::ApiJobRequestResponse)
         ),
-        request_body = ApiJobRequest
+        request_body(
+            content=ApiJobRequest, examples(
+                ("simple request" = (value=json!({"start_date": "2025-01-01", "end_date": "2025-01-02", "sites": [{"site_id": "aa", "lat": 12.34, "lon": -56.78}]}))),
+                ("complex request" = (value=json!({"start_date": "2025-01-01", "end_date": "2025-01-02", "sites": [{"site_id": "aa", "lat": 12.34, "lon": -56.78}, {"site_id": "bb", "lat": -43.21, "lon": 87.65}], "mod_fmt": "none", "vmr_fmt": "none", "map_fmt": "netcdf"})))
+            )
+        )
     )]
     pub(crate) async fn submit_job(
         State(state): State<Arc<AppState>>,

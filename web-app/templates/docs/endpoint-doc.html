@@ -1,0 +1,18 @@
+<h3 id="{{ group }}-{{ endpoint_name }}">{{ endpoint_name }}</h3>
+
+<p><b>URL:</b> {{ url }}</p>
+<p><b>URL parameters:</b> TODO</p>
+<p><b>Description:</b> {{ description }}</p>
+<p><b>Request type:</b> {{ request_type }}</p>
+<p><b>Request body:</b>{% if let Some(body) = request_body %} {{ body }} {% else %} Nothing {% endif %}</p>
+<p><b>Examples:</b></p>
+{% for example in code_examples %}
+<details>
+    <summary>{{ example.0 }}:</summary>
+    <pre class="code-box">{{ example.1 }}</div>
+</details>
+{% endfor %}
+<details>
+    <summary><b>Output:</b></summary>
+    {{ output }}
+</details>

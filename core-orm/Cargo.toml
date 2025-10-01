@@ -25,8 +25,8 @@ rand = "0.9.1"
 serde.workspace = true
 serde_json.workspace = true
 sqlx = { workspace = true, features = ["macros"] }
-strum = { version = "0.27", features = ["derive"] }
-toml = "0.8"                                        #"0.5"
+strum.workspace = true
+toml = "0.8"                                       #"0.5"
 url.workspace = true
 utoipa.workspace = true
 tabled.workspace = true

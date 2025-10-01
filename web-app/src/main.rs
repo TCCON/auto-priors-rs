@@ -167,18 +167,26 @@ fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
             api_has_query_perm,
         ));
 
-    let submit_routes = Router::new()
-        .route(
-            "/api/v1/submit/check",
-            get(api::check::get::check_api_access),
-        )
-        .route("/api/v1/jobs/submit", post(api::jobs::post::submit_job))
+    // let submit_routes = Router::new()
+    //     .route(
+    //         "/api/v1/submit/check",
+    //         get(api::check::get::check_api_access),
+    //     )
+    //     .route("/api/v1/jobs/submit", post(api::jobs::post::submit_job))
+    //     .route_layer(axum::middleware::from_fn_with_state(
+    //         state.clone(),
+    //         api_has_submit_perm,
+    //     ));
+
+    let (submit_routes, api) = utoipa_axum::router::OpenApiRouter::new()
+        .routes(routes!(api::jobs::post::submit_job))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api_has_submit_perm,
-        ));
+        ))
+        .split_for_parts();
 
-    let (download_routes, api) = utoipa_axum::router::OpenApiRouter::new()
+    let (download_routes, api) = utoipa_axum::router::OpenApiRouter::with_openapi(api)
         .routes(routes!(api::download::get::download_job_output))
         .routes(routes!(api::download::get::download_std_site_output))
         .split_for_parts();
@@ -188,7 +196,7 @@ fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
         api_has_download_perm,
     ));
 
-    let doc_routes = api::documentation::DocEndpointBuilder::new(api)
+    let doc_routes = api::documentation::DocAllEndpointBuilder::new(api)
         .json_url("/api/v1/docs/json")
         .build();
 
