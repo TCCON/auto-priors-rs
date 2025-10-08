@@ -122,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
 
     let unprotected_routes = Router::new()
         .route("/", get(home::get::home))
-        .route("/api-docs", get(api::get::api_docs))
+        .route("/api-docs-old", get(api::get::api_docs))
         .route("/login", post(auth_web::post::login))
         .route("/login", get(auth_web::get::login))
         .route("/logout", get(auth_web::get::logout));
@@ -198,6 +198,7 @@ fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
 
     let doc_routes = api::documentation::DocAllEndpointBuilder::new(api)
         .json_url("/api/v1/docs/json")
+        .html_url("/api/v1/docs")
         .build();
 
     query_routes

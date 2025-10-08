@@ -34,7 +34,10 @@
         {% let link = Self::sblink_default_id(self, "/met-data", "Met data", page_id) %}
         <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
 
-        {% let link = Self::sblink_default_id(self, "/api-docs", "API docs", page_id) %}
+        {% let link = Self::sblink_default_id(self, "/api/v1/docs", "API docs", page_id) %}
+        <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
+
+        {% let link = Self::sblink_default_id(self, "/api-docs-old", "API docs (old)", page_id) %}
         <div class="{{ link.classes }}"><a href="{{ link.url }}">{{ link.text }}</a></div>
     </div>
 

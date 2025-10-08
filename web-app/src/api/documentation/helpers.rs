@@ -164,7 +164,7 @@ fn write_string<W: std::fmt::Write>(writer: &mut W, s: String) -> std::fmt::Resu
 mod tests {
     use serde_json::json;
 
-    use crate::api::doc_helpers::json_to_python;
+    use super::*;
 
     #[test]
     fn test_string_double_quote() {

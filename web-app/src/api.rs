@@ -5,7 +5,6 @@ use serde::Deserialize;
 use crate::templates_common::{sblink_inner, BaseContext, ContextWithSidebar, Sblink};
 
 pub(crate) mod check;
-mod doc_helpers;
 pub(crate) mod documentation;
 pub(crate) mod download;
 pub(crate) mod jobs;
@@ -167,7 +166,7 @@ impl BaseContext for ApiDocsContext {
     }
 
     fn page_id(&self) -> &str {
-        "api-docs"
+        "api-docs-old"
     }
 
     fn root_uri(&self) -> &str {

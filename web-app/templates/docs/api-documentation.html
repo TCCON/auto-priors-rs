@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="body-text">
+    <h1>{{ Self::subtitle(self) }}</h1>
+
+    <ul>
+        {% for (groupkey, group) in endpoints %}
+        <li><a href="#{{ groupkey }}">{{ groupkey|capitalize }} endpoints</a></li>
+        <ul>
+            {% for endpt in group %}
+            <li><a href="#{{ groupkey }}-{{ endpt.endpoint_name }}">{{ endpt.endpoint_name }}</a></li>
+            {% endfor %}
+        </ul>
+        {% endfor %}
+    </ul>
+
+    <h2 id="authenticating">Authenticating</h2>
+    <p>
+        All the API endpoints for this site require that you authenticate your request.
+        This requires that you have a token, which can be obtained from the <a href="/token-management">token management
+            page</a>.
+        For the rest of the documentation, we will assume that your token is saved to the file
+        <code>~/.priors-api-key</code>.
+    </p>
+
+    <div class="important-title">Important</div>
+    <div class="important">
+        Your tokens grant you access to the API, just like a username and password.
+        Protect them just like you would your passwords: do not share them or send them between computer unencrypted
+        (e.g., through email).
+        If you need to copy a token from one computer to another, use something like <code>scp</code> or
+        <code>rsync</code> (over SSH).
+    </div>
+
+    {% for (groupkey, group) in endpoints %}
+    <h2 id="{{ groupkey }}">{{ groupkey|capitalize }} endpoints</h2>
+    {% for endpt in group %}
+    {{ endpt|safe }}
+    {% endfor %}
+    {% endfor %}
+</div>
+{% endblock content %}

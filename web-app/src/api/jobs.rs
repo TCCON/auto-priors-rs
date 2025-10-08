@@ -37,7 +37,8 @@ pub(crate) mod post {
                 ("simple request" = (value=json!({"start_date": "2025-01-01", "end_date": "2025-01-02", "sites": [{"site_id": "aa", "lat": 12.34, "lon": -56.78}]}))),
                 ("complex request" = (value=json!({"start_date": "2025-01-01", "end_date": "2025-01-02", "sites": [{"site_id": "aa", "lat": 12.34, "lon": -56.78}, {"site_id": "bb", "lat": -43.21, "lon": 87.65}], "mod_fmt": "none", "vmr_fmt": "none", "map_fmt": "netcdf"})))
             )
-        )
+        ),
+        tag = "submission"
     )]
     pub(crate) async fn submit_job(
         State(state): State<Arc<AppState>>,

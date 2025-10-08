@@ -2,7 +2,7 @@
 
 <p><b>URL:</b> {{ url }}</p>
 <p><b>URL parameters:</b> TODO</p>
-<p><b>Description:</b> {{ description }}</p>
+<p><b>Description:</b> {{ description|safe }}</p>
 <p><b>Request type:</b> {{ request_type }}</p>
 <p><b>Request body:</b>{% if let Some(body) = request_body %} {{ body }} {% else %} Nothing {% endif %}</p>
 <p><b>Examples:</b></p>
