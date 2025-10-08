@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM StdSiteJobs WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "6df4f52ddc4d66d027dc9e3bac7d6b9cf5dd09070e4aedc5a7db74076eca18b2"
+}

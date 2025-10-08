@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE Jobs SET ginput_key = ? WHERE job_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "6fd71b27c92d85a8e6ed9e14e50fddb6bdcbeddf9ecb40fbf35bec080d9576a3"
+}

@@ -189,3 +189,6 @@ std_site_gen_hours = 12
 std_site_tar_minutes = 30
 disable_reports = true
 std_site_json_hours = 1
+
+[auth]
+hmac_secret_file = ""

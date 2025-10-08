@@ -168,10 +168,12 @@ impl Display for JobAddError {
             ),
             JobAddError::UnknownStdSid(sids) => {
                 let s = if sids.len() == 1 { "ID" } else { "IDs" };
+                let verb = if sids.len() == 1 { "does" } else { "do" };
+                let object = if sids.len() == 1 { "it" } else { "them" };
                 let sids = sids.join(", ");
                 write!(
                     f,
-                    "The site {s} {sids} do not have standard lat/lons associated with them"
+                    "The site {s} {sids} {verb} not have standard lat/lons associated with {object}"
                 )
             }
             JobAddError::InvalidRequest(reasons) => {

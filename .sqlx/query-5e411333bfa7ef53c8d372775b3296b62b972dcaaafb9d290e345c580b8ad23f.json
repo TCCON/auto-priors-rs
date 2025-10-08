@@ -1,0 +1,36 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT email,COUNT(*) as num FROM Jobs WHERE state = ? OR state = ? GROUP BY email",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "num",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "char_set": 63,
+          "max_size": 21
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "5e411333bfa7ef53c8d372775b3296b62b972dcaaafb9d290e345c580b8ad23f"
+}

@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT DISTINCT(email) FROM Jobs WHERE email IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "char_set": 224,
+          "max_size": 256
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "3aa9a90a46aa9eb56d212eaf6ea27e9fb98ec4b7df64e33eeb5e9ed59ce78369"
+}

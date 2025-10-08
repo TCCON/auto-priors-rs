@@ -8,7 +8,7 @@ use orm::{
     input_files,
     jobs::{Job, MapFmt, ModFmt, TarChoice, VmrFmt},
     siteinfo::{SiteInfo, SiteType, StdSite},
-    test_utils::open_test_database,
+    test_utils::{make_dummy_config_with_temp_dirs, open_test_database},
     MySqlConn,
 };
 use tccon_priors_cli::met_download;
@@ -26,8 +26,8 @@ async fn test_successful_input_files() {
     let (pool, _test_db) = open_test_database(true)
         .await
         .expect("Could not open database");
-    let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("priors-test")
-        .expect("Failed to make test configuration");
+    let (config, _tmp_dir) =
+        make_dummy_config_with_temp_dirs("priors-test").expect("Failed to make test configuration");
     let mut conn = pool
         .get_connection()
         .await
@@ -124,8 +124,8 @@ async fn test_failed_input_files() {
     let (pool, _test_db) = open_test_database(true)
         .await
         .expect("Could not open database");
-    let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("priors-test")
-        .expect("Failed to make test configuration");
+    let (config, _tmp_dir) =
+        make_dummy_config_with_temp_dirs("priors-test").expect("Failed to make test configuration");
     let mut conn = pool
         .get_connection()
         .await
@@ -214,8 +214,8 @@ async fn test_blacklisted_input_files() {
     let (pool, _test_db) = open_test_database(true)
         .await
         .expect("Could not open database");
-    let (config, _tmp_dir) = common::make_dummy_config_with_temp_dirs("priors-test")
-        .expect("Failed to make test configuration");
+    let (config, _tmp_dir) =
+        make_dummy_config_with_temp_dirs("priors-test").expect("Failed to make test configuration");
     let mut conn = pool
         .get_connection()
         .await
@@ -634,10 +634,10 @@ fn get_expected_error_list(file_name: &OsStr) -> Option<&'static [&'static str]>
     let file_name = file_name.to_string_lossy();
     match file_name.as_ref() {
         "alt_met_out_of_range.txt" => {
-            Some(&["met 'co_reprocessing' spans dates from 2018-01-01 up to but not including 2018-01-08 but you requested dates (2018-01-21 to 2018-01-22) outside this range"])
+            Some(&["Invalid reanalysis: met 'co_reprocessing' spans dates from 2018-01-01 up to but not including 2018-01-08 but you requested dates (2018-01-21 to 2018-01-22) outside this range"])
         }
         "bad_alt_met.txt" => {
-            Some(&["'all_the_reprocessing' is not a valid met"])
+            Some(&["Invalid reanalysis: 'all_the_reprocessing' is not a valid met"])
         }
         "bad_date_fmt.txt" => {
             Some(&[
@@ -648,7 +648,7 @@ fn get_expected_error_list(file_name: &OsStr) -> Option<&'static [&'static str]>
             ])
         }
         "bad_date_order.txt" => {
-            Some(&["Line 3: end_date 2018-01-01 must be at least 1 day after the start date 2018-01-02"])
+            Some(&["End date (2018-01-01) must be at least one day after the start date (2018-01-02)"])
         }
         "bad_file_fmt.txt" => {
             Some(&[
@@ -664,7 +664,7 @@ fn get_expected_error_list(file_name: &OsStr) -> Option<&'static [&'static str]>
             Some(&["Your request could not be fulfilled: met data was unavailable for 1 of the dates requested: 2019-07-01. If you believe this should not be the case, contact the GGG priors automation administrators."])
         }
         "dates_same.txt" => {
-            Some(&["Line 3: end_date 2018-01-01 must be at least 1 day after the start date 2018-01-01"])
+            Some(&["End date (2018-01-01) must be at least one day after the start date (2018-01-01)"])
         }
         "input_file_too_many_days.txt" => {
             Some(&["Too many days requested: 31 requested but the maximum allowed is 30"])
@@ -676,12 +676,10 @@ fn get_expected_error_list(file_name: &OsStr) -> Option<&'static [&'static str]>
             ])
         }
         "long_multi_site_id.txt" => {
-            // TODO: alter the input file parsing code to not include the "missing field site_id" message in this case
-            Some(&["Line 1: Cannot parse 'ka,rich,bob': must be a single two-character site ID or a comma-separated list of such IDs"])
+            Some(&["Line 1: Cannot parse 'rich': must be a two-character site ID"])
         }
         "long_site_id.txt" => {
-            // TODO: alter the input file parsing code to not include the "missing field site_id" message in this case
-            Some(&["Line 1: Cannot parse 'karl': must be a single two-character site ID or a comma-separated list of such IDs"])
+            Some(&["Line 1: Cannot parse 'karl': must be a two-character site ID"])
         }
         "mismatch_site_latlon_1.txt" => {
             Some(&["Inconsistent site_id/lat/lon: site_id must have length 1 or the same number of elements as lat & lon (got 2 site ID, 3 lat/lon)"])
@@ -694,7 +692,7 @@ fn get_expected_error_list(file_name: &OsStr) -> Option<&'static [&'static str]>
         }
         "unknown_std_site.txt" => {
             // TODO: fix the error message actually sent in the email
-            Some(&["Site ID 'ua' is not a known standard site, you must provide latitude and longitude"])
+            Some(&["The site ID ua does not have standard lat/lons associated with it"])
         }
         "wrong_key_value.txt" => {
             Some(&[

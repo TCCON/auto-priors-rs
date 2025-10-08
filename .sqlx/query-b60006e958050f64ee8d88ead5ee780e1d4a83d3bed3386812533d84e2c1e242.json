@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO auth_api_user(user_id, api_key, expires, nickname) VALUES (?,?,?,?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "b60006e958050f64ee8d88ead5ee780e1d4a83d3bed3386812533d84e2c1e242"
+}

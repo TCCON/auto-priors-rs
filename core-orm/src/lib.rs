@@ -26,13 +26,39 @@ pub type MySqlConn = sqlx::MySqlConnection;
 static DB_ENV_VARS: [&'static str; 2] = ["PRIORS_DATABASE_URL", "DATABASE_URL"];
 
 static MIGRATOR: Migrator = sqlx::migrate!();
+static CI_MIGRATOR: Migrator = sqlx::migrate!("./migrations-ci");
 
-pub async fn apply_migrations(conn: &mut MySqlConn) -> anyhow::Result<()> {
-    Ok(MIGRATOR.run(conn).await?)
+/// Apply the database migrations to the database connected to with `conn`
+///
+/// Setting `use_ci` will use an alternate set of migrations designed for automated testing
+/// (in continuous integration).
+pub async fn apply_migrations(conn: &mut MySqlConn, use_ci: bool) -> anyhow::Result<()> {
+    if use_ci {
+        log::info!("Using CI migrations");
+        Ok(CI_MIGRATOR.run(conn).await?)
+    } else {
+        log::info!("Using production migrations");
+        Ok(MIGRATOR.run(conn).await?)
+    }
 }
 
-pub async fn unapply_migrations(conn: &mut MySqlConn, target: i64) -> anyhow::Result<()> {
-    Ok(MIGRATOR.undo(conn, target).await?)
+/// Unapply the database migrations to the database connected to with `conn` back to the
+/// `target` migration.
+///
+/// Setting `use_ci` will use an alternate set of migrations designed for automated testing
+/// (in continuous integration).
+pub async fn unapply_migrations(
+    conn: &mut MySqlConn,
+    target: i64,
+    use_ci: bool,
+) -> anyhow::Result<()> {
+    if use_ci {
+        log::info!("Undoing CI migrations");
+        Ok(CI_MIGRATOR.undo(conn, target).await?)
+    } else {
+        log::info!("Undoing production migrations");
+        Ok(MIGRATOR.undo(conn, target).await?)
+    }
 }
 
 pub fn get_database_url(url_in: Option<String>) -> anyhow::Result<String> {

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "1d2d398b753667cb97ca27b7968542f79d0eab88bbcb56727d702f4217babd2d"
+}

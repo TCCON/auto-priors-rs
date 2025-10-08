@@ -1,0 +1,47 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT date,GROUP_CONCAT(DISTINCT site_id SEPARATOR \",\") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR \",\") AS ids FROM v_StdSiteJobs WHERE state = ? GROUP BY date;",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "date",
+        "type_info": {
+          "type": "Date",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "site_ids",
+        "type_info": {
+          "type": "Blob",
+          "flags": "",
+          "char_set": 224,
+          "max_size": 16777216
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ids",
+        "type_info": {
+          "type": "Blob",
+          "flags": "",
+          "char_set": 224,
+          "max_size": 16777216
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "44ee89f849d2b5cbeb2b67428f6c98c303fd373fb764ebfd8b3afc20754ff4d5"
+}

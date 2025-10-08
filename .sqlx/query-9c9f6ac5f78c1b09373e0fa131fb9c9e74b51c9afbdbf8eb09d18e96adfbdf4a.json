@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM StdSiteList",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "9c9f6ac5f78c1b09373e0fa131fb9c9e74b51c9afbdbf8eb09d18e96adfbdf4a"
+}

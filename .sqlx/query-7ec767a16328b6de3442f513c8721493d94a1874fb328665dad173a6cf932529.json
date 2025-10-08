@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO auth_prior_user_permissions(user_id, perm_id) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "7ec767a16328b6de3442f513c8721493d94a1874fb328665dad173a6cf932529"
+}

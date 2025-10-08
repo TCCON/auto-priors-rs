@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT COUNT(filedate) as count FROM MetFiles\n               WHERE DATE(filedate) = ? and levels = ? AND data_type = ? AND product = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "char_set": 63,
+          "max_size": 21
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1eb3206b52b0cafebcc1d08ab3929efda83c31ad3bae41fce13a934f52ee983a"
+}

@@ -24,6 +24,8 @@ Now rewritten in Rust!
     - Enter the MySQL prompt with `mysql` at the terminal. (Linux users may need to do `sudo mysql` to access it as root.)
     - Create the 'tccon' user with `CREATE USER 'tccon'@'localhost' IDENTIFIED BY '*****';` - replace the `*`s with a real password.
     - Grant all permissions to the 'tccon' user on the 'priors' database with `GRANT ALL PRIVILEGES ON 'priors'.* TO 'tccon'@'localhost';`. If you get an error about the 'priors' database not existing, create it first with `CREATE DATABASE 'priors';`
+    - To work with the web app, this assumes that you have the Django site status/metadata portal database on the same server.
+      Grant the same user read access to those databases with ``GRANT SELECT ON `djopstat`.* TO `tccon`@`localhost` ``.
 4. Ensure you have the `sqlx-cli` Cargo extension installed and set up to work with MySQL.
     - Run `cargo sqlx --help`, if that produces an error, you need to install it
     - To install, run `cargo install sqlx-cli --features native-tls,mysql`. (This will install it with support for only MySQL databases, which avoids errors from SqLite or Postgress libraries not being installed. See the [sqlx-cli docs](https://crates.io/crates/sqlx-cli) if you want to include support for other database types.)
@@ -34,7 +36,9 @@ Now rewritten in Rust!
 DATABASE_URL="mysql://tccon:****@localhost/priors"
 ```
 
-7. Initialize the database. From the repo root, run `cargo sqlx database create` then `cargo sqlx migrate run --source core-orm/migrations/`. 
+7. Initialize the database. From the repo root, run `cargo sqlx database create` then `cargo sqlx migrate run --source core-orm/migrations/`.
+    - The `database create` command may fail if the user specified in the `DATABASE_URL` does not have database creation privileges.
+    - In that case, you can create the database manually from within `mysql` with `CREATE DATABASE priors` using a root or administrator account.
 8. Compile the project; from the repo root, run `cargo build`. If successful, the `tccon-priors-cli` and `tccon-priors-service` executables will be produced in `./target/debug`.
 9. Create a default configuration file. Assuming you want the file written to `auto-priors.toml`, the command to run from the repo root is `./target/debug/tccon-priors-cli config gen auto-priors.toml`. Modify this file as needed.
 10. Add the path to your new config file to the `.env` file. Assuming the config file created in step 9 is at the path `/home/tccon/auto-priors-rs/auto-priors.toml`, add the following line to the `.env` file:

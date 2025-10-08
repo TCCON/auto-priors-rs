@@ -3915,6 +3915,7 @@ dependencies = [
  "strum",
  "tabled",
  "tar",
+ "tempdir",
  "testcontainers-modules",
  "thiserror 1.0.69",
  "tokio",

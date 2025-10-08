@@ -9,6 +9,7 @@ axum-login = "0.18.0"
 base64 = "0.22"
 chrono = "0.4"
 clap = { version = "3.2", features = ["derive", "cargo"] }
+djangohashers = "1.7.3"
 dotenv = "0.15.0"
 env_logger = "0.9"
 glob = "0.3"
@@ -25,6 +26,7 @@ sqlx = { version = "0.7", features = [
 ] }
 strum = { version = "0.27", features = ["derive"] }
 tabled = "0.14.0"
+tempdir = "0.3"
 testcontainers-modules = { version = "0.6.1", features = [
     "mariadb",
     "blocking",

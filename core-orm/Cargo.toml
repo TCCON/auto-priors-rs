@@ -10,7 +10,7 @@ async-trait.workspace = true
 axum-login.workspace = true
 base64.workspace = true
 chrono = { workspace = true, features = ["serde"] }
-djangohashers = "1.7.3"
+djangohashers.workspace = true
 dotenv.workspace = true
 futures = "0.3"
 glob.workspace = true
@@ -30,6 +30,7 @@ toml = "0.8"                                       #"0.5"
 url.workspace = true
 utoipa.workspace = true
 tabled.workspace = true
+tempdir.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 whoami = "1.5.1"
@@ -38,6 +39,7 @@ flate2 = "1.0.26"
 
 # Dependencies for shared testing utils
 testcontainers-modules = { workspace = true, optional = true }
+
 
 [features]
 container-tests = ["dep:testcontainers-modules"]
