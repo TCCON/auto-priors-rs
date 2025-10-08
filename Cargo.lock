@@ -4784,6 +4784,7 @@ dependencies = [
  "axum-login",
  "base64 0.22.1",
  "chrono",
+ "djangohashers",
  "env_logger 0.9.3",
  "itertools",
  "jsonwebtoken",
