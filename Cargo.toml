@@ -9,6 +9,7 @@ axum-login = "0.18.0"
 base64 = "0.22"
 chrono = "0.4"
 clap = { version = "3.2", features = ["derive", "cargo"] }
+djangohashers = "1.7.3"
 dotenv = "0.15.0"
 env_logger = "0.9"
 glob = "0.3"
