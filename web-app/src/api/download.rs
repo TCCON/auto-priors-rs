@@ -79,11 +79,9 @@ pub(crate) mod get {
 
     /// Return a .tgz file with job output to the user.
     ///
-    /// # Success
-    /// Returns a response containing the file stream
+    /// _Success_: Returns a response containing the file stream
     ///
-    /// # Failure
-    /// Returns the following status codes on failure:
+    /// _Failure_: Returns the following status codes on failure:
     /// - `BAD_REQUEST` (400) is returned if:
     ///     1. the job requested could not be found or an error occurred,
     ///        assuming that the issue is that the job ID was not in the database, or
@@ -158,11 +156,9 @@ pub(crate) mod get {
 
     /// Return a .tgz file with standard site output to the user.
     ///
-    /// # Success
-    /// Returns a response containing the file stream
+    /// _Success_: Returns a response containing the file stream
     ///
-    /// # Failure
-    /// Returns the following status codes on failure:
+    /// _Failure_: Returns the following status codes on failure:
     /// - `BAD_REQUEST` (400) is returned if there if there is no entry in the standard site job table
     ///   for the given site ID and date
     /// - `NO_CONTENT` (204) is returned if the tarfile field in the database was null. This usually means

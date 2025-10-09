@@ -137,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
         .with_state(shared_state)
         .nest_service("/static", static_server);
 
-    info!("Will serve priors website from {address}");
+    info!("Will serve priors website from http://{address}");
     let listener = tokio::net::TcpListener::bind(address).await?;
     axum::serve(listener, app).await?;
 
@@ -189,12 +189,11 @@ fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
     let (download_routes, api) = utoipa_axum::router::OpenApiRouter::with_openapi(api)
         .routes(routes!(api::download::get::download_job_output))
         .routes(routes!(api::download::get::download_std_site_output))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            api_has_download_perm,
+        ))
         .split_for_parts();
-
-    let download_routes = download_routes.route_layer(axum::middleware::from_fn_with_state(
-        state.clone(),
-        api_has_download_perm,
-    ));
 
     let doc_routes = api::documentation::DocAllEndpointBuilder::new(api)
         .json_url("/api/v1/docs/json")

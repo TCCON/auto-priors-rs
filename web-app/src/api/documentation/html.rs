@@ -105,7 +105,7 @@ struct DocEndpoint<'o> {
     group: &'o str,
     endpoint_name: &'o str,
     url: &'o str,
-    description: Cow<'o, str>,
+    description: String,
     request_type: axum::http::method::Method,
     request_body: Option<String>,
     code_examples: Vec<(String, String)>,
@@ -164,8 +164,10 @@ impl<'o> DocEndpoint<'o> {
             (None, None) => Cow::Borrowed(""),
             (None, Some(desc)) => Cow::Borrowed(desc),
             (Some(summ), None) => Cow::Borrowed(summ),
-            (Some(summ), Some(desc)) => Cow::Owned(format!("<p>{summ}</p><p>{desc}</p>")),
+            (Some(summ), Some(desc)) => Cow::Owned(format!("{summ}\n\n{desc}")),
         };
+
+        let description = markdown::to_html(&description);
 
         // TODO: get the request body and output out of the schema
         let code_examples = examples.make_examples(&request_type, url, None);
