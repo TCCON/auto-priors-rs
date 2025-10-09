@@ -108,6 +108,7 @@ struct DocEndpoint<'o> {
     description: String,
     request_type: axum::http::method::Method,
     request_body: Option<String>,
+    parameters: Option<&'o [utoipa::openapi::path::Parameter]>,
     code_examples: Vec<(String, String)>,
     output: String,
 }
@@ -179,9 +180,22 @@ impl<'o> DocEndpoint<'o> {
             description,
             request_type,
             request_body: None,
+            parameters: operation.parameters.as_deref(),
             code_examples,
             output: "".to_string(),
         }
+    }
+}
+
+/// Helper function for templates to check if a parameter is required
+///
+/// The `p.required` field is not a simple boolean, so templates cannot
+/// use it in `{% if ... %}` checks. Instead, they can call this function
+/// as `self::param_required(param)`.
+fn param_required(p: &utoipa::openapi::path::Parameter) -> bool {
+    match p.required {
+        utoipa::openapi::Required::True => true,
+        utoipa::openapi::Required::False => false,
     }
 }
 

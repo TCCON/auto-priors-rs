@@ -1,7 +1,17 @@
 <h3 id="{{ group }}-{{ endpoint_name }}">{{ endpoint_name }}</h3>
 
 <p><b>URL:</b> {{ url }}</p>
-<p><b>URL parameters:</b> TODO</p>
+<p><b>URL parameters:</b> {% if parameters.is_none() %} None {% endif %}</p>
+{% if let Some(params) = parameters %}
+<ul>
+    {% for param in params %}
+    <li>
+        <i>{{ param.name }}</i> {% if self::param_required(param) %}(required){% else %}(optional){% endif %}:
+        {{ param.description.as_deref().unwrap_or_default() }}
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}
 <p><b>Description:</b> {{ description|safe }}</p>
 <p><b>Request type:</b> {{ request_type }}</p>
 <p><b>Request body:</b>{% if let Some(body) = request_body %} {{ body }} {% else %} Nothing {% endif %}</p>
