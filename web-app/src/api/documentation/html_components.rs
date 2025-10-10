@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use askama::Template;
-use utoipa::openapi::{request_body::RequestBody, Array, Object, OneOf, RefOr, Schema};
+use utoipa::openapi::{request_body::RequestBody, Array, Object, OneOf, RefOr, Response, Schema};
 
 /// How long the description of a component should be in the API page
 #[derive(Debug, Clone, Copy)]
@@ -29,6 +29,18 @@ impl<'o> HtmlRefOrSchema<'o> {
 }
 
 #[derive(Template)]
+#[template(path = "docs/ref-or-response.html")]
+pub(super) struct HtmlRefOrResponse<'o> {
+    inner: &'o RefOr<Response>,
+}
+
+impl<'o> HtmlRefOrResponse<'o> {
+    pub(crate) fn new(inner: &'o RefOr<Response>) -> Self {
+        Self { inner }
+    }
+}
+
+#[derive(Template)]
 #[template(path = "docs/component-schema.html")]
 pub(super) enum HtmlSchema<'o> {
     Array(HtmlArraySchema<'o>),
@@ -43,16 +55,28 @@ impl<'o> HtmlSchema<'o> {
             Schema::Array(array) => Self::Array(HtmlArraySchema { array, length }),
             Schema::Object(obj) => Self::Object(HtmlObjectSchema { obj, length }),
             Schema::OneOf(one_of) => Self::OneOf(HtmlOneOfSchema { one_of, length }),
-            Schema::AllOf(all_of) => Self::Unknown(HtmlUnknownSchema {
+            Schema::AllOf(_all_of) => Self::Unknown(HtmlUnknownSchema {
                 type_descr: "all_of",
             }),
-            Schema::AnyOf(any_of) => Self::Unknown(HtmlUnknownSchema {
+            Schema::AnyOf(_any_of) => Self::Unknown(HtmlUnknownSchema {
                 type_descr: "any_of",
             }),
             _ => Self::Unknown(HtmlUnknownSchema {
                 type_descr: "UNDEFINED",
             }),
         }
+    }
+}
+
+#[derive(Template)]
+#[template(path = "docs/response.html")]
+pub(super) struct HtmlResponse<'o> {
+    inner: &'o Response,
+}
+
+impl<'o> HtmlResponse<'o> {
+    pub(super) fn new(inner: &'o Response) -> Self {
+        Self { inner }
     }
 }
 

@@ -4,7 +4,7 @@
 # variables in the data, remember that most shells do not expand variables inside
 # single-quoted strings!
 
-curl {{ url }}
+curl {{ url }} \
 --request POST \
 --header "Authorization: Bearer $(cat ~/.priors-api-key)" \
 --header "Content-Type: application/json" \

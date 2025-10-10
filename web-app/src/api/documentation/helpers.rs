@@ -1,6 +1,10 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
+use utoipa::openapi::{
+    example::{self, Example},
+    Content,
+};
 
 /// Helper function for templates to check if a parameter is required
 ///

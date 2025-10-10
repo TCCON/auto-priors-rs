@@ -7,7 +7,7 @@ with open(Path("~/.priors-api-key").expanduser()) as f:
 
 headers = {"Authorization": f"Bearer {jwt}"}
 input_dict = {{ request_body }}
-result = requests.post({{ url }}, json=input_dict, headers=headers)
+result = requests.post('{{ url }}', json=input_dict, headers=headers)
 
 # result will have the JSON string returned as the .text attribute,
 # it can be transformed into a dict with the .json() method.

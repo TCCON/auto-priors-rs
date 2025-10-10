@@ -28,7 +28,8 @@ pub(crate) mod post {
         path = "/api/v1/jobs/submit",
         responses(
             (status = StatusCode::OK, description = "Job submitted successfully", body = super::ApiJobRequestResponse, example = json!({"successful": true, "job_ids": [1], "error_reason": null})),
-            (status = StatusCode::BAD_REQUEST, description = "The submission could not be processed due to incorrect parameters", body = super::ApiJobRequestResponse),
+            (status = StatusCode::BAD_REQUEST, description = "The submission could not be processed due to incorrect parameters", body = super::ApiJobRequestResponse, example = json!({"successful":false,"job_ids":null,"error_reason":"No sites/locations specified"})),
+            (status = StatusCode::UNPROCESSABLE_ENTITY, description = "The submission could not be processed likely because the JSON request was incorrect in some way"),
             (status = StatusCode::INTERNAL_SERVER_ERROR, description = "The submission could not be processed due to an internal server error", body = super::ApiJobRequestResponse)
         ),
         request_body(

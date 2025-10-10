@@ -1,0 +1,10 @@
+{{ inner.description }}
+
+{% for (content_type, content) in inner.content %}
+{% if let Some(example_value) = content.example %}
+<details>
+    <summary>Example: {{ content_type }}</summary>
+    <pre class="code-box">{{ serde_json::to_string_pretty(example_value)? }}</pre>
+</details>
+{% endif %}
+{% endfor %}

@@ -126,6 +126,7 @@ struct DocEndpoint<'o> {
     description: String,
     request_type: axum::http::method::Method,
     request_body: Option<&'o utoipa::openapi::request_body::RequestBody>,
+    responses: &'o BTreeMap<String, RefOr<utoipa::openapi::response::Response>>,
     parameters: Option<&'o [utoipa::openapi::path::Parameter]>,
     code_examples: BTreeMap<&'static str, String>,
     output: String,
@@ -189,7 +190,6 @@ impl<'o> DocEndpoint<'o> {
         let description = markdown::to_html(&description);
 
         let request_body = operation.request_body.as_ref();
-        // TODO: get the request body and output out of the schema
 
         Self {
             group,
@@ -198,6 +198,7 @@ impl<'o> DocEndpoint<'o> {
             description,
             request_type,
             request_body: request_body,
+            responses: &operation.responses.responses,
             parameters: operation.parameters.as_deref(),
             code_examples,
             output: "".to_string(),
