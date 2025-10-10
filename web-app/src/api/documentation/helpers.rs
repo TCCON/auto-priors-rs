@@ -78,7 +78,7 @@ pub(crate) fn reference_name(reference: &str) -> &str {
 ///   each successive nested value will be indented by `n`.
 pub(super) fn json_to_python<W: std::fmt::Write>(
     writer: &mut W,
-    value: serde_json::Value,
+    value: &serde_json::Value,
     indent: Option<usize>,
 ) -> std::fmt::Result {
     json_to_python_inner(writer, value, indent, 0, true)
@@ -94,7 +94,7 @@ pub(super) fn json_to_python<W: std::fmt::Write>(
 /// key in a dict.
 fn json_to_python_inner<W: std::fmt::Write>(
     writer: &mut W,
-    value: serde_json::Value,
+    value: &serde_json::Value,
     pretty_indent: Option<usize>,
     mut curr_indent: usize,
     insert_first_indent: bool,
@@ -110,7 +110,7 @@ fn json_to_python_inner<W: std::fmt::Write>(
     match value {
         serde_json::Value::Null => write!(writer, "None")?,
         serde_json::Value::Bool(b) => {
-            if b {
+            if *b {
                 write!(writer, "True")?
             } else {
                 write!(writer, "False")?
@@ -129,7 +129,7 @@ fn json_to_python_inner<W: std::fmt::Write>(
 
 fn write_values<W: std::fmt::Write>(
     writer: &mut W,
-    values: Vec<serde_json::Value>,
+    values: &[serde_json::Value],
     pretty_indent: Option<usize>,
     curr_indent: usize,
 ) -> std::fmt::Result {
@@ -168,7 +168,7 @@ fn write_values<W: std::fmt::Write>(
 
 fn write_map<W: std::fmt::Write>(
     writer: &mut W,
-    map: serde_json::Map<String, serde_json::Value>,
+    map: &serde_json::Map<String, serde_json::Value>,
     pretty_indent: Option<usize>,
     curr_indent: usize,
 ) -> std::fmt::Result {
@@ -213,7 +213,7 @@ fn write_map<W: std::fmt::Write>(
     Ok(())
 }
 
-fn write_string<W: std::fmt::Write>(writer: &mut W, s: String) -> std::fmt::Result {
+fn write_string<W: std::fmt::Write>(writer: &mut W, s: &str) -> std::fmt::Result {
     let has_sq = s.contains("'");
     let has_dq = s.contains('"');
 
@@ -240,7 +240,7 @@ mod tests {
         let mut py_s = String::new();
         json_to_python(
             &mut py_s,
-            serde_json::Value::String("It's me!".to_string()),
+            &serde_json::Value::String("It's me!".to_string()),
             None,
         )
         .unwrap();
@@ -252,7 +252,7 @@ mod tests {
         let mut py_s = String::new();
         json_to_python(
             &mut py_s,
-            serde_json::Value::String(r#"I said, "It's me!""#.to_string()),
+            &serde_json::Value::String(r#"I said, "It's me!""#.to_string()),
             None,
         )
         .unwrap();
@@ -263,7 +263,7 @@ mod tests {
     fn test_list() {
         let val = json!([true, false, null]);
         let mut py_s = String::new();
-        json_to_python(&mut py_s, val, None).unwrap();
+        json_to_python(&mut py_s, &val, None).unwrap();
         assert_eq!(py_s, "[True, False, None]");
     }
 
@@ -271,7 +271,7 @@ mod tests {
     fn test_pretty_list() {
         let val = json!([true, false, null]);
         let mut py_s = String::new();
-        json_to_python(&mut py_s, val, Some(2)).unwrap();
+        json_to_python(&mut py_s, &val, Some(2)).unwrap();
         assert_eq!(py_s, "[\n  True,\n  False,\n  None\n]");
     }
 
@@ -279,7 +279,7 @@ mod tests {
     fn test_map() {
         let val = json!({"a": 1, "b": true, "c": null});
         let mut py_s = String::new();
-        json_to_python(&mut py_s, val, None).unwrap();
+        json_to_python(&mut py_s, &val, None).unwrap();
         assert_eq!(py_s, "{'a': 1, 'b': True, 'c': None}");
     }
 
@@ -287,7 +287,7 @@ mod tests {
     fn test_pretty_map() {
         let val = json!({"a": 1, "b": true, "c": null});
         let mut py_s = String::new();
-        json_to_python(&mut py_s, val, Some(2)).unwrap();
+        json_to_python(&mut py_s, &val, Some(2)).unwrap();
         assert_eq!(py_s, "{\n  'a': 1,\n  'b': True,\n  'c': None\n}");
     }
 
@@ -295,7 +295,7 @@ mod tests {
     fn test_nested_maps() {
         let val = json!({"sites": [{"id": "aa"}, {"id": "bb"}]});
         let mut py_s = String::new();
-        json_to_python(&mut py_s, val, Some(2)).unwrap();
+        json_to_python(&mut py_s, &val, Some(2)).unwrap();
         let expected = r#"{
   'sites': [
     {

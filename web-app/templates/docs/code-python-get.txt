@@ -1,0 +1,9 @@
+from pathlib import Path
+import requests
+
+with open(Path("~/.priors-api-key").expanduser()) as f:
+    # .strip() ensures no training newline, which can cause invalid header errors
+    jwt = f.read().strip()
+
+headers = {"Authorization": f"Bearer {jwt}"}
+result = requests.get("{{ url }}", headers=headers)

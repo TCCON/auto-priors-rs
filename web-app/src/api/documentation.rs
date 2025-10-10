@@ -10,6 +10,7 @@ use crate::{server_error, AppState, AppStateRef};
 
 mod helpers;
 mod html;
+mod html_code_examples;
 mod html_components;
 
 pub(crate) struct DocAllEndpoints {

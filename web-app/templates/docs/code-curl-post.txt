@@ -1,0 +1,11 @@
+# We wrap the data argument in single quotes because the JSON string must use
+# double-quoted strings; therefore, putting the JSON string inside single quotes
+# saves us from needing to escape those double quotes. If you need to use shell
+# variables in the data, remember that most shells do not expand variables inside
+# single-quoted strings!
+
+curl {{ url }}
+--request POST \
+--header "Authorization: Bearer $(cat ~/.priors-api-key)" \
+--header "Content-Type: application/json" \
+--data '{{ request_body }}'

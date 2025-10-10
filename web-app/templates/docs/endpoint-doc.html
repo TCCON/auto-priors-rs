@@ -23,10 +23,10 @@
     {% endif %}
 </p>
 <p><b>Examples:</b></p>
-{% for example in code_examples %}
+{% for (language, example) in code_examples %}
 <details>
-    <summary>{{ example.0 }}:</summary>
-    <pre class="code-box">{{ example.1 }}</div>
+    <summary>{{ language }}:</summary>
+    <pre class="code-box">{{ example }}</pre>
 </details>
 {% endfor %}
 <details>
