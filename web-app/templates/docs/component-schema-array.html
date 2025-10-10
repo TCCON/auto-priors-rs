@@ -5,11 +5,11 @@
 {{ markdown::to_html(desc)|safe }}
 {% endif %}
 
-<p>Type: array of items of {{ items_type()?|safe|lowercase }}</p>
+<p>Type: array of items of {{ items_type()?|safe }}</p>
 
 {% when DisplayLength::Short %}
 
-array of items of {{ items_type()?|safe|lowercase }}
+array of items of {{ items_type()?|safe }}
 
 {% when DisplayLength::Minimal %}
 

@@ -52,6 +52,23 @@ pub(crate) fn comp_schema_id(name: &str) -> String {
     format!("comp-schema-{name}")
 }
 
+pub(crate) fn reference_id(reference: &str) -> askama::Result<String> {
+    if reference.starts_with("#/components/schemas/") {
+        let name = reference.split('/').last().ok_or_else(|| {
+            askama::Error::custom(format!("No component name in reference: {reference}"))
+        })?;
+        Ok(comp_schema_id(name))
+    } else {
+        Err(askama::Error::custom(format!(
+            "Prefix of reference not implemented: {reference}"
+        )))
+    }
+}
+
+pub(crate) fn reference_name(reference: &str) -> &str {
+    reference.split('/').last().unwrap_or(reference)
+}
+
 /// Write a [`serde_json::Value`] as a Python string - bool, int, float, None, list, or dict.
 ///
 /// # Parameter

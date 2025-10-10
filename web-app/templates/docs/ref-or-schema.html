@@ -1,6 +1,8 @@
 {% match inner %}
 {% when utoipa::openapi::RefOr::Ref(r) %}
-TODO: ref
+{% let rid = crate::api::documentation::helpers::reference_id(&r.ref_location)? %}
+{% let rname = crate::api::documentation::helpers::reference_name(&r.ref_location) %}
+<a href="#{{ rid }}">{{ rname }}</a>
 {% when utoipa::openapi::RefOr::T(t) %}
 {{ crate::api::documentation::html_components::HtmlSchema::new(t, *length)|safe }}
 {% endmatch %}

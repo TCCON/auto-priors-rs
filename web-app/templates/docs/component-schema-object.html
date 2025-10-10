@@ -47,8 +47,8 @@ line. #}
 , with fields:
 {% for (name, prop) in obj.properties %}
 {% let type_desc = crate::api::documentation::html_components::HtmlRefOrSchema::new(prop,
-self::DisplayLength::Minimal).render()? %}
-{{ name }} ({{ type_desc|safe }})
+self::DisplayLength::Minimal) %}
+{{ name }} ({{ type_desc.render()?|safe }})
 {% if loop.last %}.{% else %}, {% endif %}
 {% endfor %}
 {% endif %}

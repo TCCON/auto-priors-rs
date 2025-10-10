@@ -8,7 +8,8 @@
 <p>One of the following:</p>
 <ul>
     {% for item in one_of.items %}
-    <li>{{ crate::api::documentation::html_components::HtmlRefOrSchema::new(item, DisplayLength::Short).render()? }}
+    <li>{{ crate::api::documentation::html_components::HtmlRefOrSchema::new(item, DisplayLength::Short).render()?|safe
+        }}
     </li>
     {% endfor %}
 </ul>
@@ -17,7 +18,7 @@
 
 one of:
 {% for item in one_of.items -%}
-{{ crate::api::documentation::html_components::HtmlRefOrSchema::new(item, DisplayLength::Minimal).render()?|capitalize
+{{ crate::api::documentation::html_components::HtmlRefOrSchema::new(item, DisplayLength::Minimal).render()?|safe
 }}
 {% if !loop.last %}
 or
