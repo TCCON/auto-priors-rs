@@ -5,14 +5,18 @@
     <h1>{{ Self::subtitle(self) }}</h1>
 
     <ul>
-        {% for (groupkey, group) in endpoints %}
-        <li><a href="#{{ groupkey }}">{{ groupkey|capitalize }} endpoints</a></li>
+        <li>API endpoints:</li>
         <ul>
-            {% for endpt in group %}
-            <li><a href="#{{ groupkey }}-{{ endpt.endpoint_name }}">{{ endpt.endpoint_name }}</a></li>
+            {% for (groupkey, group) in endpoints %}
+            <li><a href="#{{ groupkey }}">{{ groupkey|capitalize }} endpoints</a></li>
+            <ul>
+                {% for endpt in group %}
+                <li><a href="#{{ groupkey }}-{{ endpt.endpoint_name }}">{{ endpt.endpoint_name }}</a></li>
+                {% endfor %}
+            </ul>
             {% endfor %}
         </ul>
-        {% endfor %}
+        <li>API data types:</li>
     </ul>
 
     <h2 id="authenticating">Authenticating</h2>
@@ -39,5 +43,13 @@
     {{ endpt|safe }}
     {% endfor %}
     {% endfor %}
+
+
+    <h2>Data types:</h2>
+    {% for (name, schema) in schemas %}
+    <h3 id="{{ crate::api::documentation::helpers::comp_schema_id(name) }}">{{ name }}</h2>
+        {{ schema|safe }}
+        {% endfor %}
+
 </div>
 {% endblock content %}

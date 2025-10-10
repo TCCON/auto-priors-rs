@@ -8,8 +8,10 @@ use orm::auth::AuthSession;
 
 use crate::{server_error, AppState, AppStateRef};
 
+mod filters;
 mod helpers;
 mod html;
+mod html_components;
 
 pub(crate) struct DocAllEndpoints {
     api: utoipa::openapi::OpenApi,

@@ -6,7 +6,8 @@
 <ul>
     {% for param in params %}
     <li>
-        <i>{{ param.name }}</i> {% if self::param_required(param) %}(required){% else %}(optional){% endif %}:
+        <i>{{ param.name }}</i> {% if crate::api::documentation::helpers::param_required(param) %}(required){% else
+        %}(optional){% endif %}:
         {{ param.description.as_deref().unwrap_or_default() }}
     </li>
     {% endfor %}

@@ -1,4 +1,56 @@
+use std::borrow::Cow;
+
 use itertools::Itertools;
+
+/// Helper function for templates to check if a parameter is required
+///
+/// The `p.required` field is not a simple boolean, so templates cannot
+/// use it in `{% if ... %}` checks. Instead, they can call this function
+/// as `self::param_required(param)`.
+pub(crate) fn param_required(p: &utoipa::openapi::path::Parameter) -> bool {
+    match p.required {
+        utoipa::openapi::Required::True => true,
+        utoipa::openapi::Required::False => false,
+    }
+}
+
+pub(crate) fn fmt_string(f: &utoipa::openapi::schema::SchemaFormat) -> Cow<'_, str> {
+    match f {
+        utoipa::openapi::SchemaFormat::KnownFormat(known_format) => {
+            serde_json::to_string(known_format)
+                .map(|s| Cow::Owned(s.trim_matches('"').to_string()))
+                .unwrap_or(Cow::Borrowed("UNKNOWN FORMAT"))
+        }
+        utoipa::openapi::SchemaFormat::Custom(s) => Cow::Borrowed(s.as_str()),
+    }
+}
+
+pub(crate) fn schema_type_string(t: &utoipa::openapi::schema::SchemaType) -> Cow<'static, str> {
+    fn inner_type_string(ti: &utoipa::openapi::schema::Type) -> &'static str {
+        match ti {
+            utoipa::openapi::Type::Object => "object",
+            utoipa::openapi::Type::String => "string",
+            utoipa::openapi::Type::Integer => "integer",
+            utoipa::openapi::Type::Number => "real number",
+            utoipa::openapi::Type::Boolean => "boolean (<code>true</code> or <code>false</code>)",
+            utoipa::openapi::Type::Array => "array",
+            utoipa::openapi::Type::Null => "null",
+        }
+    }
+
+    match t {
+        utoipa::openapi::schema::SchemaType::Type(inner) => Cow::Borrowed(inner_type_string(inner)),
+        utoipa::openapi::schema::SchemaType::Array(items) => {
+            let s = items.iter().map(|i| inner_type_string(i)).join(" or ");
+            Cow::Owned(s)
+        }
+        utoipa::openapi::schema::SchemaType::AnyValue => Cow::Borrowed("any"),
+    }
+}
+
+pub(crate) fn comp_schema_id(name: &str) -> String {
+    format!("comp-schema-{name}")
+}
 
 /// Write a [`serde_json::Value`] as a Python string - bool, int, float, None, list, or dict.
 ///

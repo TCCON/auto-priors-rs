@@ -1,0 +1,31 @@
+{% match length %}
+{% when DisplayLength::Full %}
+
+{% if let Some(desc) = one_of.description %}
+{{ markdown::to_html(desc)|safe }}
+{% endif %}
+
+<p>One of the following:</p>
+<ul>
+    {% for item in one_of.items %}
+    <li>{{ crate::api::documentation::html_components::HtmlRefOrSchema::new(item, DisplayLength::Short).render()? }}
+    </li>
+    {% endfor %}
+</ul>
+
+{% when DisplayLength::Short %}
+
+one of:
+{% for item in one_of.items -%}
+{{ crate::api::documentation::html_components::HtmlRefOrSchema::new(item, DisplayLength::Minimal).render()?|capitalize
+}}
+{% if !loop.last %}
+or
+{% endif %}
+{% endfor %}
+
+{% else %}
+
+various
+
+{% endmatch %}

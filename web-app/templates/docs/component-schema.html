@@ -1,0 +1,11 @@
+{% match self %}
+{% when Self::Array(inner) %}
+{{ inner|safe }}
+{% when Self::Object(inner) %}
+{{ inner|safe }}
+{% when Self::OneOf(inner) %}
+{{ inner|safe }}
+{% when Self::Unknown(inner) %}
+{{ inner|safe }}
+{% else %}
+{% endmatch %}

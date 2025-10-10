@@ -42,6 +42,7 @@ impl utoipa::PartialSchema for TgzFileStream {
             .format(Some(SchemaFormat::KnownFormat(
                 utoipa::openapi::KnownFormat::Binary,
             )))
+            .description(Some("A gzipped .tar file"))
             .build();
 
         utoipa::openapi::RefOr::T(Schema::Object(binary_string))

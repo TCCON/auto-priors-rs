@@ -1,0 +1,6 @@
+{% match inner %}
+{% when utoipa::openapi::RefOr::Ref(r) %}
+TODO: ref
+{% when utoipa::openapi::RefOr::T(t) %}
+{{ crate::api::documentation::html_components::HtmlSchema::new(t, *length)|safe }}
+{% endmatch %}

@@ -1,0 +1,65 @@
+{% match length %}
+{% when DisplayLength::Full %}
+
+{# For the full display, we want to include as much information as possible structured as lists or paragraphs. #}
+
+{% if let Some(desc) = obj.description %}
+{{ markdown::to_html(desc)|safe }}
+{% endif %}
+<p>
+    Type:
+    {{ crate::api::documentation::helpers::schema_type_string(obj.schema_type)|safe -}}
+    {%- if let Some(fmt) = obj.format -%}
+    , in {{ crate::api::documentation::helpers::fmt_string(fmt) }} format.
+    {%- else -%}
+    .
+    {% endif %}
+</p>
+
+{% if let Some(variants) = obj.enum_values %}
+<p>Allowed values: {% for v in variants %}{{ v|safe }}{% if loop.last %}.{% else %}, {% endif %}{% endfor %}</p>
+{% endif %}
+{% if !obj.properties.is_empty() %}
+<p>Fields:</p>
+<ul>
+    {% for (name, prop) in obj.properties %}
+    <li><i>{{ name }}</i>: {{
+        crate::api::documentation::html_components::HtmlRefOrSchema::new(prop,
+        self::DisplayLength::Short).render()?|safe }}
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+{% when DisplayLength::Short %}
+
+{# For the short display, we try to given enough information for people to understand what this is but still fit on one
+line. #}
+
+{{ crate::api::documentation::helpers::schema_type_string(obj.schema_type)|safe -}}
+{%- if let Some(fmt) = obj.format -%}
+, in {{ crate::api::documentation::helpers::fmt_string(fmt) }} format
+{%- endif -%}
+{%- if let Some(variants) = obj.enum_values -%}
+, allowed values: {% for v in variants %}{{ v|safe }}{% if loop.last %}.{% else %}, {% endif %}{% endfor %}
+{%- endif -%}
+{%- if !obj.properties.is_empty() -%}
+, with fields:
+{% for (name, prop) in obj.properties %}
+{% let type_desc = crate::api::documentation::html_components::HtmlRefOrSchema::new(prop,
+self::DisplayLength::Minimal).render()? %}
+{{ name }} ({{ type_desc|safe }})
+{% if loop.last %}.{% else %}, {% endif %}
+{% endfor %}
+{% endif %}
+
+{% when DisplayLength::Minimal %}
+
+{# Here, we assume we're trying to fit within a line for another type, so really minimize things #}
+
+{{ crate::api::documentation::helpers::schema_type_string(obj.schema_type)|safe -}}
+{%- if let Some(fmt) = obj.format -%}
+({{ crate::api::documentation::helpers::fmt_string(fmt) }} format)
+{% endif %}
+
+{% endmatch %}

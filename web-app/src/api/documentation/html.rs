@@ -1,10 +1,17 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+};
 
 use askama::Template;
 use itertools::Itertools;
 use orm::auth::User;
+use utoipa::openapi::RefOr;
 
-use crate::templates_common::{BaseContext, ContextWithSidebar};
+use crate::{
+    api::documentation::html_components::HtmlSchema,
+    templates_common::{BaseContext, ContextWithSidebar},
+};
 
 /// The root context for the HTML API documentation
 #[derive(Template)]
@@ -13,6 +20,7 @@ pub(super) struct ApiDocsContext<'o> {
     root_uri: String,
     user: Option<User>,
     endpoints: Vec<(&'o str, Vec<DocEndpoint<'o>>)>,
+    schemas: BTreeMap<&'o str, HtmlSchema<'o>>,
 }
 
 impl<'o> ApiDocsContext<'o> {
@@ -22,11 +30,13 @@ impl<'o> ApiDocsContext<'o> {
         api: &'o utoipa::openapi::OpenApi,
     ) -> Self {
         let endpoints = Self::collect_endpoints(api);
+        let schemas = Self::collect_component_schema(api);
 
         Self {
             root_uri,
             user,
             endpoints,
+            schemas,
         }
     }
 
@@ -44,6 +54,29 @@ impl<'o> ApiDocsContext<'o> {
         let mut endpoints = grouped_endpoints.into_iter().collect_vec();
         endpoints.sort_by_key(|grp| grp.0);
         endpoints
+    }
+
+    fn collect_component_schema(
+        api: &'o utoipa::openapi::OpenApi,
+    ) -> BTreeMap<&'o str, HtmlSchema<'o>> {
+        let mut schema = BTreeMap::new();
+        if let Some(components) = api.components.as_ref() {
+            for (name, comp_schema) in components.schemas.iter() {
+                match comp_schema {
+                    // Because this is for the list of components, we just skip references -
+                    // no point in having a reference in the list. Eventually, we might handle
+                    // this if we refer to an outside schema, but the priors API doesn't do that.
+                    RefOr::Ref(_) => (),
+                    RefOr::T(sch) => {
+                        schema.insert(
+                            name.as_str(),
+                            HtmlSchema::new(sch, super::html_components::DisplayLength::Full),
+                        );
+                    }
+                }
+            }
+        }
+        schema
     }
 }
 
@@ -184,18 +217,6 @@ impl<'o> DocEndpoint<'o> {
             code_examples,
             output: "".to_string(),
         }
-    }
-}
-
-/// Helper function for templates to check if a parameter is required
-///
-/// The `p.required` field is not a simple boolean, so templates cannot
-/// use it in `{% if ... %}` checks. Instead, they can call this function
-/// as `self::param_required(param)`.
-fn param_required(p: &utoipa::openapi::path::Parameter) -> bool {
-    match p.required {
-        utoipa::openapi::Required::True => true,
-        utoipa::openapi::Required::False => false,
     }
 }
 

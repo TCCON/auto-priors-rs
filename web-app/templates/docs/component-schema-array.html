@@ -1,0 +1,18 @@
+{% match length %}
+{% when DisplayLength::Full %}
+
+{% if let Some(desc) = array.description %}
+{{ markdown::to_html(desc)|safe }}
+{% endif %}
+
+<p>Type: array of items of {{ items_type()?|safe|lowercase }}</p>
+
+{% when DisplayLength::Short %}
+
+array of items of {{ items_type()?|safe|lowercase }}
+
+{% when DisplayLength::Minimal %}
+
+array
+
+{% endmatch %}
