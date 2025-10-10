@@ -15,7 +15,13 @@
 {% endif %}
 <p><b>Description:</b> {{ description|safe }}</p>
 <p><b>Request type:</b> {{ request_type }}</p>
-<p><b>Request body:</b>{% if let Some(body) = request_body %} {{ body }} {% else %} Nothing {% endif %}</p>
+<p><b>Request body:</b>
+    {% if let Some(body) = request_body %}
+    {{ crate::api::documentation::html_components::HtmlRequestBody::new(body).render()?|safe }}
+    {% else %}
+    Nothing
+    {% endif %}
+</p>
 <p><b>Examples:</b></p>
 {% for example in code_examples %}
 <details>

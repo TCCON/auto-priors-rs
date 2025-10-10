@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use askama::Template;
-use utoipa::openapi::{Array, Object, OneOf, RefOr, Schema};
+use utoipa::openapi::{request_body::RequestBody, Array, Object, OneOf, RefOr, Schema};
 
 /// How long the description of a component should be in the API page
 #[derive(Debug, Clone, Copy)]
@@ -93,4 +93,16 @@ pub(super) struct HtmlOneOfSchema<'o> {
 #[template(source = "Unknown schema: '{{ type_descr }}'", ext = "html")]
 pub(super) struct HtmlUnknownSchema {
     type_descr: &'static str,
+}
+
+#[derive(Template)]
+#[template(path = "docs/path-request-body.html")]
+pub(super) struct HtmlRequestBody<'o> {
+    body: &'o RequestBody,
+}
+
+impl<'o> HtmlRequestBody<'o> {
+    pub(super) fn new(body: &'o RequestBody) -> Self {
+        Self { body }
+    }
 }

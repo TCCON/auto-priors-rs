@@ -9,7 +9,7 @@ use orm::auth::User;
 use utoipa::openapi::RefOr;
 
 use crate::{
-    api::documentation::html_components::HtmlSchema,
+    api::documentation::html_components::{HtmlRefOrSchema, HtmlSchema},
     templates_common::{BaseContext, ContextWithSidebar},
 };
 
@@ -140,7 +140,7 @@ struct DocEndpoint<'o> {
     url: &'o str,
     description: String,
     request_type: axum::http::method::Method,
-    request_body: Option<String>,
+    request_body: Option<&'o utoipa::openapi::request_body::RequestBody>,
     parameters: Option<&'o [utoipa::openapi::path::Parameter]>,
     code_examples: Vec<(String, String)>,
     output: String,
@@ -203,6 +203,7 @@ impl<'o> DocEndpoint<'o> {
 
         let description = markdown::to_html(&description);
 
+        let request_body = operation.request_body.as_ref();
         // TODO: get the request body and output out of the schema
         let code_examples = examples.make_examples(&request_type, url, None);
 
@@ -212,7 +213,7 @@ impl<'o> DocEndpoint<'o> {
             url,
             description,
             request_type,
-            request_body: None,
+            request_body: request_body,
             parameters: operation.parameters.as_deref(),
             code_examples,
             output: "".to_string(),

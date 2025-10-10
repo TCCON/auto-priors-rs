@@ -1,0 +1,31 @@
+{% if let Some(desc) = body.description %}
+markdown::to_html(desc)|safe
+{% endif %}
+
+
+{% if body.content.len() == 1 %}
+
+{% for (content_type, content) in body.content %}
+{% if let Some(s) = content.schema.as_ref() %}
+Provide a request body in {{content_type}} format, type of {{
+crate::api::documentation::html_components::HtmlRefOrSchema::new(s,crate::api::documentation::html_components::DisplayLength::Short)|safe
+}}
+{% else %}
+Provide a body in {{ content_type }} format.
+{% endif %}
+{% endfor %}
+
+{% elif !body.content.is_empty() %}
+Provide the request body in one of the following formats:
+<ul>
+    {% for (content_type, content) in body.content %}
+    {% if let Some(s) = content.schema.as_ref() %}
+    <li>In {{content_type}} format, type of {{
+        crate::api::documentation::html_components::HtmlRefOrSchema::new(s,crate::api::documentation::html_components::DisplayLength::Short)|safe
+        }}</li>
+    {% else %}
+    <p>Provide a body in {{ content_type }} format.</p>
+    {% endif %}
+    {% endfor %}
+</ul>
+{% endif %}
