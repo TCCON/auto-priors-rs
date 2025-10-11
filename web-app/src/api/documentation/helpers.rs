@@ -95,7 +95,7 @@ pub(crate) fn get_example_values(content: &Content) -> Vec<(&str, &serde_json::V
     }
 
     if let Some(val) = &content.example {
-        return vec![("example", val)];
+        return vec![("", val)];
     }
 
     return vec![];

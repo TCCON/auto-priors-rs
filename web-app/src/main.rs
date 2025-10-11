@@ -145,40 +145,17 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn set_up_api(state: Arc<AppState>) -> Router<Arc<AppState>> {
-    let query_routes = Router::new()
-        .route(
-            "/api/v1/query/check",
-            get(api::check::get::check_api_access),
-        )
-        .route(
-            "/api/v1/query/all-jobs",
-            get(api::query::get::query_all_jobs),
-        )
-        .route(
-            "/api/v1/query/active-jobs",
-            get(api::query::get::query_active_jobs),
-        )
-        .route(
-            "/api/v1/query/job-status/{job_id}",
-            get(api::query::get::query_job),
-        )
+    let (query_routes, api) = utoipa_axum::router::OpenApiRouter::new()
+        .routes(routes!(api::query::get::query_active_jobs))
+        .routes(routes!(api::query::get::query_all_jobs))
+        .routes(routes!(api::query::get::query_job))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api_has_query_perm,
-        ));
+        ))
+        .split_for_parts();
 
-    // let submit_routes = Router::new()
-    //     .route(
-    //         "/api/v1/submit/check",
-    //         get(api::check::get::check_api_access),
-    //     )
-    //     .route("/api/v1/jobs/submit", post(api::jobs::post::submit_job))
-    //     .route_layer(axum::middleware::from_fn_with_state(
-    //         state.clone(),
-    //         api_has_submit_perm,
-    //     ));
-
-    let (submit_routes, api) = utoipa_axum::router::OpenApiRouter::new()
+    let (submit_routes, api) = utoipa_axum::router::OpenApiRouter::with_openapi(api)
         .routes(routes!(api::jobs::post::submit_job))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

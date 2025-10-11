@@ -1,9 +1,10 @@
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::NaiveDate;
 use itertools::Itertools;
 use orm::jobs::{Job, JobState, MapFmt, ModFmt, RequestSite, VmrFmt};
 use serde::{Deserialize, Serialize};
 
 use crate::api::download::download_url_for_job;
+use crate::api::{ApiNaiveDate, ApiNaiveDateTime};
 
 pub(crate) mod get {
     use std::sync::Arc;
@@ -18,13 +19,24 @@ pub(crate) mod get {
     use orm::{auth::User, jobs::Job};
 
     use crate::{
-        api::query::{ApiDisplayJob, JobQueryDates},
+        api::{
+            documentation::json_examples::active_jobs_output_example,
+            query::{ApiDisplayJob, JobQueryDates},
+        },
         server_error, AppState,
     };
 
     /// Endpoint to return all jobs a user has submitted in the past, including ones that have been
     /// cleaned up. It accepts "before" and "after" query parameters to limit by submission time:
     /// e.g., "?after=YYYY-MM-DD"&before=YYYY-MM-DD" - both are optional.
+    #[utoipa::path(
+        get,
+        path = "/api/v1/query/all-jobs",
+        responses(
+            (status = StatusCode::OK, description = "Query succeeded, returns a JSON list with information about each job.", body = Vec<ApiDisplayJob>)
+        ),
+        tag = "query"
+    )]
     pub(crate) async fn query_all_jobs(
         State(state): State<Arc<AppState>>,
         Query(dates): Query<JobQueryDates>,
@@ -47,6 +59,14 @@ pub(crate) mod get {
     /// Endpoint to return jobs a user has submitted in the past, excluding ones that have been
     /// cleaned up. It accepts "before" and "after" query parameters to limit by submission time:
     /// e.g., "?after=YYYY-MM-DD"&before=YYYY-MM-DD" - both are optional.
+    #[utoipa::path(
+        get,
+        path = "/api/v1/query/active-jobs",
+        responses(
+            (status = StatusCode::OK, description = "Query succeeded, returns a JSON list with information about each job.", body = Vec<ApiDisplayJob>, example=active_jobs_output_example)
+        ),
+        tag = "query"
+    )]
     pub(crate) async fn query_active_jobs(
         State(state): State<Arc<AppState>>,
         Query(dates): Query<JobQueryDates>,
@@ -80,7 +100,17 @@ pub(crate) mod get {
     }
 
     /// Endpoint to query the status of a specific job by its database ID.
-    /// The job ID must be given as part of its URL path.
+    #[utoipa::path(
+        get,
+        path = "/api/v1/query/job-status/{job_id}",
+        responses(
+            (status = StatusCode::OK, description = "Query succeeded, will return a JSON structure with information about the job, or null if there is no information to return", body = Option<ApiDisplayJob>),
+        ),
+        params(
+            ("job_id" = i32, Path, description = "The ID of the job to query.")
+        ),
+        tag = "query"
+    )]
     pub(crate) async fn query_job(
         State(state): State<Arc<AppState>>,
         Extension(user): Extension<User>,
@@ -124,21 +154,21 @@ pub(crate) struct JobQueryDates {
 }
 
 /// Structure used to serialize job information to return a JSON result to users.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub(crate) struct ApiDisplayJob {
     job_id: i32,
     state: JobState,
     sites: Vec<RequestSite>,
-    start_date: NaiveDate,
-    end_date: NaiveDate,
+    start_date: ApiNaiveDate,
+    end_date: ApiNaiveDate,
     email: Option<String>,
     met_key: Option<String>,
     ginput_key: Option<String>,
     mod_fmt: ModFmt,
     vmr_fmt: VmrFmt,
     map_fmt: MapFmt,
-    submit_time: NaiveDateTime,
-    complete_time: Option<NaiveDateTime>,
+    submit_time: ApiNaiveDateTime,
+    complete_time: Option<ApiNaiveDateTime>,
     download_url: Option<String>,
 }
 
@@ -170,16 +200,16 @@ impl ApiDisplayJob {
             job_id: value.job_id,
             state: value.state,
             sites,
-            start_date: value.start_date,
-            end_date: value.end_date,
+            start_date: ApiNaiveDate(value.start_date),
+            end_date: ApiNaiveDate(value.end_date),
             email: value.email,
             met_key: value.met_key,
             ginput_key: value.ginput_key,
             mod_fmt: value.mod_fmt,
             vmr_fmt: value.vmr_fmt,
             map_fmt: value.map_fmt,
-            submit_time: value.submit_time,
-            complete_time: value.complete_time,
+            submit_time: ApiNaiveDateTime(value.submit_time),
+            complete_time: value.complete_time.map(ApiNaiveDateTime),
             download_url,
         })
     }

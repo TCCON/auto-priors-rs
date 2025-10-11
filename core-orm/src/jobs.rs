@@ -46,7 +46,7 @@ fn str_to_json_arr<'a, T: Deserialize<'a>>(s: &'a str) -> JobResult<Vec<T>> {
 }
 
 /// An enum representing possible states for a priors job
-#[derive(Debug, Type, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Type, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[repr(i8)]
 pub enum JobState {
     /// **\[default\]** This job is queued but has not begun to execute. `i8` value = `0`.

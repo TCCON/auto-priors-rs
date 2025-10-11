@@ -12,6 +12,7 @@ mod helpers;
 mod html;
 mod html_code_examples;
 mod html_components;
+pub(crate) mod json_examples;
 
 pub(crate) struct DocAllEndpoints {
     api: utoipa::openapi::OpenApi,
