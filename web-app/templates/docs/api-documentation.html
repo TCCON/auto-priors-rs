@@ -17,6 +17,11 @@
             {% endfor %}
         </ul>
         <li>API data types:</li>
+        <ul>
+            {% for (name, _) in schemas %}
+            <li><a href="#{{ crate::api::documentation::helpers::comp_schema_id(name) }}">{{ name }}</a></li>
+            {% endfor %}
+        </ul>
     </ul>
 
     <h2 id="authenticating">Authenticating</h2>
