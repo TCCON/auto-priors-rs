@@ -1,10 +1,14 @@
 {{ inner.description }}
 
 {% for (content_type, content) in inner.content %}
-{% if let Some(example_value) = content.example %}
+{% for (example_name, example_value) in crate::api::documentation::helpers::get_example_values(content) %}
 <details>
+    {% if !example_name.is_empty() %}
+    <summary>Example: {{ example_name }}, {{ content_type }}</summary>
+    {% else %}
     <summary>Example: {{ content_type }}</summary>
+    {% endif %}
     <pre class="code-box">{{ serde_json::to_string_pretty(example_value)? }}</pre>
 </details>
-{% endif %}
+{% endfor %}
 {% endfor %}
