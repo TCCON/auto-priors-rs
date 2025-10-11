@@ -122,7 +122,6 @@ async fn main() -> anyhow::Result<()> {
 
     let unprotected_routes = Router::new()
         .route("/", get(home::get::home))
-        .route("/api-docs-old", get(api::get::api_docs))
         .route("/login", post(auth_web::post::login))
         .route("/login", get(auth_web::get::login))
         .route("/logout", get(auth_web::get::logout));
