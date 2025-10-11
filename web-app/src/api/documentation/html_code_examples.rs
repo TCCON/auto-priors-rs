@@ -1,3 +1,4 @@
+//! Template components for code examples.
 use std::{borrow::Cow, collections::BTreeMap};
 
 use askama::Template;
@@ -12,10 +13,15 @@ use utoipa::openapi::{
 use crate::api::documentation::helpers;
 
 /// These define specific substitutions to use for certain parameters where
-/// [`default_example_values_for_type`] does not make sense.
+/// [`default_example_values_for_type`] does not make sense. In each tuple,
+/// the first element is the placeholder, and the second is the example value.
+/// Note that the placeholder must include the enclosing curly braces.
 const URL_EXAMPLE_SUBS: &'static [(&'static str, &'static str)] =
     &[("{site_id}", "xx"), ("{date}", "2025-01-19")];
 
+/// Create a concrete URL from a path by replacing any parameters with real values.
+/// These values will be taken first from [`URL_EXAMPLE_SUBS`], then defaults defined
+/// by [`default_example_url_values_for_schema`].
 fn build_concrete_url<'u>(url_template: &'u str, parameters: Option<&[Parameter]>) -> Cow<'u, str> {
     let mut url = Cow::Borrowed(url_template);
     for (placeholder, value) in URL_EXAMPLE_SUBS {
@@ -41,6 +47,7 @@ fn build_concrete_url<'u>(url_template: &'u str, parameters: Option<&[Parameter]
     url
 }
 
+/// Provides a default value for a URL property based on its schema.
 fn default_example_url_values_for_schema(s: &Schema) -> Cow<'static, str> {
     match s {
         Schema::Array(array) => match &array.items {
@@ -51,13 +58,16 @@ fn default_example_url_values_for_schema(s: &Schema) -> Cow<'static, str> {
             utoipa::openapi::schema::ArrayItems::False => Cow::Borrowed("FALSE"),
         },
         Schema::Object(object) => default_example_url_values_for_type(&object.schema_type),
-        Schema::OneOf(one_of) => Cow::Borrowed("TODO"),
-        Schema::AllOf(all_of) => Cow::Borrowed("TODO"),
-        Schema::AnyOf(any_of) => Cow::Borrowed("TODO"),
+        Schema::OneOf(_one_of) => Cow::Borrowed("TODO"),
+        Schema::AllOf(_all_of) => Cow::Borrowed("TODO"),
+        Schema::AnyOf(_any_of) => Cow::Borrowed("TODO"),
         _ => todo!(),
     }
 }
 
+/// Provides a default value for a scalar valued URL property based on its type.
+/// Use [`default_example_url_values_for_schema`] if you have the property's
+/// overall schema instead.
 fn default_example_url_values_for_type(st: &SchemaType) -> Cow<'static, str> {
     fn type_ex(t: &Type) -> &'static str {
         match t {
@@ -81,6 +91,12 @@ fn default_example_url_values_for_type(st: &SchemaType) -> Cow<'static, str> {
     }
 }
 
+/// Create the list of code examples for a HTTP GET endpoint.
+///
+/// # Parameters
+/// - `url_template`: the path defined for the endpoint, with placeholders.
+/// - `parameters`: the optional list of URL parameters defined for the [`Operation`].
+///   These will be used to insert concrete values into the URL for the examples.
 pub(super) fn make_get_examples<'u>(
     url_template: &'u str,
     parameters: Option<&[Parameter]>,
@@ -102,18 +118,28 @@ pub(super) fn make_get_examples<'u>(
     ])
 }
 
+/// Template for an example of calling an HTTP GET with Python
 #[derive(Template)]
 #[template(path = "docs/code-python-get.txt")]
-pub(super) struct PythonGetExample<'u> {
+struct PythonGetExample<'u> {
     url: Cow<'u, str>,
 }
 
+/// Template for an example of calling an HTTP GET with cURL
 #[derive(Template)]
 #[template(path = "docs/code-curl-get.txt")]
-pub(super) struct CurlGetExample<'u> {
+struct CurlGetExample<'u> {
     url: Cow<'u, str>,
 }
 
+/// Create the list of code examples for a HTTP POST endpoint.
+///
+/// # Parameters
+/// - `url_template`: the path defined for the endpoint, with placeholders.
+/// - `operation`: the definition of the POST call from OpenAPI; it will
+///   be used to insert both concrete values into the URL and to create the
+///   request body example. This requires that the [`utoipa::path`] macro
+///   defines an `examples` field for the request body.
 pub(super) fn make_post_examples<'u>(
     url_template: &'u str,
     operation: &Operation,
@@ -135,9 +161,10 @@ pub(super) fn make_post_examples<'u>(
     ])
 }
 
+/// Template for an example of calling an HTTP POST with cURL
 #[derive(Template)]
 #[template(path = "docs/code-curl-post.txt")]
-pub(super) struct CurlPostExample<'u> {
+struct CurlPostExample<'u> {
     url: Cow<'u, str>,
     request_body: String,
 }
@@ -166,9 +193,10 @@ impl<'u> CurlPostExample<'u> {
     }
 }
 
+/// Template for an example of calling an HTTP POST with Python
 #[derive(Template)]
 #[template(path = "docs/code-python-post.txt")]
-pub(super) struct PythonPostExample<'u> {
+struct PythonPostExample<'u> {
     url: Cow<'u, str>,
     request_body: String,
 }
@@ -205,6 +233,7 @@ impl<'u> PythonPostExample<'u> {
     }
 }
 
+/// Create a JSON string of an [`Example`], handling the case of a missing value.
 fn example_to_json_string(ex: &Example) -> String {
     if let Some(value) = &ex.value {
         serde_json::to_string(value).unwrap_or_else(|e| format!("ERROR: {e}"))

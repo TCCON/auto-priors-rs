@@ -1,10 +1,8 @@
+//! Utility functions for the API documentation with utoipa
 use std::borrow::Cow;
 
 use itertools::Itertools;
-use utoipa::openapi::{
-    example::{self, Example},
-    Content, RefOr,
-};
+use utoipa::openapi::{Content, RefOr};
 
 /// Helper function for templates to check if a parameter is required
 ///
@@ -18,7 +16,11 @@ pub(crate) fn param_required(p: &utoipa::openapi::path::Parameter) -> bool {
     }
 }
 
-pub(crate) fn fmt_string(f: &utoipa::openapi::schema::SchemaFormat) -> Cow<'_, str> {
+/// Helper function to convert a [`utoipa::openapi::schema::SchemaFormat`] to a string.
+///
+/// These formats are typically more information about the type. For example, this might
+/// specify that a string represents binary data or will be in a specific date format.
+pub(super) fn fmt_string(f: &utoipa::openapi::schema::SchemaFormat) -> Cow<'_, str> {
     match f {
         utoipa::openapi::SchemaFormat::KnownFormat(known_format) => {
             serde_json::to_string(known_format)
@@ -29,7 +31,8 @@ pub(crate) fn fmt_string(f: &utoipa::openapi::schema::SchemaFormat) -> Cow<'_, s
     }
 }
 
-pub(crate) fn schema_type_string(t: &utoipa::openapi::schema::SchemaType) -> Cow<'static, str> {
+/// Helper function to convert a schema type into a string.
+pub(super) fn schema_type_string(t: &utoipa::openapi::schema::SchemaType) -> Cow<'static, str> {
     fn inner_type_string(ti: &utoipa::openapi::schema::Type) -> &'static str {
         match ti {
             utoipa::openapi::Type::Object => "object",
@@ -52,15 +55,22 @@ pub(crate) fn schema_type_string(t: &utoipa::openapi::schema::SchemaType) -> Cow
     }
 }
 
+/// Helper function to return the anchor ID for a given component schema within the API docs page.
 pub(crate) fn comp_schema_id(name: &str) -> String {
     format!("comp-schema-{name}")
 }
 
+/// Helper function to return the anchor ID for a given endpoint function within the API docs page.
 pub(crate) fn endpoint_id(group: &str, name: &str) -> String {
     format!("{group}-{name}")
 }
 
-pub(crate) fn reference_id(reference: &str) -> askama::Result<String> {
+/// Helper function to return the anchor ID for an element reference in the OpenAPI structure.
+///
+/// Returns an error if it does not know how to map the reference to an anchor ID.
+/// So far, I have only seen references to components (i.e., data types), so that is all this
+/// handles at present.
+pub(super) fn reference_id(reference: &str) -> askama::Result<String> {
     if reference.starts_with("#/components/schemas/") {
         let name = reference.split('/').last().ok_or_else(|| {
             askama::Error::custom(format!("No component name in reference: {reference}"))
@@ -73,7 +83,9 @@ pub(crate) fn reference_id(reference: &str) -> askama::Result<String> {
     }
 }
 
-pub(crate) fn reference_name(reference: &str) -> &str {
+/// Helper function to return the name of an OpenAPI reference. This will be the
+/// last component of the path. It is useful for section headers.
+pub(super) fn reference_name(reference: &str) -> &str {
     reference.split('/').last().unwrap_or(reference)
 }
 
@@ -159,6 +171,7 @@ fn json_to_python_inner<W: std::fmt::Write>(
     Ok(())
 }
 
+/// Inner function to write a sequence of values for an array.
 fn write_values<W: std::fmt::Write>(
     writer: &mut W,
     values: &[serde_json::Value],
@@ -198,6 +211,7 @@ fn write_values<W: std::fmt::Write>(
     Ok(())
 }
 
+/// Inner function to write a sequence of key/value pairs for a map.
 fn write_map<W: std::fmt::Write>(
     writer: &mut W,
     map: &serde_json::Map<String, serde_json::Value>,
@@ -245,6 +259,10 @@ fn write_map<W: std::fmt::Write>(
     Ok(())
 }
 
+/// Inner function to write a string.
+/// The returned string will only use double quotes if the string contains one or
+/// more single quotes but no double quotes. Otherwise, it will use single quotes
+/// and escape any literal single quotes contained in it.
 fn write_string<W: std::fmt::Write>(writer: &mut W, s: &str) -> std::fmt::Result {
     let has_sq = s.contains("'");
     let has_dq = s.contains('"');

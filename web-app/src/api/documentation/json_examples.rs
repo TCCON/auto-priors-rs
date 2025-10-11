@@ -1,3 +1,8 @@
+//! JSON values to use for examples in the [`utoipa::path`] macros.
+//! Weirdly, these functions do not seem to need to be in scope,
+//! and can be passed as the value to the `example` attribute,
+//! e.g. `example=active_jobs_output_example`. (Note that the
+//! function is not called - no parentheses.)
 use serde_json::{json, Value};
 
 pub(crate) fn active_jobs_output_example() -> Value {

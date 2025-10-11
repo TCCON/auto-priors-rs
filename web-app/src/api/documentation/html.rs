@@ -1,9 +1,10 @@
+//! The main module for generating HTML versions of the OpenAPI docs.
 use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
 };
 
-use askama::{DynTemplate, Template};
+use askama::Template;
 use itertools::Itertools;
 use orm::auth::User;
 use utoipa::openapi::RefOr;
@@ -40,6 +41,7 @@ impl<'o> ApiDocsContext<'o> {
         }
     }
 
+    /// Return a collection of all endpoints defined in the API, grouped by their first tag.
     fn collect_endpoints(
         api: &'o utoipa::openapi::OpenApi,
     ) -> Vec<(&'o str, Vec<DocEndpoint<'o>>)> {
@@ -56,6 +58,8 @@ impl<'o> ApiDocsContext<'o> {
         endpoints
     }
 
+    /// Collect the schema for all of the components (i.e., data types) defined in the API.
+    /// The keys of the map will be the component names, and the values the schema themselves.
     fn collect_component_schema(
         api: &'o utoipa::openapi::OpenApi,
     ) -> BTreeMap<&'o str, HtmlSchema<'o>> {
@@ -129,10 +133,10 @@ struct DocEndpoint<'o> {
     responses: &'o BTreeMap<String, RefOr<utoipa::openapi::response::Response>>,
     parameters: Option<&'o [utoipa::openapi::path::Parameter]>,
     code_examples: BTreeMap<&'static str, String>,
-    output: String,
 }
 
 impl<'o> DocEndpoint<'o> {
+    /// Make a list of all of the endpoints defined in the `api`.
     fn list_from_openapi(api: &'o utoipa::openapi::OpenApi) -> Vec<Self> {
         let mut endpoints = vec![];
 
@@ -159,6 +163,9 @@ impl<'o> DocEndpoint<'o> {
         endpoints
     }
 
+    /// Create a new instance of this type from a specific operation (GET, POST, etc.)
+    /// for a URL. The examples must be supplied from the [`html_code_examples`] module,
+    /// since the examples will depend on the HTTP method used.
     fn from_operation_and_examples(
         url: &'o str,
         request_type: axum::http::method::Method,
@@ -201,7 +208,6 @@ impl<'o> DocEndpoint<'o> {
             responses: &operation.responses.responses,
             parameters: operation.parameters.as_deref(),
             code_examples,
-            output: "".to_string(),
         }
     }
 }
