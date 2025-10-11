@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use itertools::Itertools;
 use utoipa::openapi::{
     example::{self, Example},
-    Content,
+    Content, RefOr,
 };
 
 /// Helper function for templates to check if a parameter is required
@@ -71,6 +71,30 @@ pub(crate) fn reference_id(reference: &str) -> askama::Result<String> {
 
 pub(crate) fn reference_name(reference: &str) -> &str {
     reference.split('/').last().unwrap_or(reference)
+}
+
+/// Get example values and their names from OpenAPI content.
+/// This will prefer the `examples` field if available. If not,
+/// it will use the `example` field. The returned vec will be
+/// empty if neither provided examples.
+pub(crate) fn get_example_values(content: &Content) -> Vec<(&str, &serde_json::Value)> {
+    if !content.examples.is_empty() {
+        let mut out = vec![];
+        for (key, ref_or_ex) in content.examples.iter() {
+            if let RefOr::T(ex) = ref_or_ex {
+                if let Some(val) = &ex.value {
+                    out.push((key.as_str(), val))
+                }
+            }
+        }
+        return out;
+    }
+
+    if let Some(val) = &content.example {
+        return vec![("example", val)];
+    }
+
+    return vec![];
 }
 
 /// Write a [`serde_json::Value`] as a Python string - bool, int, float, None, list, or dict.

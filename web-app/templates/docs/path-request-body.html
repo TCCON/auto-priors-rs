@@ -13,6 +13,14 @@ crate::api::documentation::html_components::HtmlRefOrSchema::new(s,crate::api::d
 {% else %}
 Provide a body in {{ content_type }} format.
 {% endif %}
+
+{% for (example_name, example_value) in crate::api::documentation::helpers::get_example_values(content) %}
+<details>
+    <summary>Example: {{ example_name }}</summary>
+    <pre class="code-box">{{ serde_json::to_string_pretty(example_value)? }}</pre>
+</details>
+{% endfor %}
+
 {% endfor %}
 
 {% elif !body.content.is_empty() %}
@@ -26,6 +34,13 @@ Provide the request body in one of the following formats:
     {% else %}
     <p>Provide a body in {{ content_type }} format.</p>
     {% endif %}
+
+    {% for (example_name, example_value) in crate::api::documentation::helpers::get_example_values(content) %}
+    <details>
+        <summary>Example: {{ example_name }}</summary>
+        <pre class="code-box">{{ serde_json::to_string_pretty(example_value)? }}</pre>
+    </details>
+    {% endfor %}
     {% endfor %}
 </ul>
 {% endif %}
