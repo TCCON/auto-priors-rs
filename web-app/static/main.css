@@ -90,10 +90,28 @@
     padding: 1em;
 }
 
-/* Code styles */
+/* Styles for API documentation */
 
 .code-box {
     background-color: lightgray;
     border: 2px solid black;
     padding: 1em;
+}
+
+.api-entry {
+    padding: 3pt 1em;
+    margin: 1em 3pt;
+    border-radius: 6pt;
+}
+
+.api-entry:nth-of-type(odd) {
+    background-color: bisque;
+}
+
+.api-entry:nth-of-type(even) {
+    background-color: beige;
+}
+
+.api-entry:target {
+    border: 3px solid orangered;
 }

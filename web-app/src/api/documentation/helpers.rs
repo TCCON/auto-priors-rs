@@ -56,6 +56,10 @@ pub(crate) fn comp_schema_id(name: &str) -> String {
     format!("comp-schema-{name}")
 }
 
+pub(crate) fn endpoint_id(group: &str, name: &str) -> String {
+    format!("{group}-{name}")
+}
+
 pub(crate) fn reference_id(reference: &str) -> askama::Result<String> {
     if reference.starts_with("#/components/schemas/") {
         let name = reference.split('/').last().ok_or_else(|| {
