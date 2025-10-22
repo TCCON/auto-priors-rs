@@ -1,6 +1,0 @@
-
-{% extends "base" %}
-
-{% block content %}
-    <p>Use the navigation bar at the top to get started.<p>
-{% endblock content %}
