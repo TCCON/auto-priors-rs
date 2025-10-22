@@ -6,7 +6,7 @@ use clap::{Args, Subcommand};
 #[derive(Debug, Args)]
 pub struct ConfigCli {
     #[clap(subcommand)]
-    pub command: ConfigActions
+    pub command: ConfigActions,
 }
 
 #[derive(Debug, Subcommand)]
@@ -18,14 +18,14 @@ pub enum ConfigActions {
     /// and print the internal representation to the screen. (Useful for checking that a config
     /// file is being parsed as you expect.) If the PRIOR_CONFIG_FILE variable is not set,
     /// then the default configuration is displayed.
-    Debug
+    Debug,
 }
 
 #[derive(Debug, Args)]
 /// Generate a default configuration file from the command line (alias: gen)
 pub struct GenConfigCli {
     /// Path to write the default TOML file as.
-    path: PathBuf
+    path: PathBuf,
 }
 
 pub fn generate_config_file(clargs: GenConfigCli) -> anyhow::Result<()> {

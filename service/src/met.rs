@@ -2,18 +2,17 @@ use std::sync::Arc;
 
 use cli::met_download::download_missing_files;
 use cli::utils::WgetDownloader;
-use log::{warn, debug, info};
+use log::{debug, info, warn};
 use orm::config::Config;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use crate::error::ErrorHandler;
 
-
 pub(crate) enum MetMessage {
     DownloadMet,
     StopGracefully,
-    StopRapidly
+    StopRapidly,
 }
 
 #[derive(Debug)]
@@ -22,22 +21,22 @@ pub(crate) struct MetManager {
     pub(crate) shared_config: Arc<RwLock<Config>>,
     pub(crate) error_handler: ErrorHandler,
     pub(crate) msg_recv: tokio::sync::mpsc::Receiver<MetMessage>,
-    inner_runner: Option<JoinHandle<()>>
+    inner_runner: Option<JoinHandle<()>>,
 }
 
 impl MetManager {
     pub(crate) async fn new_with_pool(
-        pool: orm::PoolWrapper, 
-        shared_config: Arc<RwLock<Config>>, 
+        pool: orm::PoolWrapper,
+        shared_config: Arc<RwLock<Config>>,
         error_handler: ErrorHandler,
         msg_recv: tokio::sync::mpsc::Receiver<MetMessage>,
     ) -> Self {
-        Self { 
+        Self {
             pool,
             shared_config,
             error_handler,
             msg_recv,
-            inner_runner: None
+            inner_runner: None,
         }
     }
 
@@ -53,11 +52,11 @@ impl MetManager {
                     MetMessage::StopGracefully => {
                         self.wait_for_download_to_finish().await;
                         break;
-                    },
+                    }
                     MetMessage::StopRapidly => {
                         self.stop_running_download().await;
                         break;
-                    },
+                    }
                 };
             } else {
                 info!("MetManager receiver closed, exiting message loop");
@@ -81,7 +80,7 @@ impl MetManager {
                 self.inner_runner = None;
             } else {
                 warn!("Cannot start a second met download task while one is ongoing.");
-                return ;
+                return;
             }
         }
 
@@ -92,25 +91,18 @@ impl MetManager {
 
         let child = tokio::spawn(async move {
             let res = download_missing_files(
-                &mut conn, 
-                None, 
-                None, 
-                None, 
-                false, 
-                &config, 
-                downloader, 
-                false
-            ).await;
+                &mut conn, None, None, None, false, &config, downloader, false,
+            )
+            .await;
 
             if let Err(e) = res {
                 err_handler.report_error(e.as_ref())
             }
         });
         self.inner_runner = Some(child);
-
     }
 
-    async fn stop_running_download(&mut self) {        
+    async fn stop_running_download(&mut self) {
         if let Some(runner) = self.inner_runner.take() {
             info!("Cancelling met download in progress");
             runner.abort();
@@ -128,7 +120,7 @@ impl MetManager {
         if let Some(runner) = self.inner_runner.take() {
             match runner.await {
                 Ok(_) => info!("Met download task complete, proceeding with service shutdown"),
-                Err(e) => warn!("Error while waiting for met download task to complete: {e:?}")
+                Err(e) => warn!("Error while waiting for met download task to complete: {e:?}"),
             }
         } else {
             info!("No active met download task to wait on");

@@ -9,14 +9,13 @@ use tokio::sync::RwLock;
 
 use crate::error::ErrorHandler;
 
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum StdSiteMessage {
     AddJobs,
     MakeTarballs,
     UpdateJson,
     StopGracefully,
-    StopRapidly
+    StopRapidly,
 }
 
 #[derive(Debug)]
@@ -24,21 +23,21 @@ pub(crate) struct StdSiteManager {
     pub(crate) pool: orm::PoolWrapper,
     pub(crate) shared_config: Arc<RwLock<Config>>,
     pub(crate) error_handler: ErrorHandler,
-    pub(crate) msg_recv: tokio::sync::mpsc::Receiver<StdSiteMessage>
+    pub(crate) msg_recv: tokio::sync::mpsc::Receiver<StdSiteMessage>,
 }
 
 impl StdSiteManager {
     pub(crate) async fn new_with_pool(
-        pool: orm::PoolWrapper, 
-        shared_config: Arc<RwLock<Config>>, 
+        pool: orm::PoolWrapper,
+        shared_config: Arc<RwLock<Config>>,
         error_handler: ErrorHandler,
-        msg_recv: tokio::sync::mpsc::Receiver<StdSiteMessage>
+        msg_recv: tokio::sync::mpsc::Receiver<StdSiteMessage>,
     ) -> Self {
-        Self { 
+        Self {
             pool,
             shared_config,
             error_handler,
-            msg_recv
+            msg_recv,
         }
     }
 
@@ -61,7 +60,7 @@ impl StdSiteManager {
                 if let Err(e) = res {
                     self.error_handler.report_error_with_context(
                         e.as_ref(),
-                        "Error in StdSiteManager message loop"
+                        "Error in StdSiteManager message loop",
                     );
                 }
             } else {
@@ -86,11 +85,13 @@ impl StdSiteManager {
         let config = self.shared_config.read().await;
 
         info!("Updating the list of rows requiring jobs in the standard sites job table");
-        StdSiteJob::update_std_site_job_table(&mut conn, &config, None).await
+        StdSiteJob::update_std_site_job_table(&mut conn, &config, None)
+            .await
             .context("Error occurred while trying to update the standard sites job table")?;
 
         info!("Adding jobs for the standard sites");
-        StdSiteJob::add_jobs_for_pending_rows(&mut conn, &config).await
+        StdSiteJob::add_jobs_for_pending_rows(&mut conn, &config)
+            .await
             .context("Error occurred while trying to add jobs for standard sites")?;
 
         info!("Standard site table/job update complete");
@@ -102,13 +103,15 @@ impl StdSiteManager {
             warn!("Standard site priors disabled in config");
             return Ok(());
         }
-        
-        let mut conn = self.pool.get_connection().await
-            .context("Error occurred trying to get the database connection to make standard sites tarballs")?;
+
+        let mut conn = self.pool.get_connection().await.context(
+            "Error occurred trying to get the database connection to make standard sites tarballs",
+        )?;
 
         let config = self.shared_config.read().await;
         info!("Checking for standard sites output ready to be put in tarballs");
-        StdSiteJob::make_standard_site_tarballs(&mut conn, &config).await
+        StdSiteJob::make_standard_site_tarballs(&mut conn, &config)
+            .await
             .context("Error occurred while making standard site tarballs")?;
         info!("Standard site tarball check complete");
 
@@ -116,10 +119,12 @@ impl StdSiteManager {
     }
 
     async fn update_site_json(&self) -> anyhow::Result<()> {
-        
         let (flat_file, grouped_file) = {
             let config = self.shared_config.read().await;
-            (config.execution.flat_stdsite_json_file.clone(), config.execution.grouped_stdsite_json_file.clone())
+            (
+                config.execution.flat_stdsite_json_file.clone(),
+                config.execution.grouped_stdsite_json_file.clone(),
+            )
         };
 
         // No reason to open a database connection if nothing to write!
@@ -128,8 +133,11 @@ impl StdSiteManager {
             return Ok(());
         }
 
-        let mut conn = self.pool.get_connection().await
-        .context("Could not get database connection while updating standard site JSON")?;
+        let mut conn = self
+            .pool
+            .get_connection()
+            .await
+            .context("Could not get database connection while updating standard site JSON")?;
 
         let infos = orm::siteinfo::SiteInfo::get_all_site_info(&mut conn).await?;
         if let Some(p) = flat_file {
@@ -145,16 +153,24 @@ impl StdSiteManager {
             Self::write_json(&p, &json_string)
                 .context("Error occurred while writing grouped standard site JSON")?;
         }
-        
+
         Ok(())
     }
 
     fn write_json(json_file: &Path, json_string: &str) -> anyhow::Result<()> {
         use std::io::Write;
-        let mut f = std::fs::File::create(json_file)
-            .with_context(|| format!("Could not create standard site JSON file at {}", json_file.display()))?;
-        write!(f, "{}", json_string)
-            .with_context(|| format!("Could not write to standard site JSON file {}", json_file.display()))?;
+        let mut f = std::fs::File::create(json_file).with_context(|| {
+            format!(
+                "Could not create standard site JSON file at {}",
+                json_file.display()
+            )
+        })?;
+        write!(f, "{}", json_string).with_context(|| {
+            format!(
+                "Could not write to standard site JSON file {}",
+                json_file.display()
+            )
+        })?;
         Ok(())
     }
 }

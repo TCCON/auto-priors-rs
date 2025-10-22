@@ -7,12 +7,11 @@ use tokio::sync::RwLock;
 
 use crate::error::ErrorHandler;
 
-
 pub(crate) enum ReportMessage {
     DailyReport,
     WeeklyReport,
     StopGracefully,
-    StopRapidly
+    StopRapidly,
 }
 
 pub(crate) struct ReportManager {
@@ -24,12 +23,12 @@ pub(crate) struct ReportManager {
 
 impl ReportManager {
     pub(crate) async fn new_with_pool(
-        pool: orm::PoolWrapper, 
-        shared_config: Arc<RwLock<Config>>, 
+        pool: orm::PoolWrapper,
+        shared_config: Arc<RwLock<Config>>,
         error_handler: ErrorHandler,
         msg_recv: tokio::sync::mpsc::Receiver<ReportMessage>,
     ) -> Self {
-        Self { 
+        Self {
             pool,
             shared_config,
             error_handler,
@@ -53,8 +52,8 @@ impl ReportManager {
 
                 if let Err(e) = res {
                     self.error_handler.report_error_with_context(
-                        e.as_ref(), 
-                        "Error occurred in ReportManager message loop"
+                        e.as_ref(),
+                        "Error occurred in ReportManager message loop",
                     );
                 }
             } else {
@@ -74,13 +73,22 @@ impl ReportManager {
             return Ok(());
         }
 
-        let to_emails = self.shared_config.read().await.email.report_emails_string_list(true);
+        let to_emails = self
+            .shared_config
+            .read()
+            .await
+            .email
+            .report_emails_string_list(true);
         let to_emails: Vec<_> = to_emails.iter().map(|s| s.as_str()).collect();
 
-        let mut conn = self.pool.get_connection().await
+        let mut conn = self
+            .pool
+            .get_connection()
+            .await
             .context("Error occurred trying to get database connection to send daily report")?;
         let config = self.shared_config.read().await;
-        email::email_current_jobs(&mut conn, &config, &to_emails).await
+        email::email_current_jobs(&mut conn, &config, &to_emails)
+            .await
             .context("Error occurred sending daily report email")?;
 
         Ok(())
@@ -92,18 +100,26 @@ impl ReportManager {
             return Ok(());
         }
 
-        let to_emails = self.shared_config.read().await.email.report_emails_string_list(true);
+        let to_emails = self
+            .shared_config
+            .read()
+            .await
+            .email
+            .report_emails_string_list(true);
         let to_emails: Vec<_> = to_emails.iter().map(|s| s.as_str()).collect();
 
-        let mut conn = self.pool.get_connection().await
+        let mut conn = self
+            .pool
+            .get_connection()
+            .await
             .context("Error occurred trying to get database connection to send daily report")?;
         let config = self.shared_config.read().await;
 
         let start_date = chrono::Local::now().date_naive() - chrono::Duration::days(7);
-        email::email_completed_jobs(&mut conn, &config, &to_emails, start_date, None).await
+        email::email_completed_jobs(&mut conn, &config, &to_emails, start_date, None)
+            .await
             .context("Error occurred trying to send weekly report email")?;
 
         Ok(())
     }
-
 }

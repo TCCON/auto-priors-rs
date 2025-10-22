@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use log::error;
 use orm::config::{Config, EmailConfig};
-use tokio::sync::{RwLock, watch};
+use tokio::sync::{watch, RwLock};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ErrorHandler {
@@ -18,7 +18,11 @@ impl ErrorHandler {
         }
     }
 
-    pub(crate) fn report_error_with_context<S: AsRef<str>>(&self, err: &(dyn std::error::Error + Send + Sync + 'static), context: S) {
+    pub(crate) fn report_error_with_context<S: AsRef<str>>(
+        &self,
+        err: &(dyn std::error::Error + Send + Sync + 'static),
+        context: S,
+    ) {
         match self {
             ErrorHandler::Logging(h) => h.report_error_with_context(err, context),
             ErrorHandler::EmailAdmins(h) => h.report_error_with_context(err, context),
@@ -34,7 +38,11 @@ impl LoggingErrorHandler {
         error!("{err:?}")
     }
 
-    pub(crate) fn report_error_with_context<S: AsRef<str>>(&self, err: &(dyn std::error::Error + Send + Sync + 'static), context: S) {
+    pub(crate) fn report_error_with_context<S: AsRef<str>>(
+        &self,
+        err: &(dyn std::error::Error + Send + Sync + 'static),
+        context: S,
+    ) {
         error!("{err:?}");
         error!("{}", context.as_ref())
     }
@@ -47,9 +55,15 @@ pub(crate) struct EmailAdminsErrorHandler {
 }
 
 impl EmailAdminsErrorHandler {
-    pub(crate) async fn new(shared_config: Arc<RwLock<Config>>, rx_config: watch::Receiver<orm::config::Config>) -> Self {
+    pub(crate) async fn new(
+        shared_config: Arc<RwLock<Config>>,
+        rx_config: watch::Receiver<orm::config::Config>,
+    ) -> Self {
         let cached_email_config = shared_config.read().await.email.clone();
-        Self { cached_email_config, config_watcher: rx_config }
+        Self {
+            cached_email_config,
+            config_watcher: rx_config,
+        }
     }
 
     fn send_email(&self, body: &str) -> anyhow::Result<()> {
@@ -80,7 +94,11 @@ impl EmailAdminsErrorHandler {
         })
     }
 
-    fn report_error_with_context<S: AsRef<str>>(&self, err: &(dyn std::error::Error + Send + Sync + 'static), context: S) {
+    fn report_error_with_context<S: AsRef<str>>(
+        &self,
+        err: &(dyn std::error::Error + Send + Sync + 'static),
+        context: S,
+    ) {
         error!("{err:?}");
         error!("{}", context.as_ref());
 

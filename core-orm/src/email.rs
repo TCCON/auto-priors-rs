@@ -1,25 +1,44 @@
-use std::{cell::RefCell, collections::VecDeque, fmt::Debug, io::Write, path::PathBuf, process::{Command, Stdio}, sync::{Arc, Mutex}};
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    fmt::Debug,
+    io::Write,
+    path::PathBuf,
+    process::{Command, Stdio},
+    sync::{Arc, Mutex},
+};
 
 use chrono::NaiveDate;
 use itertools::Itertools;
-use lettre::{message::Mailbox, transport::smtp::authentication::Credentials, Address, Message, SmtpTransport, Transport};
+use lettre::{
+    message::Mailbox, transport::smtp::authentication::Credentials, Address, Message,
+    SmtpTransport, Transport,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::{error::EmailError, MySqlConn, config::Config};
+use crate::{config::Config, error::EmailError, MySqlConn};
 
 /// A trait that any email backend must implement
 pub trait SendMail: Debug {
     /// Send an email
-    fn send_mail(&self, to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError>;
+    fn send_mail(
+        &self,
+        to: &[&str],
+        from: &str,
+        cc: Option<&[&str]>,
+        bcc: Option<&[&str]>,
+        subject: &str,
+        message: &str,
+    ) -> Result<(), EmailError>;
 }
 
 /// A struct used to send emails by calling the `mailx` utility via the shell
-/// 
-/// The default is to use shell PATH resolution to get the `mail` program. If 
+///
+/// The default is to use shell PATH resolution to get the `mail` program. If
 /// that does not work for your system, you can specify an alternate executable.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mailx {
-    exec: PathBuf
+    exec: PathBuf,
 }
 
 impl Mailx {
@@ -31,12 +50,22 @@ impl Mailx {
 
 impl Default for Mailx {
     fn default() -> Self {
-        Self { exec: PathBuf::from("mail") }
+        Self {
+            exec: PathBuf::from("mail"),
+        }
     }
 }
 
 impl SendMail for Mailx {
-    fn send_mail(&self, to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError> {
+    fn send_mail(
+        &self,
+        to: &[&str],
+        from: &str,
+        cc: Option<&[&str]>,
+        bcc: Option<&[&str]>,
+        subject: &str,
+        message: &str,
+    ) -> Result<(), EmailError> {
         let mut cmd = Command::new(&self.exec);
         cmd.stdin(Stdio::piped())
             .args(["-r", from])
@@ -51,18 +80,22 @@ impl SendMail for Mailx {
             cmd.args(["-b", bcc.join(",").as_str()]);
         }
 
-        let mut p = cmd.spawn()
-            .map_err(|e| EmailError::SendFailure(format!("Unable to spawn child process to send email: {e}")))?;
+        let mut p = cmd.spawn().map_err(|e| {
+            EmailError::SendFailure(format!("Unable to spawn child process to send email: {e}"))
+        })?;
 
-        let mut stdin = p.stdin.take()
-            .ok_or_else(|| EmailError::SendFailure(format!("Failed to get stdin to mailx process")))?;
-        stdin.write_all(message.as_bytes())
-            .map_err(|e| EmailError::SendFailure(format!("Failed to write message to mail process stdin: {e}")))?;
+        let mut stdin = p.stdin.take().ok_or_else(|| {
+            EmailError::SendFailure(format!("Failed to get stdin to mailx process"))
+        })?;
+        stdin.write_all(message.as_bytes()).map_err(|e| {
+            EmailError::SendFailure(format!(
+                "Failed to write message to mail process stdin: {e}"
+            ))
+        })?;
 
         Ok(())
     }
 }
-
 
 /// An enum defining different connection types the Lettre crate can use.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,29 +107,38 @@ pub enum LettreSmtpType {
     /// Establish an encrypted connection to an SMTP server using a username and password
     /// to authentical. This works with Gmail for example; note that for Gmail you must
     /// use an app password, set through https://myaccount.google.com/apppasswords as of
-    /// 24 Jul 2024. Requires the host (e.g. "smtp.gmail.com"), username (often the 
+    /// 24 Jul 2024. Requires the host (e.g. "smtp.gmail.com"), username (often the
     /// sending email address), and password. `user` and `password` can be "netrc",
     /// which means this program will look for a machine named the value of `host`
     /// in your ~/.netrc file - the intention is to keep sensitive information out
     /// of the configuration file if desired and to minimize how long the password is
     /// in memory.
-    TlsPassword{host: String, user: String, password: String},
+    TlsPassword {
+        host: String,
+        user: String,
+        password: String,
+    },
 }
 
 impl LettreSmtpType {
     fn get_mailer(&self) -> Result<SmtpTransport, EmailError> {
         match self {
             LettreSmtpType::Local => Ok(SmtpTransport::unencrypted_localhost()),
-            LettreSmtpType::TlsPassword { host, user, password } => {
-                let (user, password) = fill_user_or_pw_from_netrc(user.to_string(), password.to_string(), host)
-                    .map_err(|e| EmailError::SendFailure(e.to_string()))?;
+            LettreSmtpType::TlsPassword {
+                host,
+                user,
+                password,
+            } => {
+                let (user, password) =
+                    fill_user_or_pw_from_netrc(user.to_string(), password.to_string(), host)
+                        .map_err(|e| EmailError::SendFailure(e.to_string()))?;
                 let creds = Credentials::new(user, password);
                 let mailer = SmtpTransport::relay(&host)
                     .map_err(|e| EmailError::SendFailure(e.to_string()))?
                     .credentials(creds)
                     .build();
                 Ok(mailer)
-            },
+            }
         }
     }
 }
@@ -107,32 +149,34 @@ impl Default for LettreSmtpType {
     }
 }
 
-/// Given a username and password from the configuration, if either one is 
+/// Given a username and password from the configuration, if either one is
 /// "netrc", it will be replaced with the corresponding value from the
 /// ~/.netrc file for the `host`. User or password values other than
 /// "netrc" are returned unchanged.
-fn fill_user_or_pw_from_netrc(user: String, password: String, host: &str) -> std::io::Result<(String, String)> {
+fn fill_user_or_pw_from_netrc(
+    user: String,
+    password: String,
+    host: &str,
+) -> std::io::Result<(String, String)> {
     if user != "netrc" && password != "netrc" {
-        return Ok((user, password))
+        return Ok((user, password));
     }
 
     let machine = crate::utils::get_netrc_credentials(host, None)?;
-    let (netrc_user, netrs_pw) = machine.map(|m| (m.login, m.password)).ok_or_else(|| 
-        std::io::Error::other(format!("Host '{host}' not found in ~/.netrc"))
-    )?;
+    let (netrc_user, netrs_pw) = machine
+        .map(|m| (m.login, m.password))
+        .ok_or_else(|| std::io::Error::other(format!("Host '{host}' not found in ~/.netrc")))?;
 
-    let user = if user == "netrc" { 
-        netrc_user.ok_or_else(|| std::io::Error::other(
-            format!("No username found for host '{host}'")
-        ))?
+    let user = if user == "netrc" {
+        netrc_user
+            .ok_or_else(|| std::io::Error::other(format!("No username found for host '{host}'")))?
     } else {
         user
     };
 
     let password = if password == "netrc" {
-        netrs_pw.ok_or_else(|| std::io::Error::other(
-            format!("No password found for host '{host}'")
-        ))?
+        netrs_pw
+            .ok_or_else(|| std::io::Error::other(format!("No password found for host '{host}'")))?
     } else {
         password
     };
@@ -140,11 +184,10 @@ fn fill_user_or_pw_from_netrc(user: String, password: String, host: &str) -> std
     Ok((user, password))
 }
 
-
 /// A struct used to send emails by directly connecting to an SMTP server with the Lettre crate.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Lettre {
-    smtp: LettreSmtpType
+    smtp: LettreSmtpType,
 }
 
 impl Lettre {
@@ -155,34 +198,49 @@ impl Lettre {
 }
 
 impl SendMail for Lettre {
-    fn send_mail(&self, to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError> {
+    fn send_mail(
+        &self,
+        to: &[&str],
+        from: &str,
+        cc: Option<&[&str]>,
+        bcc: Option<&[&str]>,
+        subject: &str,
+        message: &str,
+    ) -> Result<(), EmailError> {
         let email = build_message(to, from, cc, bcc, subject, message)?;
 
         // Send the email
         let mailer = self.smtp.get_mailer()?;
-        mailer.send(&email)
+        mailer
+            .send(&email)
             .map_err(|e| EmailError::SendFailure(e.to_string()))?;
 
         Ok(())
     }
 }
 
-
 /// A struct used to send emails by directly connecting to an SMTP server with the Lettre crate.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MockEmail {}
 
 impl SendMail for MockEmail {
-    fn send_mail(&self, to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError> {
+    fn send_mail(
+        &self,
+        to: &[&str],
+        from: &str,
+        cc: Option<&[&str]>,
+        bcc: Option<&[&str]>,
+        subject: &str,
+        message: &str,
+    ) -> Result<(), EmailError> {
         use std::fmt::Write;
         let mut msg = "== Mock email ==\n".to_string();
-        
+
         writeln!(&mut msg, "To: {}", to.join(","))
             .map_err(|e| EmailError::SendFailure(e.to_string()))?;
-        
-        writeln!(&mut msg, "From: {}", from)
-            .map_err(|e| EmailError::SendFailure(e.to_string()))?;
-        
+
+        writeln!(&mut msg, "From: {}", from).map_err(|e| EmailError::SendFailure(e.to_string()))?;
+
         if let Some(cc) = cc {
             writeln!(&mut msg, "CC: {}", cc.join(","))
                 .map_err(|e| EmailError::SendFailure(e.to_string()))?;
@@ -210,44 +268,51 @@ impl SendMail for MockEmail {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct TestingEmail {
     #[serde(skip, default)]
-    messages: Arc<Mutex<RefCell<VecDeque<TestEmailData>>>>
+    messages: Arc<Mutex<RefCell<VecDeque<TestEmailData>>>>,
 }
 
 impl TestingEmail {
     pub fn pop_front(&self) -> Option<TestEmailData> {
-        let mut lock = self.messages.lock()
-            .expect("Could not acquire mutex lock");
+        let mut lock = self.messages.lock().expect("Could not acquire mutex lock");
         let r = lock.get_mut();
         r.pop_front()
     }
 
     pub fn clear(&self) {
-        let mut lock = self.messages.lock()
-            .expect("Could not acquire mutex lock");
+        let mut lock = self.messages.lock().expect("Could not acquire mutex lock");
         let r = lock.get_mut();
         r.clear();
     }
 
     pub fn num_messages(&self) -> usize {
-        let mut lock = self.messages.lock()
-            .expect("Could not acquire mutex lock");
+        let mut lock = self.messages.lock().expect("Could not acquire mutex lock");
         let r = lock.get_mut();
         r.len()
     }
 }
 
 impl SendMail for TestingEmail {
-    fn send_mail(&self, to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<(), EmailError> {
+    fn send_mail(
+        &self,
+        to: &[&str],
+        from: &str,
+        cc: Option<&[&str]>,
+        bcc: Option<&[&str]>,
+        subject: &str,
+        message: &str,
+    ) -> Result<(), EmailError> {
         let msg = TestEmailData {
             to: to.into_iter().map(|s| s.to_string()).collect_vec(),
             from: from.to_string(),
             cc: cc.map(|val| val.into_iter().map(|s| s.to_string()).collect_vec()),
             bcc: bcc.map(|val| val.into_iter().map(|s| s.to_string()).collect_vec()),
             subject: subject.to_string(),
-            message: message.to_string()
+            message: message.to_string(),
         };
 
-        let mut lock = self.messages.lock()
+        let mut lock = self
+            .messages
+            .lock()
             .map_err(|e| EmailError::SendFailure(format!("Could not acquire mutex lock: {e}")))?;
         let r = lock.get_mut();
         r.push_back(msg);
@@ -266,61 +331,72 @@ pub struct TestEmailData {
     pub message: String,
 }
 
-
 /// A convenience function to parse a string into a [`Lettre::Mailbox`] with
 /// no name, just an email address.
 pub fn parse_email_address(email: &str) -> Result<Mailbox, EmailError> {
-    let email = email.parse::<Address>()
+    let email = email
+        .parse::<Address>()
         .map_err(|_| EmailError::UnparsableEmail(email.to_string()))?;
-    
+
     Ok(Mailbox::new(None, email))
 }
 
-fn build_message(to: &[&str], from: &str, cc: Option<&[&str]>, bcc: Option<&[&str]>, subject: &str, message: &str) -> Result<Message, EmailError> {
+fn build_message(
+    to: &[&str],
+    from: &str,
+    cc: Option<&[&str]>,
+    bcc: Option<&[&str]>,
+    subject: &str,
+    message: &str,
+) -> Result<Message, EmailError> {
     // Construct the basis of the email with the from address and subject
     let email = Message::builder()
         .from(parse_email_address(from)?)
         .subject(subject);
 
     // Add all of the recipients to the email
-    let to = to.into_iter()
+    let to = to
+        .into_iter()
         .map(|&a| parse_email_address(a))
         .collect::<Result<Vec<_>, _>>()?;
-    let email = to.into_iter()
-        .fold(email, |e, a| e.to(a));
+    let email = to.into_iter().fold(email, |e, a| e.to(a));
 
     // Add any cc'd recipients
     let email = if let Some(cc) = cc {
-        let cc = cc.into_iter()
-        .map(|c| parse_email_address(c))
-        .collect::<Result<Vec<_>, _>>()?;
-        
-        cc.into_iter()
-            .fold(email, |e, c| e.cc(c))
+        let cc = cc
+            .into_iter()
+            .map(|c| parse_email_address(c))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        cc.into_iter().fold(email, |e, c| e.cc(c))
     } else {
         email
     };
 
     // Add any bcc'd recipients
     let email = if let Some(bcc) = bcc {
-        let bcc = bcc.into_iter()
+        let bcc = bcc
+            .into_iter()
             .map(|&b| parse_email_address(b))
             .collect::<Result<Vec<_>, _>>()?;
-        
-        bcc.into_iter()
-                .fold(email, |e, b| e.bcc(b))
+
+        bcc.into_iter().fold(email, |e, b| e.bcc(b))
     } else {
         email
     };
 
-    // Add the body to the message - this converts the MessageBuilder to a 
+    // Add the body to the message - this converts the MessageBuilder to a
     // Message so it has to go last.
-    email.body(message.to_string())
+    email
+        .body(message.to_string())
         .map_err(|e| EmailError::UnencodableBody(e.to_string()))
 }
 
-
-pub async fn email_current_jobs(conn: &mut MySqlConn, config: &Config, to: &[&str]) -> anyhow::Result<()> {
+pub async fn email_current_jobs(
+    conn: &mut MySqlConn,
+    config: &Config,
+    to: &[&str],
+) -> anyhow::Result<()> {
     let summary = crate::jobs::Job::summarize_active_jobs_by_submitter(conn).await?;
     let total = summary.total_num_jobs();
     let subject = "AutoModRust current job summary";
@@ -332,8 +408,15 @@ pub async fn email_current_jobs(conn: &mut MySqlConn, config: &Config, to: &[&st
     Ok(())
 }
 
-pub async fn email_completed_jobs(conn: &mut MySqlConn, config: &Config, to: &[&str], start_date: NaiveDate, end_date: Option<NaiveDate>) -> anyhow::Result<()> {
-    let (successes, failures) = crate::jobs::Job::summarize_jobs_completed_between(conn, start_date, end_date).await?;
+pub async fn email_completed_jobs(
+    conn: &mut MySqlConn,
+    config: &Config,
+    to: &[&str],
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>,
+) -> anyhow::Result<()> {
+    let (successes, failures) =
+        crate::jobs::Job::summarize_jobs_completed_between(conn, start_date, end_date).await?;
     let (body_intro, subject) = if let Some(end) = end_date {
         let intro = format!("Priors jobs summary for {start_date} to {end}:");
         let subj = format!("AutoModRust completed job summary {start_date} to {end}");
@@ -362,6 +445,8 @@ pub async fn email_completed_jobs(conn: &mut MySqlConn, config: &Config, to: &[&
 
     let full_body = format!("{body_intro}\n\n{success_body}\n\n{failure_body}");
 
-    config.email.send_mail(to, None, None, &subject, &full_body)?;
+    config
+        .email
+        .send_mail(to, None, None, &subject, &full_body)?;
     Ok(())
 }

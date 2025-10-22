@@ -1,15 +1,20 @@
 use anyhow::{self, Context};
 use chrono::NaiveDate;
-use clap::{self,Args, Subcommand};
+use clap::{self, Args, Subcommand};
 use log::warn;
-use orm::{self, config::Config, siteinfo::{JsonType, SiteInfo, SiteType, StdOutputStructure, StdSite}, MySqlConn};
+use orm::{
+    self,
+    config::Config,
+    siteinfo::{JsonType, SiteInfo, SiteType, StdOutputStructure, StdSite},
+    MySqlConn,
+};
 use sqlx::Connection;
 
 /// Manage definition of standard sites and their locations
 #[derive(Debug, Args)]
 pub struct StdSiteCli {
     #[clap(subcommand)]
-    pub command: StdSiteActions
+    pub command: StdSiteActions,
 }
 
 #[derive(Debug, Subcommand)]
@@ -48,25 +53,25 @@ pub struct InfoJsonCli {
     /// for every site, even if it was not active on the given date. In that case,
     /// the site information closest in time to the given date is provided.
     #[clap(short = 'i', long = "inactive")]
-    inactive: bool
+    inactive: bool,
 }
-
 
 pub async fn site_info_json(db: &mut orm::MySqlConn, clargs: &InfoJsonCli) -> anyhow::Result<()> {
     let infos = if clargs.date.is_some() {
-        orm::siteinfo::SiteInfo::get_site_info_for_date(db, clargs.date.unwrap(), !clargs.inactive).await?
-    }else {
+        orm::siteinfo::SiteInfo::get_site_info_for_date(db, clargs.date.unwrap(), !clargs.inactive)
+            .await?
+    } else {
         orm::siteinfo::SiteInfo::get_all_site_info(db).await?
     };
 
     let json = match clargs.json_type {
         JsonType::Flat => orm::siteinfo::SiteInfo::to_flat_json(&infos, !clargs.minified)?,
-        JsonType::Grouped => orm::siteinfo::SiteInfo::to_grouped_json(&infos, !clargs.minified)?
+        JsonType::Grouped => orm::siteinfo::SiteInfo::to_grouped_json(&infos, !clargs.minified)?,
     };
-    
+
     if clargs.minified {
         print!("{json}");
-    }else{
+    } else {
         println!("{json}");
     }
 
@@ -81,15 +86,22 @@ pub struct AddNewStdSiteCli {
     /// The long, human-readable name for this site
     site_name: String,
     /// Whether this is a TCCON or EM27 site
-    site_type: SiteType
+    site_type: SiteType,
 }
 
-pub async fn add_new_std_site_cli(conn: &mut MySqlConn, args: AddNewStdSiteCli) -> anyhow::Result<()> {
+pub async fn add_new_std_site_cli(
+    conn: &mut MySqlConn,
+    args: AddNewStdSiteCli,
+) -> anyhow::Result<()> {
     add_new_std_site(conn, &args.site_id, &args.site_name, args.site_type).await
 }
 
-
-pub async fn add_new_std_site(conn: &mut MySqlConn, site_id: &str, site_name: &str, site_type: SiteType) -> anyhow::Result<()> {
+pub async fn add_new_std_site(
+    conn: &mut MySqlConn,
+    site_id: &str,
+    site_name: &str,
+    site_type: SiteType,
+) -> anyhow::Result<()> {
     StdSite::create(conn, site_id, site_name, site_type).await?;
     Ok(())
 }
@@ -101,38 +113,46 @@ pub struct EditSiteCli {
     site_id: String,
 
     /// A new two-letter ID for the site - must be unique among all sites
-    #[clap(long="site-id")]
+    #[clap(long = "site-id")]
     new_site_id: Option<String>,
 
     /// If given, the new name to assign for this site
-    #[clap(long="name")]
+    #[clap(long = "name")]
     site_name: Option<String>,
 
     /// If given, the new type (TCCON or EM27) for this site
-    #[clap(long="type")]
+    #[clap(long = "type")]
     site_type: Option<SiteType>,
 
     /// If given, the new output structure ("FlatModVmr", "FlatAll", "TreeModVmr", or "TreeAll")
     /// for this site. The "Flat" structures will put all the files in the root of the tarball,
     /// while the "Tree" structure retain ginputs `fpit/xx/*` directory structure. The "ModVmr"
-    /// options only keep the `.mod` and `.vmr` files, while the "All" structures include the 
+    /// options only keep the `.mod` and `.vmr` files, while the "All" structures include the
     /// `.map` files as well.
-    #[clap(long="output")]
-    output_structure: Option<StdOutputStructure>
+    #[clap(long = "output")]
+    output_structure: Option<StdOutputStructure>,
 }
 
 pub async fn edit_std_site_cli(conn: &mut MySqlConn, args: EditSiteCli) -> anyhow::Result<()> {
-    edit_std_site(conn, &args.site_id, args.new_site_id, args.site_name, args.site_type, args.output_structure).await
+    edit_std_site(
+        conn,
+        &args.site_id,
+        args.new_site_id,
+        args.site_name,
+        args.site_type,
+        args.output_structure,
+    )
+    .await
 }
 
 pub async fn edit_std_site(
-    conn: &mut MySqlConn, 
-    site_id: &str, 
+    conn: &mut MySqlConn,
+    site_id: &str,
     new_site_id: Option<String>,
-    site_name: Option<String>, 
+    site_name: Option<String>,
     site_type: Option<SiteType>,
     output_structure: Option<StdOutputStructure>,
-    ) -> anyhow::Result<()> {
+) -> anyhow::Result<()> {
     let mut trans = conn.begin().await?;
 
     let mut site = if let Some(s) = StdSite::get_by_site_id(&mut trans, site_id).await? {
@@ -162,14 +182,13 @@ pub async fn edit_std_site(
     Ok(())
 }
 
-
 /// Add a new date range defining the location of a standard site.
-/// 
+///
 /// If this is the first date range added for this site, then location,
 /// latitude, and longitude must all be given. If you are adding a new date
 /// range that overlaps an existing date range, then location, latitude, and/or
 /// longitude may be omitted so long as their values are consistent in
-/// all of the date ranges overlapped. In that case, any omitted values are copied 
+/// all of the date ranges overlapped. In that case, any omitted values are copied
 /// from the overlapped existing periods.
 #[derive(Debug, Args)]
 pub struct AddSiteInfoCli {
@@ -203,7 +222,11 @@ pub struct AddSiteInfoCli {
     comment: Option<String>,
 }
 
-pub async fn add_std_site_info_range_cli(conn: &mut MySqlConn, config: &Config, args: AddSiteInfoCli) -> anyhow::Result<()> {
+pub async fn add_std_site_info_range_cli(
+    conn: &mut MySqlConn,
+    config: &Config,
+    args: AddSiteInfoCli,
+) -> anyhow::Result<()> {
     add_std_site_info_range(
         conn,
         config,
@@ -213,37 +236,30 @@ pub async fn add_std_site_info_range_cli(conn: &mut MySqlConn, config: &Config, 
         args.location,
         args.longitude,
         args.latitude,
-        args.comment.as_deref()
-    ).await
+        args.comment.as_deref(),
+    )
+    .await
 }
 
 pub async fn add_std_site_info_range(
-    conn: &mut MySqlConn, 
+    conn: &mut MySqlConn,
     config: &Config,
-    site_id: &str, 
-    start_date: NaiveDate, 
-    end_date: Option<NaiveDate>, 
-    location: Option<String>, 
-    longitude: Option<f32>, 
-    latitude: Option<f32>, 
-    comment: Option<&str>
+    site_id: &str,
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>,
+    location: Option<String>,
+    longitude: Option<f32>,
+    latitude: Option<f32>,
+    comment: Option<&str>,
 ) -> anyhow::Result<()> {
     SiteInfo::set_site_info_for_dates(
-        conn, 
-        config,
-        site_id, 
-        start_date, 
-        end_date, 
-        location, 
-        longitude, 
-        latitude, 
-        comment,
-        false
-    ).await
+        conn, config, site_id, start_date, end_date, location, longitude, latitude, comment, false,
+    )
+    .await
 }
 
 /// Clear existing location information for a site
-/// 
+///
 /// Note that this will delete output files for the cleared
 /// dates the next time regen flags are processed.
 #[derive(Debug, Args)]
@@ -259,7 +275,11 @@ pub struct SetNonopCli {
     end_date: Option<NaiveDate>,
 }
 
-pub async fn clear_site_info_range_cli(conn: &mut MySqlConn, config: &Config, args: SetNonopCli) -> anyhow::Result<()> {
+pub async fn clear_site_info_range_cli(
+    conn: &mut MySqlConn,
+    config: &Config,
+    args: SetNonopCli,
+) -> anyhow::Result<()> {
     clear_site_info_range(conn, config, &args.site_id, args.start_date, args.end_date).await
 }
 
@@ -268,24 +288,16 @@ pub async fn clear_site_info_range(
     config: &Config,
     site_id: &str,
     start_date: NaiveDate,
-    end_date: Option<NaiveDate>
+    end_date: Option<NaiveDate>,
 ) -> anyhow::Result<()> {
     SiteInfo::set_site_info_for_dates(
-        conn,
-        config,
-        site_id,
-        start_date,
-        end_date,
-        None,
-        None,
-        None,
-        None,
-        true
-    ).await
+        conn, config, site_id, start_date, end_date, None, None, None, None, true,
+    )
+    .await
 }
 
 /// Delete a site info entry by its ID
-/// 
+///
 /// WARNING: this is meant *only* for cleaning up row entries that should not exist.
 /// If you want to indicate that a site should not have priors generated for a given
 /// time, use set-nonop instead. This subcommand does not update the site jobs table.
@@ -297,26 +309,34 @@ pub struct DeleteInfoCli {
 }
 
 pub async fn delete_info_row_cli(conn: &mut MySqlConn, args: DeleteInfoCli) -> anyhow::Result<()> {
-    let info = SiteInfo::get_location_by_id(conn, args.row_id).await
-        .with_context(|| format!("Error occurred retrieving info row with id = {}", args.row_id))?;
-    info.delete(conn).await
-        .with_context(|| format!("Error occurred while trying to delete info row with id = {}", args.row_id))?;
+    let info = SiteInfo::get_location_by_id(conn, args.row_id)
+        .await
+        .with_context(|| {
+            format!(
+                "Error occurred retrieving info row with id = {}",
+                args.row_id
+            )
+        })?;
+    info.delete(conn).await.with_context(|| {
+        format!(
+            "Error occurred while trying to delete info row with id = {}",
+            args.row_id
+        )
+    })?;
     Ok(())
 }
-
 
 /// Print out a table of defined standard sites
 #[derive(Debug, Args)]
 pub struct PrintSitesCli {
     /// Limit to only sites of a certain type
     #[clap(short = 't', long = "type")]
-    site_type: Option<SiteType>
+    site_type: Option<SiteType>,
 }
 
 pub async fn print_sites_cli(conn: &mut MySqlConn, args: PrintSitesCli) -> anyhow::Result<()> {
     print_sites(conn, args.site_type).await
 }
-
 
 pub async fn print_sites(conn: &mut MySqlConn, site_type: Option<SiteType>) -> anyhow::Result<()> {
     let sites = StdSite::get_by_type(conn, site_type).await?;
@@ -328,18 +348,21 @@ pub async fn print_sites(conn: &mut MySqlConn, site_type: Option<SiteType>) -> a
 /// Print currently defined location info for a given site
 #[derive(Debug, Args)]
 pub struct PrintLocsCli {
-    /// The two-letter ID for the site to print information about. If omitted, 
+    /// The two-letter ID for the site to print information about. If omitted,
     /// all sites' information is printed.
-    site_id: Option<String>
+    site_id: Option<String>,
 }
 
-pub async fn print_locations_for_site_cli(conn: &mut MySqlConn, args: PrintLocsCli) -> anyhow::Result<()> {
+pub async fn print_locations_for_site_cli(
+    conn: &mut MySqlConn,
+    args: PrintLocsCli,
+) -> anyhow::Result<()> {
     print_locations_for_site(conn, args.site_id.as_deref()).await
 }
 
 pub async fn print_locations_for_site(
     conn: &mut MySqlConn,
-    site_id: Option<&str>
+    site_id: Option<&str>,
 ) -> anyhow::Result<()> {
     let infos = if let Some(sid) = site_id {
         SiteInfo::get_site_locations(conn, sid).await?
