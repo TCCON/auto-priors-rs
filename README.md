@@ -40,6 +40,7 @@ DATABASE_URL="mysql://tccon:****@localhost/priors"
     - The `database create` command may fail if the user specified in the `DATABASE_URL` does not have database creation privileges.
     - In that case, you can create the database manually from within `mysql` with `CREATE DATABASE priors` using a root or administrator account.
 8. Compile the project; from the repo root, run `cargo build`. If successful, the `tccon-priors-cli` and `tccon-priors-service` executables will be produced in `./target/debug`.
+    - Note, for deployment, you should use `cargo build --release` and find the executables under `./target/release` instead, as their will have much better optimization.
 9. Create a default configuration file. Assuming you want the file written to `auto-priors.toml`, the command to run from the repo root is `./target/debug/tccon-priors-cli config gen auto-priors.toml`. Modify this file as needed.
 10. Add the path to your new config file to the `.env` file. Assuming the config file created in step 9 is at the path `/home/tccon/auto-priors-rs/auto-priors.toml`, add the following line to the `.env` file:
 
@@ -53,7 +54,27 @@ PRIOR_CONFIG_FILE=/home/tccon/auto-priors-rs/auto-priors.toml
     - On your computer, run `tccon-priors-cli db import priors-db.json` (assuming the JSON file is named `priors-db.json`).
     - This process will be slower than using `mysqldump`; however, it avoids issues with subtly different MySQL configurations.
 
+## Further documention
+
+More documentation is available in the `book` subdirectory.
+You can browse the markdown in `book/src` directly, or use `mdbook` to render it.
+To render it:
+
+1. Install [mdbook](https://crates.io/crates/mdbook)
+2. Install [mdbook-admonish](https://crates.io/crates/mdbook-admonish)
+3. In the `book` subdirectory, run `mdbook serve`. It will provide a localhost link where you can view the rendered book.
+
+Unfortunately, GitHub pages requires that a repository be made public or be hosted by a GitHub Enterprise account.
+Until/unless we make this repository public, the best way to view the book is locally.
+
 ## Notes during development
 
-This project uses [sqlx](https://crates.io/crates/sqlx) to interact with the database. Most of the queries are checked at compile time with its `query!` and `query_as!` macros. This requires that the MySQL server be running on your computer, and that the database specified in the `.env` file's `DATABASE_URL` variable exist with the proper tables. The `cargo sqlx` commands in step 7 of the setup will take care of the second requirement. If your MySQL server doesn't start automatically, then you will get many errors about "unable to connect to database" when compiling or in your code editor. If that happens, just start the MySQL server. For Macs, the command is probably `mysql.server start`. For other systems, consult the documentation for your MySQL server.
+This project uses [sqlx](https://crates.io/crates/sqlx) to interact with the database.
+Most of the queries are checked at compile time with its `query!` and `query_as!` macros.
+This requires that the MySQL server be running on your computer, and that the database specified in the `.env` file's `DATABASE_URL` variable exist with the proper tables.
+The `cargo sqlx` commands in step 7 of the setup will take care of the second requirement.
+If your MySQL server doesn't start automatically, then you will get many errors about "unable to connect to database" when compiling or in your code editor.
+If that happens, just start the MySQL server.
+For Macs, the command is probably either `mysql.server start` or `mariadbd`.
+For other systems, consult the documentation for your MySQL server.
 

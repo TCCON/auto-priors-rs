@@ -14,6 +14,22 @@ not a summarization of the database.)
 2. Run `cargo sqlx prepare --workspace -- --all-targets`
 3. Stop `mariadbd`. (Ctrl+C doesn't seem to work, so I just `pkill mariadbd` in another shell.)
 
+## Running tests on Linux
+
+You can use docker on Linux OSes natively; however, you will likely need to do some configuration to get testcontainers to work.
+
+1. Install docker, if not already done: e.g., https://docs.docker.com/engine/install/ubuntu/
+2. Add your user to the docker group: `sudo usermod -aG docker $USER`
+3. You may need to set the `DOCKER_HOST` environmental variable to point to your `docker.sock` file. 
+   `testcontainers` tries to find this automatically, but if docker has put the socket in a place it
+   isn't expecting, the tests will fail. In my case, the socket was at `/var/run/docker.sock`, so I
+   did `export DOCKER_HOST=unix:///var/run/docker.sock`.
+
+Now, you can run the tests with `SQLX_OFFLINE=true cargo test --features=container-tests`.
+If you get an error about some kind of connection error, verify that you've done both step 2 and 3.
+If you get an error about database queries during compilation, ensure that your prepared queries are
+up to date.
+
 ## Running tests with Podman
 
 Start podman with `podman machine start`.

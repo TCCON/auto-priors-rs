@@ -78,13 +78,25 @@ impl Display for StdSiteJobState {
 
 #[derive(Debug)]
 pub struct StdSiteJob {
+    /// The ID for this row in the table
     pub id: i32,
+    /// The TCCON-style two-character site ID for this job
     pub site_id: String,
+    /// The date for which this job produces priors
     pub date: NaiveDate,
+    /// The state of this job, distinct from the regular Job state
     pub state: StdSiteJobState,
+    /// Whether this job is for a TCCON or EM27 site
     pub site_type: SiteType,
+    /// The ID in the Jobs table of the job that will/has produced the
+    /// output for this site/date. Will be `None` if no job has been submitted
+    /// yet or if the tarball for this site/date was imported from an existing
+    /// source.
     pub job: Option<i32>,
+    /// Path to the tarfile for this site/date. Will be `None` if it has not yet
+    /// been generated.
     pub tarfile: Option<PathBuf>,
+    /// How the .mod and .vmr files should be organized within the tarball.
     pub output_structure: StdOutputStructure,
 }
 
@@ -995,33 +1007,22 @@ impl StdSiteJob {
                     );
                 }
             } else {
-                // If there is no existing standard site job, then create it.
-                if let Some(job) = Self::find_existing_job_for_standard_site(
-                    &config.execution.std_site_job_queue,
-                    site_id.clone(),
+                // If there is no existing standard site job, then create it with no foreign key job ID
+                let ss_id = Self::add_std_site_job_row_from_args(
+                    conn,
+                    &site_id,
                     date,
-                    &all_jobs,
-                ) {
-                    let ss_id = Self::add_std_site_job_row_from_args(
-                        conn,
-                        &site_id,
-                        date,
-                        StdSiteJobState::InProgress,
-                        Some(job.job_id),
-                    )
-                    .await?;
-                    let mut ss = Self::get_std_job_by_id(conn, ss_id).await?
-                        .ok_or_else(|| anyhow::anyhow!("Failed to get the standard site job just created with ID = {ss_id} (this should not happen)"))?;
-                    ss.set_complete(conn, tarball.to_path_buf(), Some(job.job_id))
-                        .await?;
-                    info!(
-                        "Created standard site job to use tarball {} and job {}",
-                        tarball.display(),
-                        job.job_id
-                    );
-                } else {
-                    warn!("Could not use tarball {}, no job in the standard sites queue matches its site ID and date", tarball.display());
-                }
+                    StdSiteJobState::InProgress,
+                    None,
+                )
+                .await?;
+                let mut ss = Self::get_std_job_by_id(conn, ss_id).await?
+                    .ok_or_else(|| anyhow::anyhow!("Failed to get the standard site job just created with ID = {ss_id} (this should not happen)"))?;
+                ss.set_complete(conn, tarball.to_path_buf(), None).await?;
+                info!(
+                    "Created standard site job to use tarball {}",
+                    tarball.display()
+                );
             }
         }
 
