@@ -153,14 +153,15 @@ async fn import_db_inner(conn: &mut MySqlConn, db_data: Db) -> anyhow::Result<()
     info!("Filling table MetFiles");
     for row in progress_iter(db_data.met_files) {
         sqlx::query!(
-            "INSERT INTO MetFiles(file_id, file_path, product, filedate, levels, data_type) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO MetFiles(file_id, file_path, product_key, filedate) VALUES (?, ?, ?, ?)",
             row.file_id,
-            row.file_path.to_str().ok_or_else(|| anyhow::anyhow!("Unable to convert met file path to string"))?, 
-            row.product.to_string(),
+            row.file_path
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("Unable to convert met file path to string"))?,
+            row.product_key,
             row.filedate.to_string(),
-            row.levels.to_string(),
-            row.data_type.to_string()
-        ).execute(&mut *conn)
+        )
+        .execute(&mut *conn)
         .await?;
     }
     info!("MetFile complete.");

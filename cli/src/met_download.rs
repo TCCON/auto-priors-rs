@@ -590,7 +590,7 @@ pub async fn print_met_availability_table_all_mets(
     // First get the list of all mets defined in the config
     let met_keys = config
         .data
-        .download
+        .met_download
         .keys()
         .map(|k| k.to_string())
         .collect_vec();
@@ -1160,7 +1160,7 @@ pub async fn download_files_for_dates(
 async fn download_one_file_set_one_date(
     conn: &mut orm::MySqlConn,
     date: NaiveDate,
-    file_cfg: &orm::config::DownloadConfig,
+    file_cfg: &orm::config::MetDownloadConfig,
     mut downloader: impl utils::Downloader,
     dry_run: bool,
 ) -> Result<(), DownloadError> {

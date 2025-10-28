@@ -907,7 +907,7 @@ async fn test_single_met_start_from_dl_config() {
         "Final date in iterator was incorrect when all files have the same earliest_date values"
     );
 
-    let fpit_cfg = config.data.download.get_mut("geosfpit").unwrap();
+    let fpit_cfg = config.data.met_download.get_mut("geosfpit").unwrap();
     fpit_cfg[0].earliest_date = NaiveDate::from_ymd_opt(2011, 1, 1).unwrap();
 
     // Redo the test with the different files having different start dates - should take the latest one
@@ -944,7 +944,10 @@ async fn test_single_met_start_from_defaults() {
 
     // This is deliberately contrived - someone would really have to write a funky TOML file
     // for this to happen, but it could.
-    config.data.download.insert("geosfpit".to_owned(), vec![]);
+    config
+        .data
+        .met_download
+        .insert("geosfpit".to_owned(), vec![]);
     // The test config doesn't define a start date for GEOS-FPIT, so let's change that.
     config.default_options.get_mut(0).unwrap().start_date =
         Some(NaiveDate::from_ymd_opt(2004, 7, 1).unwrap());
@@ -982,7 +985,10 @@ async fn test_single_met_no_valid_start_err() {
 
     // This is deliberately contrived - someone would really have to write a funky TOML file
     // for this to happen, but it could. Now there should be no way for it to find a start date.
-    config.data.download.insert("geosfpit".to_owned(), vec![]);
+    config
+        .data
+        .met_download
+        .insert("geosfpit".to_owned(), vec![]);
 
     let res =
         met_download::get_date_iter(&mut conn, &config, None, None, Some("geosfpit"), false).await;

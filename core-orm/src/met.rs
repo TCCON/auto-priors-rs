@@ -304,13 +304,8 @@ pub struct MetFile {
     pub file_path: PathBuf,
     #[allow(dead_code)]
     pub file_path_sha256: Option<String>,
-    #[sqlx(try_from = "String")]
-    pub product: MetProduct,
+    pub product_key: String,
     pub filedate: NaiveDateTime,
-    #[sqlx(try_from = "String")]
-    pub levels: MetLevels,
-    #[sqlx(try_from = "String")]
-    pub data_type: MetDataType,
 }
 
 impl MetFile {
@@ -318,7 +313,7 @@ impl MetFile {
     ///
     /// Will error if the frequency specified in the configuration does not divide evenly
     /// into a day (e.g. if the files are provided every 300 minutes)
-    fn num_expected_daily_files(cfg: &config::DownloadConfig) -> anyhow::Result<i64> {
+    fn num_expected_daily_files(cfg: &config::MetDownloadConfig) -> anyhow::Result<i64> {
         if 1440 % cfg.file_freq_min != 0 {
             let remainder = 1440 % cfg.file_freq_min;
             let msg = format!("A met configuration has a file frequency that does not evenly divide per day, remaining minutes were {remainder} ({cfg})");
@@ -330,7 +325,7 @@ impl MetFile {
 
     pub async fn get_first_complete_date_for_config(
         conn: &mut MySqlConn,
-        cfg: &config::DownloadConfig,
+        cfg: &config::MetDownloadConfig,
     ) -> anyhow::Result<Option<NaiveDate>> {
         let n_expected = Self::num_expected_daily_files(cfg)?;
 
@@ -345,13 +340,11 @@ impl MetFile {
                 FROM (
                     SELECT DATE(filedate) AS date,COUNT(filedate) AS count
                     FROM MetFiles
-                    WHERE levels = ? AND data_type = ? AND product = ?
+                    WHERE product_key = ?
                     GROUP BY DATE(filedate)
                 ) AS tbl
                 WHERE tbl.count = ?"#,
-            cfg.levels.to_string(),
-            cfg.data_type.to_string(),
-            cfg.product.to_string(),
+            cfg.product_key,
             n_expected
         )
         .fetch_one(conn)
@@ -372,7 +365,7 @@ impl MetFile {
     /// Returns an `Err` if querying the database fails.
     pub async fn get_last_complete_date_for_config(
         conn: &mut MySqlConn,
-        cfg: &config::DownloadConfig,
+        cfg: &config::MetDownloadConfig,
     ) -> anyhow::Result<Option<NaiveDate>> {
         let n_expected = Self::num_expected_daily_files(cfg)?;
 
@@ -387,13 +380,11 @@ impl MetFile {
                 FROM (
                     SELECT DATE(filedate) AS date,COUNT(filedate) AS count
                     FROM MetFiles
-                    WHERE levels = ? AND data_type = ? AND product = ?
+                    WHERE product_key = ?
                     GROUP BY DATE(filedate)
                 ) AS tbl
                 WHERE tbl.count = ?"#,
-            cfg.levels.to_string(),
-            cfg.data_type.to_string(),
-            cfg.product.to_string(),
+            cfg.product_key,
             n_expected
         )
         .fetch_one(conn)
@@ -420,7 +411,7 @@ impl MetFile {
     /// This will return an `Err` if the database query fails.
     pub async fn get_first_or_last_complete_date_for_config_set(
         conn: &mut MySqlConn,
-        cfgs: &[config::DownloadConfig],
+        cfgs: &[config::MetDownloadConfig],
         first: bool,
     ) -> anyhow::Result<Option<NaiveDate>> {
         let mut dates = vec![];
@@ -564,16 +555,14 @@ impl MetFile {
     pub async fn is_date_complete_for_config(
         conn: &mut MySqlConn,
         date: NaiveDate,
-        cfg: &config::DownloadConfig,
+        cfg: &config::MetDownloadConfig,
     ) -> anyhow::Result<MetDayState> {
         let n_expected = Self::num_expected_daily_files(cfg)?;
         let n_found = sqlx::query!(
             r#"SELECT COUNT(filedate) as count FROM MetFiles
-               WHERE DATE(filedate) = ? and levels = ? AND data_type = ? AND product = ?"#,
+               WHERE DATE(filedate) = ? AND product_key = ?"#,
             date,
-            cfg.levels.to_string(),
-            cfg.data_type.to_string(),
-            cfg.product.to_string()
+            cfg.product_key
         )
         .fetch_one(conn)
         .await?
@@ -606,7 +595,7 @@ impl MetFile {
     pub async fn is_date_complete_for_config_set(
         conn: &mut MySqlConn,
         date: NaiveDate,
-        cfgs: &[config::DownloadConfig],
+        cfgs: &[config::MetDownloadConfig],
     ) -> anyhow::Result<MetDayState> {
         let mut states = vec![];
         let mut num_expected = vec![];
@@ -779,7 +768,7 @@ impl MetFile {
         conn: &mut MySqlConn,
         file: &Path,
         datetime: NaiveDateTime,
-        download_cfg: &config::DownloadConfig,
+        download_cfg: &config::MetDownloadConfig,
     ) -> Result<(), AddMetFileError> {
         if !file.exists() {
             return Err(AddMetFileError::FileDoesNotExist(file.to_path_buf()));
@@ -811,11 +800,7 @@ impl MetFile {
         })?;
 
         if let Some(record) = extant_record {
-            if datetime != record.filedate
-                || download_cfg.product != record.product
-                || download_cfg.levels != record.levels
-                || download_cfg.data_type != record.data_type
-            {
+            if datetime != record.filedate || download_cfg.product_key != record.product_key {
                 // For now, I'm considering this an error. If we've downloaded the same file, it should have the
                 // same characteristics.
                 return Err(AddMetFileError::FileCharacteristicMismatch(
@@ -828,15 +813,19 @@ impl MetFile {
 
         // TODO: make a method to insert a new metfile, use it here and update export::import_db_inner
         sqlx::query!(
-            "INSERT INTO MetFiles (file_path, filedate, product, levels, data_type) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO MetFiles (file_path, filedate, product_key) VALUES (?, ?, ?)",
             file_str,
             datetime,
-            download_cfg.product.to_string(),
-            download_cfg.levels.to_string(),
-            download_cfg.data_type.to_string()
-        ).execute(conn)
+            download_cfg.product_key,
+        )
+        .execute(conn)
         .await
-        .with_context(|| format!("Error occurred trying to insert {} into MetFiles table", file.display()))?;
+        .with_context(|| {
+            format!(
+                "Error occurred trying to insert {} into MetFiles table",
+                file.display()
+            )
+        })?;
 
         Ok(())
     }
@@ -847,7 +836,7 @@ impl MetFile {
     /// or if the parsing of the file name fails.
     fn date_from_filename(
         file: &Path,
-        download_cfg: &config::DownloadConfig,
+        download_cfg: &config::MetDownloadConfig,
     ) -> anyhow::Result<NaiveDateTime> {
         let basename = file
             .file_name()
@@ -870,7 +859,7 @@ impl MetFile {
     pub async fn add_met_file_infer_date(
         conn: &mut MySqlConn,
         file: &Path,
-        download_cfg: &config::DownloadConfig,
+        download_cfg: &config::MetDownloadConfig,
     ) -> Result<(), AddMetFileError> {
         let datetime = Self::date_from_filename(file, download_cfg)?;
         Self::add_met_file(conn, file, datetime, download_cfg).await
@@ -891,17 +880,15 @@ impl MetFile {
     pub async fn file_exists_by_type(
         conn: &mut MySqlConn,
         file: &Path,
-        file_cfg: &config::DownloadConfig,
+        file_cfg: &config::MetDownloadConfig,
     ) -> anyhow::Result<bool> {
         let datetime = Self::date_from_filename(file, file_cfg)?;
 
         let n = sqlx::query!(
             r#"SELECT COUNT(*) as count FROM MetFiles
-               WHERE filedate = ? AND product = ? AND levels = ? and data_type = ?"#,
+               WHERE filedate = ? AND product_key = ?"#,
             datetime,
-            file_cfg.product.to_string(),
-            file_cfg.levels.to_string(),
-            file_cfg.data_type.to_string()
+            file_cfg.product_key.to_string(),
         )
         .fetch_one(conn)
         .await?
