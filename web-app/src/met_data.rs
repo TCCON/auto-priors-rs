@@ -42,17 +42,13 @@ impl MetDateStatus {
 struct MetFileRow {
     date: chrono::NaiveDateTime,
     product: String,
-    levels: orm::met::MetLevels,
-    data_type: orm::met::MetDataType,
     name: String,
 }
 
 impl From<orm::met::MetFile> for MetFileRow {
     fn from(value: orm::met::MetFile) -> Self {
         let date = value.filedate;
-        let product = value.product.pretty().to_string();
-        let levels = value.levels;
-        let data_type = value.data_type;
+        let product = value.product_key.to_string();
         let name = value
             .file_path
             .file_name()
@@ -61,8 +57,6 @@ impl From<orm::met::MetFile> for MetFileRow {
         Self {
             date,
             product,
-            levels,
-            data_type,
             name,
         }
     }
@@ -97,19 +91,21 @@ impl MetDataContext {
 
         let mut date_statuses = vec![];
         for date in orm::utils::DateIterator::new_one_range(start_date, end_date_excl) {
-            let expected_products = config.get_single_product_configs_for_date(date);
+            let proc_cfg_keys = config.get_possible_proc_cfgs_for_date(date);
             let mut prod_status = HashMap::new();
-            for (prod, cfgs) in expected_products {
+            for key in proc_cfg_keys {
+                let keyed_met_cfgs = config.get_mets_for_processing_config(key)?;
                 let status =
-                    orm::met::MetFile::is_date_complete_for_config_set(conn, date, cfgs).await?;
-                prod_status.insert(prod.pretty().to_string(), status);
+                    orm::met::MetFile::is_date_complete_for_config_set(conn, date, &keyed_met_cfgs)
+                        .await?;
+                prod_status.insert(key.to_string(), status);
             }
             date_statuses.push(MetDateStatus { date, prod_status });
         }
 
         let product_strings = available_products
             .into_iter()
-            .map(|p| p.pretty().to_string())
+            .map(|p| p.to_string())
             .collect_vec();
         Ok(Self {
             root_uri,

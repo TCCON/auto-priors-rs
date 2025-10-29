@@ -26,8 +26,7 @@ pub(crate) struct DisplayJob {
     pub(crate) end_date: String,
     pub(crate) email: String,
     pub(crate) delete_time: String,
-    pub(crate) met_key: String,
-    pub(crate) ginput_key: String,
+    pub(crate) proc_cfg_key: String,
     pub(crate) save_tarball: String,
     pub(crate) mod_fmt: String,
     pub(crate) vmr_fmt: String,
@@ -68,8 +67,7 @@ impl DisplayJob {
             "end_date" => &self.end_date,
             "email" => &self.email,
             "delete_time" => &self.delete_time,
-            "met_key" => &self.met_key,
-            "ginput_key" => &self.ginput_key,
+            "proc_config_key" => &self.proc_cfg_key,
             "save_tarball" => &self.save_tarball,
             "mod_fmt" => &self.mod_fmt,
             "vmr_fmt" => &self.vmr_fmt,
@@ -93,8 +91,10 @@ impl From<Job> for DisplayJob {
             .delete_time
             .map(|dt| dt.to_string())
             .unwrap_or_else(|| "None".to_string());
-        let met_key = job.met_key.unwrap_or_else(|| "Default".to_string());
-        let ginput_key = job.ginput_key.unwrap_or_else(|| "Default".to_string());
+        let proc_cfg_key = job
+            .processing_key
+            .map(|k| k.0)
+            .unwrap_or_else(|| "Default".to_string());
         let save_tarball = job.save_tarball.to_string();
         let mod_fmt = job.mod_fmt.to_string();
         let vmr_fmt = job.vmr_fmt.to_string();
@@ -114,8 +114,7 @@ impl From<Job> for DisplayJob {
             end_date,
             email,
             delete_time,
-            met_key,
-            ginput_key,
+            proc_cfg_key,
             save_tarball,
             mod_fmt,
             vmr_fmt,

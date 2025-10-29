@@ -17,14 +17,16 @@
     <h2>Date status</h2>
     <!-- This will be a table with each date as a row and a simple checkmark for complete, X for missing, maybe something else for partially complete. -->
     <table class="job-table">
-        <thead><th>Date</th>{% for prod in products %}<th>{{ prod }}</th>{% endfor %}</thead>
+        <thead>
+            <th>Date</th>{% for prod in products %}<th>{{ prod }}</th>{% endfor %}
+        </thead>
         {% for date in dates %}
-            <tr>
-                <td>{{ date.date }}</td>
-                {% for prod in products %}
-                    <td>{{ date.get_status_str(prod) }}</td>
-                {% endfor %}
-            </tr>
+        <tr>
+            <td>{{ date.date }}</td>
+            {% for prod in products %}
+            <td>{{ date.get_status_str(prod) }}</td>
+            {% endfor %}
+        </tr>
         {% endfor %}
     </table>
 
@@ -34,15 +36,17 @@
     <p>No met files found between {{ start_date }} and {{ end_date }}</p>
     {% else %}
     <table class="job-table">
-        <thead><th>File datetime</th><th>Product</th><th>Levels</th><th>Type</th><th>File name</th></thead>
+        <thead>
+            <th>File datetime</th>
+            <th>Product</th>
+            <th>File name</th>
+        </thead>
         {% for file in files %}
-            <tr>
-                <td>{{ file.date }}</td>
-                <td>{{ file.product }}</td>
-                <td>{{ file.levels }}</td>
-                <td>{{ file.data_type }}</td>
-                <td>{{ file.name }}</td>
-            </tr>
+        <tr>
+            <td>{{ file.date }}</td>
+            <td>{{ file.product }}</td>
+            <td>{{ file.name }}</td>
+        </tr>
         {% endfor %}
     </table>
     {% endif %}

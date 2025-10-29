@@ -145,10 +145,11 @@ async fn get_date_iter_for_defaults(
         // Take the later of the earliest date for which this meteorology is available and the start of the
         // default set - assuming that if the default set starts after the met, then we don't need the full
         // met record.
-        let first_met_configs = config.get_met_configs(&first_defaults.met)?;
+        let first_met_configs =
+            config.get_mets_for_processing_config(&first_defaults.processing_configuration)?;
         let met_start_date = first_met_configs
             .iter()
-            .map(|c| c.earliest_date)
+            .map(|c| c.cfg.earliest_date)
             .max()
             .expect("Should have been at least one file configured for the first meteorology"); // get_met_configs should have errored if 0 met files defined
 

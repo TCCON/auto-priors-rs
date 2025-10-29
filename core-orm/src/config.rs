@@ -76,7 +76,7 @@ impl ConfigValidationError {
 #[derive(Debug)]
 pub enum ConfigValErrorCause {
     UnknownGinputKey {
-        key: String,
+        key: GinputCfgKey,
         location: String,
     },
     UnknownMetKey {
@@ -240,6 +240,29 @@ pub struct MetCfgKey(pub String);
 impl Display for MetCfgKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Deserialize, Serialize)]
+pub struct GinputCfgKey(String);
+
+impl Display for GinputCfgKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for GinputCfgKey {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl FromStr for GinputCfgKey {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_string()))
     }
 }
 
@@ -444,6 +467,16 @@ impl Config {
         }
 
         Ok((geos_path, chem_path, ginput_met_key))
+    }
+
+    pub fn get_possible_proc_cfgs_for_date(&self, date: NaiveDate) -> Vec<&ProcCfgKey> {
+        let mut proc_cfgs = vec![];
+        for (key, proc_cfg) in self.processing_configurations.iter() {
+            if proc_cfg.contains_date(date) {
+                proc_cfgs.push(key)
+            }
+        }
+        proc_cfgs
     }
 
     /// The top-level subdirectory that `ginput` places output for this met type, e.g. "fpit" for GEOS FP-IT.
@@ -921,7 +954,7 @@ pub struct ExecutionConfig {
     pub queues: HashMap<String, JobQueueOptions>,
 
     /// Map of available ginput versions to use.
-    pub ginput: HashMap<String, GinputConfig>,
+    pub ginput: HashMap<GinputCfgKey, GinputConfig>,
 }
 
 impl Default for ExecutionConfig {
@@ -1608,7 +1641,7 @@ where
     );
 
     default_cfg.execution.ginput.insert(
-        "v1.0.6".to_string(),
+        GinputCfgKey::from("v1.0.6".to_string()),
         GinputConfig::Script {
             entry_point_path: PathBuf::new(),
         },

@@ -33,7 +33,7 @@ const DEFAULT_MIN_SUB_DATE: NaiveDate = NaiveDate::from_ymd_opt(1970, 1, 1).unwr
 const DEFAULT_MAX_SUB_DATE: NaiveDate = NaiveDate::from_ymd_opt(2100, 1, 1).unwrap();
 
 use crate::{
-    config::{Config, EmailConfig, ProcCfgKey},
+    config::{Config, EmailConfig, GinputCfgKey, ProcCfgKey},
     error::{JobAddError, JobError, JobPriorityError, JobResult},
     siteinfo, utils, MySqlConn, PoolWrapper,
 };
@@ -2463,11 +2463,11 @@ async fn run_priors_gen_job(pool: PoolWrapper, mut job: Job, config: Config) -> 
     Ok(())
 }
 
-pub fn start_lut_regen_job(ginput_key: String, config: Config) -> GinputHandle {
+pub fn start_lut_regen_job(ginput_key: GinputCfgKey, config: Config) -> GinputHandle {
     tokio::spawn(async move { run_lut_regen_job(ginput_key, config).await })
 }
 
-async fn run_lut_regen_job(ginput_key: String, config: Config) -> anyhow::Result<()> {
+async fn run_lut_regen_job(ginput_key: GinputCfgKey, config: Config) -> anyhow::Result<()> {
     let ginput = config.execution.ginput.get(&ginput_key)
         .ok_or_else(|| anyhow::anyhow!("Ginput key '{ginput_key}', passed to regenerate LUTs, is not defined in the configuration"))?;
     let runner = get_runner_for_ginput(ginput);

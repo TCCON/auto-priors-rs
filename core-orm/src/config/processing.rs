@@ -10,7 +10,8 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    ConfigValErrorCause, ConfigValidationError, KeyedMetDownloadConfig, MetCfgKey, ProcCfgKey,
+    ConfigValErrorCause, ConfigValidationError, GinputCfgKey, KeyedMetDownloadConfig, MetCfgKey,
+    ProcCfgKey,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +22,7 @@ pub struct ProcessingConfig {
 
     /// The key for the ginput section from the execution configuration
     /// to use to run this processing.
-    pub ginput: String,
+    pub ginput: GinputCfgKey,
 
     /// The earliest date that this configuration may be requested.
     pub start_date: NaiveDate,
@@ -72,6 +73,14 @@ impl ProcessingConfig {
     /// then this configuration should be produced indefinitely.
     fn auto_end_date(&self) -> Option<NaiveDate> {
         self.auto_end_date.or(self.end_date)
+    }
+
+    pub(super) fn contains_date(&self, date: NaiveDate) -> bool {
+        if let Some(end) = self.end_date {
+            date >= self.start_date && date < end
+        } else {
+            date >= self.start_date
+        }
     }
 
     pub fn get_met_configs<'a>(
