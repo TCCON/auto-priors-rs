@@ -140,7 +140,7 @@ impl StdSiteJob {
     ) -> anyhow::Result<()> {
         let first_date = if let Some(d) = not_before {
             d
-        } else if let Some(d) = met::MetFile::get_first_complete_day_for_default_mets(conn, config).await
+        } else if let Some(d) = met::MetFile::get_first_complete_day_for_default_processing(conn, config).await
         .context("Error occurred while trying to identify the first complete day for default meteorologies")? {
             d
         } else {
@@ -148,7 +148,7 @@ impl StdSiteJob {
             return Ok(());
         };
 
-        let last_met_date = if let Some(d) = met::MetFile::get_last_complete_date_for_default_mets(conn, config).await
+        let last_met_date = if let Some(d) = met::MetFile::get_last_complete_date_for_default_processing(conn, config).await
             .context("Error occurred while trying to identify the last complete day for default meteorologies")? {
                 d
             } else {
@@ -277,7 +277,7 @@ impl StdSiteJob {
                     log::info!("Adding 'JobNeeded' entries ({ndates} complete so far)")
                 }
 
-                if !crate::met::MetFile::is_date_complete_for_default_mets(conn, config, date)
+                if !crate::met::MetFile::is_date_complete_for_default_processing(conn, config, date)
                     .await?
                     .is_complete()
                 {
@@ -401,7 +401,7 @@ impl StdSiteJob {
 
         for date in dates_missing_met {
             if let met::MetDayState::Complete =
-                met::MetFile::is_date_complete_for_default_mets(conn, config, date).await?
+                met::MetFile::is_date_complete_for_default_processing(conn, config, date).await?
             {
                 // Assumes that if a date was missing met, it can't have an output file, so we only need to set the state
                 let res = sqlx::query!(
@@ -471,7 +471,7 @@ impl StdSiteJob {
                 .try_collect()
                 .with_context(|| format!("Could not convert standard site job table row IDs back from string for date {} (this shouldn't happen)", rec.date))?;
 
-            if !crate::met::MetFile::is_date_complete_for_default_mets(conn, config, rec.date)
+            if !crate::met::MetFile::is_date_complete_for_default_processing(conn, config, rec.date)
                 .await?
                 .is_complete()
             {

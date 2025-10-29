@@ -4,11 +4,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::anyhow;
 use chrono::NaiveDate;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{ConfigValErrorCause, ConfigValidationError, MetCfgKey, ProcCfgKey};
+use crate::config::{
+    ConfigValErrorCause, ConfigValidationError, KeyedMetDownloadConfig, MetCfgKey, ProcCfgKey,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessingConfig {
@@ -71,6 +74,37 @@ impl ProcessingConfig {
         self.auto_end_date.or(self.end_date)
     }
 
+    pub fn get_met_configs<'a>(
+        &'a self,
+        cfg: &'a super::Config,
+    ) -> anyhow::Result<Vec<KeyedMetDownloadConfig<'a>>> {
+        let mut met_cfgs = vec![];
+        for key in self.required_mets.iter() {
+            let c = cfg.data.met_download.get(key)
+                .ok_or_else(|| anyhow!("Met configuration key '{key}', required by a processing configuration, not found on the parent configuration"))?;
+            met_cfgs.push(KeyedMetDownloadConfig {
+                product_key: key,
+                cfg: c,
+            });
+        }
+        Ok(met_cfgs)
+    }
+
+    pub fn describe_date_range(&self) -> String {
+        if let Some(end) = self.end_date {
+            format!(
+                "dates from {} up to but not including {end}",
+                self.start_date
+            )
+        } else {
+            format!("dates from {} on", self.start_date)
+        }
+    }
+
+    // ------------------ //
+    // VALIDATION METHODS //
+    // ------------------ //
+
     fn location(my_key: &ProcCfgKey) -> String {
         format!("processing configuration '{my_key}'")
     }
@@ -83,12 +117,7 @@ impl ProcessingConfig {
     ) {
         // Check that all the required mets are defined in the parent config
         for met in self.required_mets.iter() {
-            if !cfg
-                .data
-                .met_download
-                .iter()
-                .any(|dl| &dl.product_key == met)
-            {
+            if !cfg.data.met_download.keys().any(|key| key == met) {
                 errors.push(ConfigValErrorCause::UnknownMetKey {
                     met_key: met.to_string(),
                     processing_key: my_key.to_string(),

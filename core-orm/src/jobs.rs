@@ -813,13 +813,13 @@ impl Job {
 
     fn get_possible_output_subdirs(&self, config: &Config) -> anyhow::Result<Vec<String>> {
         if let Some(met_key) = &self.met_key {
-            let subdir = config.get_ginput_output_subdirs_for_met(met_key)?;
+            let subdir = config.get_proc_cfg_ginput_output_subdirs(met_key)?;
             Ok(vec![subdir])
         } else {
             let mut all_subdirs = HashSet::new();
             for date in utils::DateIterator::new_one_range(self.start_date, self.end_date) {
-                let met_key = &config.get_defaults_for_date(date)?.met;
-                let subdir = config.get_ginput_output_subdirs_for_met(met_key)?;
+                let proc_cfg_key = &config.get_defaults_for_date(date)?.processing_configuration;
+                let subdir = config.get_proc_cfg_ginput_output_subdirs(proc_cfg_key)?;
                 all_subdirs.insert(subdir);
             }
             Ok(Vec::from_iter(all_subdirs.into_iter()))

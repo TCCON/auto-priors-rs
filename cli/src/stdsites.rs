@@ -291,7 +291,8 @@ pub async fn special_std_site_run(
     } else {
         for date in orm::utils::DateIterator::new_one_range(start_date, end_date) {
             let state =
-                orm::met::MetFile::is_date_complete_for_default_mets(conn, config, date).await?;
+                orm::met::MetFile::is_date_complete_for_default_processing(conn, config, date)
+                    .await?;
             if !state.is_complete() {
                 anyhow::bail!("Required met not available for {date}");
             }

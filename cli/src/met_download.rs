@@ -130,7 +130,7 @@ async fn get_date_iter_for_defaults(
     let start_date = if let Some(start) = start_date {
         start
     } else if let Some(d) =
-        orm::met::MetFile::get_last_complete_date_for_default_mets(conn, config).await?
+        orm::met::MetFile::get_last_complete_date_for_default_processing(conn, config).await?
     {
         // If no start date, use the first day we don't have met data for. If no data previously downloaded, use the
         // start date defined for the meteorology. If no meteorology datasets defined, return an error.
@@ -441,7 +441,7 @@ pub async fn report_default_met_status(
         sd
     } else {
         if let Some(sd) =
-            orm::met::MetFile::get_first_complete_day_for_default_mets(conn, config).await?
+            orm::met::MetFile::get_first_complete_day_for_default_processing(conn, config).await?
         {
             println!("No start date defined for default mets in config; will report on met data starting from first complete date.");
             sd

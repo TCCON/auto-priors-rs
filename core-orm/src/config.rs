@@ -8,7 +8,7 @@
 //!
 //! A default (mostly blank) configuration file can be created by calling [`generate_config_file`].
 //!
-use anyhow::{self, Context};
+use anyhow::{anyhow, Context};
 use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use hostname;
 use itertools::Itertools;
@@ -29,7 +29,7 @@ use url::Url;
 use crate::{
     email::SendMail,
     error::{DefaultOptsQueryError, EmailError},
-    met::{self, MetDataType},
+    met::GinputMetType,
 };
 
 mod processing;
@@ -82,6 +82,10 @@ pub enum ConfigValErrorCause {
         met_key: String,
         processing_key: String,
     },
+    UnknownProcCfgKey {
+        proc_cfg_key: ProcCfgKey,
+        location: String,
+    },
     BadMetConfig {
         key: String,
         reason: String,
@@ -131,6 +135,15 @@ impl Display for ConfigValErrorCause {
                 write!(
                     f,
                     "Undefined met key '{key}' in processing configuration '{processing_key}'",
+                )
+            }
+            ConfigValErrorCause::UnknownProcCfgKey {
+                proc_cfg_key,
+                location,
+            } => {
+                write!(
+                    f,
+                    "Undefined processing configuration key '{proc_cfg_key}' in {location}"
                 )
             }
             ConfigValErrorCause::BadMetConfig { key, reason } => {
@@ -195,8 +208,8 @@ impl Display for ConfigValErrorCause {
     }
 }
 
-#[derive(Debug, Hash, Deserialize, Serialize, PartialEq, Eq, Clone)]
-pub struct ProcCfgKey(String);
+#[derive(Debug, Default, Hash, Deserialize, Serialize, PartialEq, Eq, Clone)]
+pub struct ProcCfgKey(pub String);
 
 impl Display for ProcCfgKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -204,8 +217,9 @@ impl Display for ProcCfgKey {
     }
 }
 
-#[derive(Debug, Hash, Deserialize, Serialize, PartialEq, Eq, Clone)]
-pub struct MetCfgKey(String);
+#[derive(Debug, Hash, Deserialize, Serialize, PartialEq, Eq, Clone, sqlx::Type)]
+#[sqlx(transparent)]
+pub struct MetCfgKey(pub String);
 
 impl Display for MetCfgKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -232,8 +246,6 @@ pub struct Config {
     pub blacklist: Vec<BlacklistEntry>, // errors if later in the struct (might be okay after default_options now)
     pub default_options: Vec<DefaultOptions>, // errors if after data
     pub execution: ExecutionConfig,
-    #[serde(default)]
-    pub requests: UserRequestConfig,
     pub data: DataConfig,
     #[serde(default)]
     pub processing_configurations: HashMap<ProcCfgKey, ProcessingConfig>,
@@ -245,61 +257,6 @@ pub struct Config {
 }
 
 impl Config {
-    /// Get the slice of download configuration needed for a given met type
-    ///
-    /// Returns an `Err` if the given met_key is not present in the config.
-    pub fn get_met_configs(&self, met_key: &str) -> anyhow::Result<&[MetDownloadConfig]> {
-        self.data
-            .met_download
-            .get(met_key)
-            .map(|cfgs| cfgs.as_slice())
-            .ok_or_else(|| {
-                anyhow::Error::msg(format!("No meteorology with key '{met_key}' found."))
-            })
-    }
-
-    /// Returns a list of [`met::MetProduct`]s and [`MetDownloadConfig`] sets that could have data on the given `date`.
-    ///
-    /// Note: if a set of [`MetDownloadConfig`]s contains different product values (e.g. a mix of GEOS FP-IT and GEOS-IT)
-    /// this function will always exclude that set. This is because this function assumes it is being called to identify
-    /// the external met products which we want to check the status of, and thus that any set that mixes products is
-    /// mixing products that have their own set of download configs for just that met product. This way, the function
-    /// can be infallible, which is helpful for the web interface.
-    pub fn get_single_product_configs_for_date(
-        &self,
-        date: NaiveDate,
-    ) -> Vec<(&met::MetProduct, &[MetDownloadConfig])> {
-        let mut available_products = vec![];
-        for key in self.data.met_download.keys() {
-            let cfgs = self
-                .get_met_configs(key)
-                .expect("should not fail to get met configs when iterating over their keys");
-            let products = cfgs.iter().map(|c| &c.product).unique().collect_vec();
-
-            let all_start_too_late = cfgs.iter().all(|c| c.earliest_date > date);
-            if all_start_too_late {
-                continue;
-            }
-
-            let all_end_too_early = cfgs
-                .iter()
-                .all(|c| c.latest_date.map(|d| d <= date).unwrap_or(false));
-            if all_end_too_early {
-                continue;
-            }
-
-            if products.is_empty() {
-                continue;
-            } else if products.len() > 1 {
-                log::info!("skipping met key {key} as it has multiple products listed, assuming this is a special configuration");
-                continue;
-            }
-
-            available_products.push((products[0], cfgs));
-        }
-        available_products
-    }
-
     /// Return the span of dates covered by the default meteorologies
     ///
     /// Returns the earliest start date and latest end date of all meteorologies
@@ -345,6 +302,19 @@ impl Config {
         (start_date, end_date)
     }
 
+    pub fn get_mets_for_processing_config<'cfg>(
+        &'cfg self,
+        proc_cfg_key: &ProcCfgKey,
+    ) -> anyhow::Result<Vec<KeyedMetDownloadConfig<'cfg>>> {
+        let proc_cfg = self
+            .processing_configurations
+            .get(proc_cfg_key)
+            .ok_or_else(|| {
+                anyhow!("Requested processing configuration '{proc_cfg_key}' not defined")
+            })?;
+        proc_cfg.get_met_configs(self).with_context(|| anyhow!("Error occurred while getting required mets for processing configuration '{proc_cfg_key}'"))
+    }
+
     /// Get the GEOS and chemistry directories required to pass to version 1 ginput instances
     ///
     /// Version 1.x ginput instances expect GEOS data to be organized in a specific way: all files
@@ -366,96 +336,84 @@ impl Config {
     ///    for that file type.
     /// 4. Any of the `download_dir` paths does not have a parent directory
     /// 5. Inconsistent `geos_path`, `chem_path`, or `ginput_met_key` values are defined.
-    pub fn get_ginput_met_args(&self, met_key: &str) -> anyhow::Result<(PathBuf, PathBuf, String)> {
-        let dl_cfgs = self
-            .get_met_configs(met_key)
-            .context("Could not find meteorology while setting up geos & chem paths")?;
+    pub fn get_ginput_met_args(
+        &self,
+        proc_cfg_key: &ProcCfgKey,
+    ) -> anyhow::Result<(PathBuf, PathBuf, String)> {
+        let proc_cfg = self
+            .processing_configurations
+            .get(proc_cfg_key)
+            .ok_or_else(|| anyhow!("Unknown processing configuration '{proc_cfg_key}'"))?;
+        let dl_cfgs = proc_cfg.get_met_configs(self).with_context(|| {
+            anyhow!(
+                "Error occurred while getting mets for processing configuration '{proc_cfg_key}'"
+            )
+        })?;
+
         let mut geos_path = None;
         let mut chem_path = None;
-        let mut ginput_met_key = None;
+        let ginput_met_key = proc_cfg.ginput_met_key.clone();
 
         let mut found_eta_met = false;
         let mut found_eta_chem = false;
         let mut found_2d_met = false;
 
-        for (i, cfg) in dl_cfgs.iter().enumerate() {
+        for (i, met_cfg) in dl_cfgs.iter().enumerate() {
             let i = i + 1;
-            let download_dir = cfg.download_dir.canonicalize()
-                .map_err(|e| anyhow::Error::msg(format!("In met type {met_key}, could not canonicalize download path for file type {i}: {e}")))?;
+            let download_dir = met_cfg.cfg.download_dir.canonicalize()
+                .map_err(|e| anyhow::Error::msg(format!("In processing configuration '{proc_cfg_key}', could not canonicalize download path for met file type #{i}: {e}")))?;
             let final_dir = download_dir.components()
                 .last()
-                .ok_or_else(|| anyhow::Error::msg(format!("In met type {met_key}, file {i} does not have a final component to its download path")))?;
+                .ok_or_else(|| anyhow::Error::msg(format!("In processing configuration '{proc_cfg_key}', file {i} does not have a final component to its download path")))?;
 
-            if final_dir.as_os_str() != cfg.levels.standard_subdir().as_os_str() {
+            if final_dir.as_os_str() != met_cfg.cfg.ginput_met_type.standard_subdir().as_os_str() {
                 let final_dir = final_dir.as_os_str().to_string_lossy();
-                anyhow::bail!(format!("In met type {met_key}, file type {i}'s final component ({final_dir}) is not consistent with its declared levels ({})", cfg.levels))
+                anyhow::bail!(format!("In processing configuration {proc_cfg_key}, file type {i}'s final component ({final_dir}) is not consistent with its declared met subtype ({})", met_cfg.cfg.ginput_met_type))
             }
 
             let parent_dir = download_dir.parent()
-                .ok_or_else(|| anyhow::Error::msg(format!("In met type {met_key}, cannot get parent directory of file type {i}'s download path")))?;
+                .ok_or_else(|| anyhow::Error::msg(format!("In processing configuration '{proc_cfg_key}', cannot get parent directory of file type {i}'s download path")))?;
 
-            // The met key value doesn't depend on the file type, so we handle it outside the match statement
-            if ginput_met_key.is_none() {
-                ginput_met_key = Some(cfg.ginput_met_key.clone());
-            } else if ginput_met_key.as_deref() != Some(&cfg.ginput_met_key) {
-                anyhow::bail!(
-                    "Met type {met_key} defines inconsistent values for `ginput_met_key`: {} vs {}",
-                    cfg.ginput_met_key,
-                    ginput_met_key.unwrap()
-                )
-            }
-
-            match &cfg.data_type {
-                MetDataType::Met => {
+            match &met_cfg.cfg.ginput_met_type {
+                GinputMetType::MetEta => {
+                    found_eta_met = true;
                     if geos_path.is_none() {
                         geos_path = Some(parent_dir.to_owned());
                     } else if geos_path.as_deref() != Some(parent_dir) {
                         anyhow::bail!(
-                            "Met type {met_key} defines inconsistent parent directories for its met files: {} vs {}",
+                            "Processing config '{proc_cfg_key}' defines inconsistent parent directories for its met files: {} vs {}",
                             parent_dir.display(), geos_path.unwrap().display()
                         );
                     }
-
-                    match &cfg.levels {
-                        met::MetLevels::Surf => {
-                            found_2d_met = true;
-                        }
-                        met::MetLevels::Eta => {
-                            found_eta_met = true;
-                        }
-                        _ => (),
-                    }
                 }
-                MetDataType::Chm => {
+
+                GinputMetType::Met2D => found_2d_met = true,
+
+                GinputMetType::ChemEta => {
+                    found_eta_chem = true;
                     if chem_path.is_none() {
                         chem_path = Some(parent_dir.to_owned());
                     } else if chem_path.as_deref() != Some(parent_dir) {
                         anyhow::bail!(
-                            "Met type {met_key} defines inconsistent parent directories for its chem files: {} vs {}",
+                            "Processing config '{proc_cfg_key}' defines inconsistent parent directories for its chem files: {} vs {}",
                             parent_dir.display(), chem_path.unwrap().display()
                         );
                     }
-
-                    if let met::MetLevels::Eta = &cfg.levels {
-                        found_eta_chem = true;
-                    }
                 }
-                MetDataType::Other(v) => {
-                    info!("Ignoring met type of {v} for GEOS met/chm paths")
+
+                GinputMetType::Other => {
+                    info!("Ignoring non-standard met #{i} for processing config '{proc_cfg_key}'")
                 }
             }
         }
 
         let geos_path = geos_path.ok_or_else(|| {
-            anyhow::anyhow!("Met type {met_key} defines no met files for download")
+            anyhow::anyhow!("Processing config '{proc_cfg_key}' defines no met files for download")
         })?;
 
         let chem_path = chem_path.ok_or_else(|| {
-            anyhow::anyhow!("Met type {met_key} defines no chem files for download")
+            anyhow::anyhow!("Processing config '{proc_cfg_key}' defines no chem files for download")
         })?;
-
-        let ginput_met_key = ginput_met_key
-            .ok_or_else(|| anyhow::anyhow!("Met type {met_key} defines no files for download"))?;
 
         if !found_2d_met {
             anyhow::bail!("2D met files not defined for download");
@@ -472,26 +430,17 @@ impl Config {
         Ok((geos_path, chem_path, ginput_met_key))
     }
 
-    pub fn get_ginput_output_subdirs_for_met(&self, met_key: &str) -> anyhow::Result<String> {
-        let dl_cfgs = self
-            .get_met_configs(met_key)
-            .context("Could not find meteorology while getting output subdirs")?;
-        let mut subdir = None;
-
-        for dl_cfg in dl_cfgs {
-            if subdir.is_none() {
-                subdir = Some(dl_cfg.ginput_output_subdir.clone());
-            } else if subdir.as_deref() != Some(&dl_cfg.ginput_output_subdir) {
-                anyhow::bail!("Inconsistent ginput output subdirs defined for met key {met_key}, got both {} and {}", subdir.unwrap(), dl_cfg.ginput_output_subdir)
-            }
-        }
-
-        if let Some(subdir) = subdir {
-            Ok(subdir)
-        } else {
-            // this really shouldn't happen
-            anyhow::bail!("No download configurations defined for {met_key}")
-        }
+    /// The top-level subdirectory that `ginput` places output for this met type, e.g. "fpit" for GEOS FP-IT.
+    /// If the `ginput_met_key` value is "XXX-eta", then this is usually "XXX".
+    pub fn get_proc_cfg_ginput_output_subdirs<'a>(
+        &'a self,
+        proc_cfg_key: &ProcCfgKey,
+    ) -> anyhow::Result<&'a str> {
+        let proc_cfg = self
+            .processing_configurations
+            .get(proc_cfg_key)
+            .ok_or_else(|| anyhow!("Processing configuration '{proc_cfg_key}' not defined"))?;
+        Ok(&proc_cfg.ginput_output_subdir)
     }
 
     /// Get the earliest start date for all the file types of a given met configuration
@@ -502,16 +451,18 @@ impl Config {
     /// `met_key`, or `None` if `met_key` exists but has no files defined.
     ///
     /// Will also return an `Err` is `met_key` is not in the config.
-    pub fn get_met_start_date(&self, met_key: &str) -> anyhow::Result<Option<NaiveDate>> {
-        let met_cfgs = self.get_met_configs(met_key)?;
+    pub fn get_proc_cfg_start_date(
+        &self,
+        proc_cfg_key: &ProcCfgKey,
+    ) -> anyhow::Result<Option<NaiveDate>> {
+        let met_cfgs = self
+            .get_mets_for_processing_config(proc_cfg_key)
+            .with_context(|| {
+                anyhow!("Error occurred while getting mets for processing config '{proc_cfg_key}'")
+            })?;
 
-        if met_cfgs.len() == 0 {
-            // This is redundant (Iterator::min() returns None if the iterator is empty) but I find this clearer
-            Ok(None)
-        } else {
-            let x = met_cfgs.iter().map(|c| c.earliest_date);
-            Ok(x.min())
-        }
+        let maybe_min_date = met_cfgs.iter().map(|c| c.cfg.earliest_date).min();
+        Ok(maybe_min_date)
     }
 
     /// Get the sequence of [`DefaultOptions`] in time order.
@@ -617,6 +568,35 @@ impl Config {
         }
     }
 
+    pub fn check_user_proc_request(
+        &self,
+        proc_cfg_key: &ProcCfgKey,
+        request_start: NaiveDate,
+        request_end: NaiveDate,
+    ) -> anyhow::Result<()> {
+        let proc_cfg = self
+            .processing_configurations
+            .get(proc_cfg_key)
+            .ok_or_else(|| anyhow!("Unknown processing configuration: '{proc_cfg_key}'"))?;
+
+        match crate::utils::DateRangeOverlap::classify(
+            Some(proc_cfg.start_date),
+            proc_cfg.end_date,
+            Some(request_start),
+            Some(request_end),
+        ) {
+            crate::utils::DateRangeOverlap::AContainsB
+            | crate::utils::DateRangeOverlap::AEqualsB => Ok(()),
+            crate::utils::DateRangeOverlap::AInsideB
+            | crate::utils::DateRangeOverlap::AEndsInB
+            | crate::utils::DateRangeOverlap::AStartsInB
+            | crate::utils::DateRangeOverlap::None => {
+                let range_str = proc_cfg.describe_date_range();
+                Err(anyhow!("processing configuration '{proc_cfg_key}' spans {range_str} but you requested dates ({request_start} to {request_end}) outside this range"))
+            }
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigValidationError> {
         let mut errors = ConfigValidationError::default();
 
@@ -632,9 +612,6 @@ impl Config {
         let processing_errors = processing::validate_processing_configs(self);
         errors.extend(processing_errors);
 
-        let request_errors = self.validate_request_opts();
-        errors.extend(request_errors);
-
         let data_errors = self.validate_data();
         errors.extend(data_errors);
 
@@ -648,22 +625,20 @@ impl Config {
         let mut errors = ConfigValidationError::default();
 
         for (idx, default_opts) in self.default_options.iter().enumerate() {
-            if !self.execution.ginput.contains_key(&default_opts.ginput) {
-                errors.push(ConfigValErrorCause::UnknownGinputKey {
-                    key: default_opts.ginput.clone(),
+            if !self
+                .processing_configurations
+                .contains_key(&default_opts.processing_configuration)
+            {
+                errors.push(ConfigValErrorCause::UnknownProcCfgKey {
+                    proc_cfg_key: default_opts.processing_configuration.clone(),
                     location: format!("default options #{}", idx + 1),
                 });
             }
 
-            if self.get_met_configs(&default_opts.met).is_err() {
-                errors.push(ConfigValErrorCause::UnknownMetKey {
-                    met_key: default_opts.met.clone(),
-                    defaults_index: idx,
-                });
-            }
-
             if default_opts.start_date >= default_opts.end_date {
-                errors.push(ConfigValErrorCause::DateRangeInverted(idx));
+                errors.push(ConfigValErrorCause::DateRangeInverted {
+                    location: format!("default options #{}", idx + 1),
+                });
             }
         }
 
@@ -789,28 +764,6 @@ impl Config {
         errors
     }
 
-    fn validate_request_opts(&self) -> ConfigValidationError {
-        let mut errors = ConfigValidationError::default();
-
-        for (idx, allowed_met) in self.requests.allowed_mets.values().enumerate() {
-            if let Err(e) = self.get_met_configs(&allowed_met.met_key) {
-                errors.push(ConfigValErrorCause::BadMetConfig {
-                    key: allowed_met.met_key.clone(),
-                    reason: e.to_string(),
-                });
-            }
-
-            if self.execution.ginput.get(&allowed_met.ginput_key).is_none() {
-                errors.push(ConfigValErrorCause::UnknownGinputKey {
-                    key: allowed_met.ginput_key.clone(),
-                    location: format!("request allowed met #{}", idx + 1),
-                })
-            }
-        }
-
-        errors
-    }
-
     fn validate_data(&self) -> ConfigValidationError {
         let mut errors = ConfigValidationError::default();
 
@@ -838,18 +791,18 @@ impl Config {
             ));
         }
 
-        // Confirm that all mets are valid for ginput
-        for met_key in self.data.met_download.keys() {
-            if let Err(e) = self.get_ginput_met_args(met_key) {
+        // Confirm that all processing configurations are valid for ginput
+        for proc_cfg_key in self.processing_configurations.keys() {
+            if let Err(e) = self.get_ginput_met_args(proc_cfg_key) {
                 errors.push(ConfigValErrorCause::BadMetConfig {
-                    key: met_key.to_string(),
+                    key: proc_cfg_key.to_string(),
                     reason: e.to_string(),
                 });
             }
 
-            if let Err(e) = self.get_ginput_output_subdirs_for_met(met_key) {
+            if let Err(e) = self.get_proc_cfg_ginput_output_subdirs(proc_cfg_key) {
                 errors.push(ConfigValErrorCause::BadMetConfig {
-                    key: met_key.to_string(),
+                    key: proc_cfg_key.to_string(),
                     reason: e.to_string(),
                 });
             }
@@ -1002,75 +955,6 @@ pub enum GinputConfig {
     Script { entry_point_path: PathBuf },
 }
 
-/// Configuration section dealing with allowed options for user-requested jobs
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct UserRequestConfig {
-    /// A table of non-default combinations of met data and ginput that
-    /// users can request. The keys of this table will be the value the
-    /// user gives as the "reanalysis" line in the input file to request
-    /// this particular configuration.
-    pub allowed_mets: HashMap<String, AllowedRequestMet>,
-}
-
-impl UserRequestConfig {
-    pub fn check_met_request(
-        &self,
-        key: &str,
-        request_start: NaiveDate,
-        request_end: NaiveDate,
-    ) -> Result<&AllowedRequestMet, String> {
-        let met = self
-            .allowed_mets
-            .get(key)
-            .ok_or_else(|| format!("'{key}' is not a valid met"))?;
-
-        match crate::utils::DateRangeOverlap::classify(
-            met.start_date,
-            met.end_date,
-            Some(request_start),
-            Some(request_end),
-        ) {
-            crate::utils::DateRangeOverlap::AContainsB
-            | crate::utils::DateRangeOverlap::AEqualsB => Ok(met),
-            crate::utils::DateRangeOverlap::AInsideB
-            | crate::utils::DateRangeOverlap::AEndsInB
-            | crate::utils::DateRangeOverlap::AStartsInB
-            | crate::utils::DateRangeOverlap::None => {
-                let range_str = met.describe_date_range();
-                Err(format!("met '{key}' spans {range_str} but you requested dates ({request_start} to {request_end}) outside this range"))
-            }
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AllowedRequestMet {
-    /// The key from the `data.download` section that this request will use.
-    pub met_key: String,
-
-    /// The key from the `execution.ginput` section that this request will use.
-    pub ginput_key: String,
-
-    /// Optional, if given, requests that ask for a date before this using this
-    /// met will be rejected.
-    pub start_date: Option<NaiveDate>,
-
-    /// Optional, if given, requests that ask for a date on or after this using this
-    /// met will be rejected.
-    pub end_date: Option<NaiveDate>,
-}
-
-impl AllowedRequestMet {
-    fn describe_date_range(&self) -> String {
-        match (self.start_date, self.end_date) {
-            (None, None) => "all dates".to_string(),
-            (None, Some(end)) => format!("dates up to but not including {end}"),
-            (Some(start), None) => format!("dates from {start} on"),
-            (Some(start), Some(end)) => format!("dates from {start} up to but not including {end}"),
-        }
-    }
-}
-
 /// Configuration section dealing with input data for jobs
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct DataConfig {
@@ -1087,16 +971,12 @@ pub struct DataConfig {
     /// from GEOS IT, we require 3D met, 2D met, and 3D chemistry files. Each entry in this
     /// map specifies one of those files. The processing configuration section specifies
     /// how we combine them together.
-    pub met_download: Vec<MetDownloadConfig>,
+    pub met_download: HashMap<MetCfgKey, MetDownloadConfig>,
 }
 
 /// Configuration for how to download input reanalysis files for ginput
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MetDownloadConfig {
-    /// A short key to refer to this file type in the database. Must be unique across
-    /// all met file types.
-    pub product_key: MetCfgKey,
-
     /// A URL pattern that can be passed to wget to download the desired file.
     /// Use [Chrono format strings](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
     /// (e.g. "%Y", "%d") to insert date/time elements into the URL.
@@ -1135,21 +1015,40 @@ pub struct MetDownloadConfig {
     ///   latter is recommended.
     pub download_dir: PathBuf,
 
+    /// A string describing
+    pub ginput_met_type: GinputMetType,
+
     /// How many days to allow before failing to download files is an error
     pub days_latency: u32,
 }
 
+/// A structure combining the product key of a met download configuration with its
+/// configuration values.
+#[derive(Debug, Clone, Copy)]
+pub struct KeyedMetDownloadConfig<'cfg> {
+    pub product_key: &'cfg MetCfgKey,
+    pub cfg: &'cfg MetDownloadConfig,
+}
+
 impl Display for MetDownloadConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "product_key = {}", self.product_key)
+        if let Ok(pat) = self.get_basename_pattern() {
+            write!(f, "{pat} ({})", self.ginput_met_type)
+        } else {
+            let end = self
+                .latest_date
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "now".to_string());
+            write!(
+                f,
+                "{} to {end} ({})",
+                self.earliest_date, self.ginput_met_type
+            )
+        }
     }
 }
 
 impl MetDownloadConfig {
-    pub fn to_short_string(&self) -> String {
-        self.product_key.clone()
-    }
-
     /// Get the pattern for file names of this type of file, with no leading path.
     ///
     /// If the configuration has a value for the `basename_pattern` specified, that is
@@ -1229,8 +1128,7 @@ impl MetDownloadConfig {
 pub struct DefaultOptions {
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
-    pub ginput: String,
-    pub met: String,
+    pub processing_configuration: ProcCfgKey,
 }
 
 impl DefaultOptions {
@@ -1250,15 +1148,14 @@ impl Display for DefaultOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "[{} to {}: ginput = {}, met = {}]",
+            "[{} to {}: {}]",
             self.start_date
                 .map(|d| d.to_string())
                 .unwrap_or_else(|| "None".to_owned()),
             self.end_date
                 .map(|d| d.to_string())
                 .unwrap_or_else(|| "None".to_owned()),
-            self.ginput,
-            self.met
+            self.processing_configuration
         )
     }
 }
@@ -1653,24 +1550,28 @@ where
     // https://github.com/toml-rs/toml-rs/issues/142
     let mut default_cfg = Config::default();
 
-    default_cfg.data.base_vmr_file = Some(PathBuf::new());
-    default_cfg.data.zgrid_file = Some(PathBuf::new());
-    default_cfg.data.met_download.push(MetDownloadConfig {
-        product_key: "geosfpit-eta-met".to_string(),
+    let demo_met_cfg = MetDownloadConfig {
         url_pattern: "".to_string(),
         basename_pattern: Some("(omit to infer from url_pattern)".to_string()),
         file_freq_min: 180,
         earliest_date: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+        ginput_met_type: GinputMetType::MetEta,
         latest_date: None,
         download_dir: PathBuf::new(),
         days_latency: 1,
-    });
+    };
+
+    default_cfg.data.base_vmr_file = Some(PathBuf::new());
+    default_cfg.data.zgrid_file = Some(PathBuf::new());
+    default_cfg
+        .data
+        .met_download
+        .insert(MetCfgKey("geosfpit-met-eta".to_string()), demo_met_cfg);
 
     default_cfg.default_options = vec![DefaultOptions {
         start_date: NaiveDate::from_ymd_opt(2000, 1, 1),
         end_date: NaiveDate::from_ymd_opt(2038, 1, 1),
-        ginput: "".to_string(),
-        met: "".to_string(),
+        processing_configuration: ProcCfgKey("ginput-v1.0.6-std".to_string()),
     }];
 
     let sub_queue = default_cfg.execution.submitted_job_queue.clone();

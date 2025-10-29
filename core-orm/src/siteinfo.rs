@@ -1381,7 +1381,7 @@ impl SiteInfo {
         }
 
         // Finally, add rows that didn't already exist. This is usually needed when adding a new site.
-        let last_met_date = if let Some(d) = crate::met::MetFile::get_last_complete_date_for_default_mets(&mut trans, config).await
+        let last_met_date = if let Some(d) = crate::met::MetFile::get_last_complete_date_for_default_processing(&mut trans, config).await
             .context("Error occurred while trying to identify the last complete day for default meteorologies")? {
                 d
             } else {

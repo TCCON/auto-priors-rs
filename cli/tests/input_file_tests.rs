@@ -881,7 +881,7 @@ impl ExpectedJob {
         if let Some(alt_met) = self.alt_met {
             let alt_cfg = config
                 .requests
-                .allowed_mets
+                .allowed_processing_cfgs
                 .get(alt_met)
                 .expect("Alternate met should be defined in the test config");
             if alt_cfg.met_key != db_job.met_key.as_deref().unwrap_or("???") {

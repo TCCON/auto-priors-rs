@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     fmt::Display,
     path::{Path, PathBuf},
     str::FromStr,
@@ -7,12 +6,15 @@ use std::{
 
 use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
-use itertools::Itertools;
 use log::{debug, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use sqlx::{self, FromRow, Type};
 
-use crate::{config, error::DefaultOptsQueryError, MySqlConn};
+use crate::{
+    config::{self, MetCfgKey},
+    error::DefaultOptsQueryError,
+    MySqlConn,
+};
 
 /// Indicates a problem adding a met file to the database
 #[derive(Debug)]
@@ -133,166 +135,60 @@ impl MetDayState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(try_from = "String", into = "String")]
-pub enum MetProduct {
-    GeosFp,
-    GeosFpit,
-    GeosIt,
-    Other(String),
+#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(from = "String", into = "String")]
+pub enum GinputMetType {
+    MetEta,
+    Met2D,
+    ChemEta,
+    Other,
 }
 
-impl Into<String> for MetProduct {
-    fn into(self) -> String {
-        format!("{}", self)
+impl Display for GinputMetType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GinputMetType::MetEta => write!(f, "met-eta"),
+            GinputMetType::Met2D => write!(f, "met-2d"),
+            GinputMetType::ChemEta => write!(f, "chem-eta"),
+            GinputMetType::Other => write!(f, "other"),
+        }
     }
 }
 
-impl From<String> for MetProduct {
-    fn from(value: String) -> Self {
-        Self::from_str(value.as_str()).unwrap_or_else(|_| Self::Other(value))
+impl From<GinputMetType> for String {
+    fn from(value: GinputMetType) -> Self {
+        format!("{value}")
     }
 }
 
-impl FromStr for MetProduct {
-    type Err = anyhow::Error;
+impl FromStr for GinputMetType {
+    type Err = std::convert::Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_ref() {
-            "geosfp" => Ok(Self::GeosFp),
-            "geosfpit" => Ok(Self::GeosFpit),
-            "geosit" => Ok(Self::GeosIt),
-            _ => anyhow::bail!("Unknown string value for GeosProduct enum: {s}"),
+            "met-eta" => Ok(Self::MetEta),
+            "met-2d" => Ok(Self::Met2D),
+            "chem-eta" => Ok(Self::ChemEta),
+            _ => Ok(Self::Other),
         }
     }
 }
 
-impl Display for MetProduct {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::GeosFp => write!(f, "geosfp"),
-            Self::GeosFpit => write!(f, "geosfpit"),
-            Self::GeosIt => write!(f, "geosit"),
-            Self::Other(v) => write!(f, "other({v})"),
-        }
+impl From<String> for GinputMetType {
+    fn from(value: String) -> Self {
+        value
+            .parse()
+            .expect("Parsing a string to GinputMetType expected to be infallible")
     }
 }
 
-impl MetProduct {
-    pub fn pretty(&self) -> Cow<str> {
-        match self {
-            MetProduct::GeosFp => "GEOS FP".into(),
-            MetProduct::GeosFpit => "GEOS FP-IT".into(),
-            MetProduct::GeosIt => "GEOS IT".into(),
-            MetProduct::Other(s) => s.into(),
-        }
-    }
-}
-
-#[derive(Debug, Type, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(try_from = "String", into = "String")]
-pub enum MetLevels {
-    Pres,
-    Surf,
-    Eta,
-    Unknown,
-}
-
-impl MetLevels {
+impl GinputMetType {
     pub fn standard_subdir(&self) -> PathBuf {
         match self {
-            Self::Pres => PathBuf::from("Np"),
-            Self::Surf => PathBuf::from("Nx"),
-            Self::Eta => PathBuf::from("Nv"),
-            Self::Unknown => PathBuf::from("UNKNOWN"),
-        }
-    }
-}
-
-impl Into<String> for MetLevels {
-    fn into(self) -> String {
-        format!("{}", self)
-    }
-}
-
-// impl TryFrom<String> for MetLevels {
-//     type Error = anyhow::Error;
-
-//     fn try_from(value: String) -> Result<Self, Self::Error> {
-//         Self::from_str(value.as_str())
-//     }
-// }
-
-impl FromStr for MetLevels {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_ref() {
-            "pres" => Ok(Self::Pres),
-            "surf" => Ok(Self::Surf),
-            "eta" => Ok(Self::Eta),
-            _ => anyhow::bail!("Unknown string value for MetLevels: {s}"),
-        }
-    }
-}
-
-impl From<String> for MetLevels {
-    fn from(value: String) -> Self {
-        Self::from_str(&value).unwrap_or(Self::Unknown)
-    }
-}
-
-impl Display for MetLevels {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Self::Pres => "pres",
-            Self::Surf => "surf",
-            Self::Eta => "eta",
-            Self::Unknown => "UNKNOWN",
-        };
-
-        write!(f, "{s}")
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(try_from = "String", into = "String")]
-pub enum MetDataType {
-    Met,
-    Chm,
-    Other(String),
-}
-
-impl Into<String> for MetDataType {
-    fn into(self) -> String {
-        format!("{}", self)
-    }
-}
-
-impl From<String> for MetDataType {
-    fn from(value: String) -> Self {
-        Self::from_str(value.as_str()).unwrap_or_else(|_| Self::Other(value))
-    }
-}
-
-impl FromStr for MetDataType {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_ref() {
-            "met" => Ok(Self::Met),
-            "chm" => Ok(Self::Chm),
-            _ => anyhow::bail!("Unknown string value for MetDataType: {s}"),
-        }
-    }
-}
-
-impl Display for MetDataType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Met => write!(f, "met"),
-            Self::Chm => write!(f, "chm"),
-            Self::Other(v) => write!(f, "other({v})"),
+            GinputMetType::MetEta => PathBuf::from("Nv"),
+            GinputMetType::Met2D => PathBuf::from("Nx"),
+            GinputMetType::ChemEta => PathBuf::from("Nv"),
+            GinputMetType::Other => PathBuf::from("XX"),
         }
     }
 }
@@ -325,15 +221,13 @@ impl MetFile {
 
     pub async fn get_first_complete_date_for_config(
         conn: &mut MySqlConn,
-        cfg: &config::MetDownloadConfig,
+        keyed_cfg: config::KeyedMetDownloadConfig<'_>,
     ) -> anyhow::Result<Option<NaiveDate>> {
-        let n_expected = Self::num_expected_daily_files(cfg)?;
+        let n_expected = Self::num_expected_daily_files(keyed_cfg.cfg)?;
 
         trace!(
-            "Querying first complete date ({n_expected} files) for {}, {}, {}",
-            cfg.levels,
-            cfg.data_type,
-            cfg.product
+            "Querying first complete date ({n_expected} files) for product key = '{}'",
+            keyed_cfg.product_key,
         );
         let this_min_date = sqlx::query!(
             r#"SELECT MIN(tbl.date) as min_date
@@ -344,7 +238,7 @@ impl MetFile {
                     GROUP BY DATE(filedate)
                 ) AS tbl
                 WHERE tbl.count = ?"#,
-            cfg.product_key,
+            keyed_cfg.product_key,
             n_expected
         )
         .fetch_one(conn)
@@ -365,15 +259,13 @@ impl MetFile {
     /// Returns an `Err` if querying the database fails.
     pub async fn get_last_complete_date_for_config(
         conn: &mut MySqlConn,
-        cfg: &config::MetDownloadConfig,
+        keyed_cfg: config::KeyedMetDownloadConfig<'_>,
     ) -> anyhow::Result<Option<NaiveDate>> {
-        let n_expected = Self::num_expected_daily_files(cfg)?;
+        let n_expected = Self::num_expected_daily_files(keyed_cfg.cfg)?;
 
         trace!(
-            "Querying most recent complete date ({n_expected} files) for {}, {}, {}",
-            cfg.levels,
-            cfg.data_type,
-            cfg.product
+            "Querying most recent complete date ({n_expected} files) for product key = {}",
+            keyed_cfg.product_key
         );
         let this_max_date = sqlx::query!(
             r#"SELECT MAX(tbl.date) as max_date
@@ -384,7 +276,7 @@ impl MetFile {
                     GROUP BY DATE(filedate)
                 ) AS tbl
                 WHERE tbl.count = ?"#,
-            cfg.product_key,
+            keyed_cfg.product_key,
             n_expected
         )
         .fetch_one(conn)
@@ -411,28 +303,31 @@ impl MetFile {
     /// This will return an `Err` if the database query fails.
     pub async fn get_first_or_last_complete_date_for_config_set(
         conn: &mut MySqlConn,
-        cfgs: &[config::MetDownloadConfig],
+        cfgs: &[config::KeyedMetDownloadConfig<'_>],
         first: bool,
     ) -> anyhow::Result<Option<NaiveDate>> {
         let mut dates = vec![];
-        for cfg in cfgs {
+        for keyed_cfg in cfgs {
             let (descr, opt_date) = if first {
                 (
                     "First",
-                    Self::get_first_complete_date_for_config(conn, cfg).await?,
+                    Self::get_first_complete_date_for_config(conn, *keyed_cfg).await?,
                 )
             } else {
                 (
                     "Last",
-                    Self::get_last_complete_date_for_config(conn, cfg).await?,
+                    Self::get_last_complete_date_for_config(conn, *keyed_cfg).await?,
                 )
             };
 
             if let Some(d) = opt_date {
-                debug!("{descr} complete day for {cfg} was {d}");
+                debug!(
+                    "{descr} complete day for '{}' was {d}",
+                    keyed_cfg.product_key
+                );
                 dates.push(d);
             } else {
-                debug!("No complete days found for {cfg}");
+                debug!("No complete days found for '{}'", keyed_cfg.product_key);
             }
         }
 
@@ -475,7 +370,7 @@ impl MetFile {
     /// - `Ok(Some(date))` if it finds a date with all the needed met files
     /// - `Ok(None)` if no dates have all the needed met files
     /// - `Err` if any database queries fail or any of the default option sets defined in the configuration overlap in time.
-    pub async fn get_first_complete_day_for_default_mets(
+    pub async fn get_first_complete_day_for_default_processing(
         conn: &mut MySqlConn,
         cfg: &config::Config,
     ) -> anyhow::Result<Option<NaiveDate>> {
@@ -486,10 +381,10 @@ impl MetFile {
             if iopt == 0 && options.start_date.map(|d| d > today).unwrap_or(false) {
                 warn!("First default set {options} has a start date in the future, no complete day will be determined for any met.")
             }
-            let met_key = &options.met;
-            let met_configs = cfg.get_met_configs(met_key)?;
+            let proc_cfg_key = &options.processing_configuration;
+            let met_configs = cfg.get_mets_for_processing_config(proc_cfg_key)?;
             if let Some(first_date) =
-                Self::get_first_or_last_complete_date_for_config_set(conn, met_configs, true)
+                Self::get_first_or_last_complete_date_for_config_set(conn, &met_configs, true)
                     .await?
             {
                 return Ok(Some(first_date));
@@ -509,7 +404,7 @@ impl MetFile {
     /// - `Ok(Some(date))` if it finds a date with all the needed met files
     /// - `Ok(None)` if no dates have all the needed met files
     /// - `Err` if any database queries fail or any of the default option sets defined in the configuration overlap in time.
-    pub async fn get_last_complete_date_for_default_mets(
+    pub async fn get_last_complete_date_for_default_processing(
         conn: &mut MySqlConn,
         cfg: &config::Config,
     ) -> anyhow::Result<Option<NaiveDate>> {
@@ -522,10 +417,10 @@ impl MetFile {
                 debug!("Default set {options} starts in the future, not considering it when determining last complete date for met files");
                 continue;
             }
-            let met_key = &options.met;
-            let met_configs = cfg.get_met_configs(met_key)?;
+            let proc_cfg_key = &options.processing_configuration;
+            let met_configs = cfg.get_mets_for_processing_config(proc_cfg_key)?;
             if let Some(last_date) =
-                Self::get_first_or_last_complete_date_for_config_set(conn, met_configs, false)
+                Self::get_first_or_last_complete_date_for_config_set(conn, &met_configs, false)
                     .await?
             {
                 return Ok(Some(last_date));
@@ -535,14 +430,14 @@ impl MetFile {
         Ok(None)
     }
 
-    pub async fn is_date_complete_for_default_mets(
+    pub async fn is_date_complete_for_default_processing(
         conn: &mut MySqlConn,
         cfg: &config::Config,
         date: NaiveDate,
     ) -> Result<MetDayState, CheckMetAvailableError> {
         let opts = cfg.get_defaults_for_date(date)?;
-        let met_opts = cfg.get_met_configs(&opts.met)?;
-        Ok(Self::is_date_complete_for_config_set(conn, date, met_opts).await?)
+        let met_opts = cfg.get_mets_for_processing_config(&opts.processing_configuration)?;
+        Ok(Self::is_date_complete_for_config_set(conn, date, &met_opts).await?)
     }
 
     /// Returns whether a given date is complete, incomplete, or wholly missing for a given reanalysis download configuration.
@@ -555,22 +450,22 @@ impl MetFile {
     pub async fn is_date_complete_for_config(
         conn: &mut MySqlConn,
         date: NaiveDate,
-        cfg: &config::MetDownloadConfig,
+        keyed_cfg: config::KeyedMetDownloadConfig<'_>,
     ) -> anyhow::Result<MetDayState> {
-        let n_expected = Self::num_expected_daily_files(cfg)?;
+        let n_expected = Self::num_expected_daily_files(keyed_cfg.cfg)?;
         let n_found = sqlx::query!(
             r#"SELECT COUNT(filedate) as count FROM MetFiles
                WHERE DATE(filedate) = ? AND product_key = ?"#,
             date,
-            cfg.product_key
+            keyed_cfg.product_key
         )
         .fetch_one(conn)
         .await?
         .count;
 
         debug!(
-            "Checked met (levels = {}, data type = {}, product = {}) files for {date}: expected {n_expected}, found {n_found}",
-            cfg.levels, cfg.data_type, cfg.product
+            "Checked met (product_key = {}) files for {date}: expected {n_expected}, found {n_found}",
+            keyed_cfg.product_key
         );
 
         if n_found == 0 {
@@ -595,15 +490,15 @@ impl MetFile {
     pub async fn is_date_complete_for_config_set(
         conn: &mut MySqlConn,
         date: NaiveDate,
-        cfgs: &[config::MetDownloadConfig],
+        keyed_cfgs: &[config::KeyedMetDownloadConfig<'_>],
     ) -> anyhow::Result<MetDayState> {
         let mut states = vec![];
         let mut num_expected = vec![];
-        for cfg in cfgs {
-            let this_state = Self::is_date_complete_for_config(conn, date, cfg).await?;
-            debug!("Met {cfg} {date} -> {this_state:?}");
+        for keyed_cfg in keyed_cfgs {
+            let this_state = Self::is_date_complete_for_config(conn, date, *keyed_cfg).await?;
+            debug!("Met {} {date} -> {this_state:?}", keyed_cfg.product_key);
             states.push(this_state);
-            num_expected.push(Self::num_expected_daily_files(cfg)?);
+            num_expected.push(Self::num_expected_daily_files(keyed_cfg.cfg)?);
         }
 
         if states.iter().all(|&s| s == MetDayState::Complete) {
@@ -688,21 +583,23 @@ impl MetFile {
         }
     }
 
+    /// Return a list of met product keys for which we have downloaded files
+    /// within the given date range. Note that `end_date` is exclusive.
     pub async fn get_products_with_files_for_dates(
         conn: &mut MySqlConn,
         start_date: NaiveDate,
         end_date: NaiveDate,
-    ) -> anyhow::Result<Vec<MetProduct>> {
-        let products: Vec<MetProduct> = sqlx::query!(
-            "SELECT DISTINCT(product) FROM MetFiles WHERE filedate >= ? AND filedate < ?",
+    ) -> anyhow::Result<Vec<MetCfgKey>> {
+        let products: Vec<MetCfgKey> = sqlx::query!(
+            "SELECT DISTINCT(product_key) FROM MetFiles WHERE filedate >= ? AND filedate < ?",
             start_date,
             end_date
         )
         .fetch_all(conn)
         .await?
         .into_iter()
-        .map(|r| MetProduct::from_str(&r.product))
-        .try_collect()?;
+        .map(|r| MetCfgKey(r.product_key))
+        .collect();
 
         Ok(products)
     }
@@ -718,15 +615,15 @@ impl MetFile {
         conn: &mut MySqlConn,
         start_date: NaiveDate,
         end_date: NaiveDate,
-        met_product: Option<&MetProduct>,
+        met_product: Option<&MetCfgKey>,
     ) -> anyhow::Result<Vec<MetFile>> {
         let files = if let Some(prod) = met_product {
             sqlx::query_as!(
                 MetFile,
-                "SELECT * From MetFiles WHERE filedate >= ? AND filedate < ? AND product = ?",
+                "SELECT * From MetFiles WHERE filedate >= ? AND filedate < ? AND product_key = ?",
                 start_date,
                 end_date,
-                prod.to_string()
+                prod
             )
             .fetch_all(conn)
             .await?
@@ -768,7 +665,7 @@ impl MetFile {
         conn: &mut MySqlConn,
         file: &Path,
         datetime: NaiveDateTime,
-        download_cfg: &config::MetDownloadConfig,
+        download_cfg: config::KeyedMetDownloadConfig<'_>,
     ) -> Result<(), AddMetFileError> {
         if !file.exists() {
             return Err(AddMetFileError::FileDoesNotExist(file.to_path_buf()));
@@ -800,7 +697,7 @@ impl MetFile {
         })?;
 
         if let Some(record) = extant_record {
-            if datetime != record.filedate || download_cfg.product_key != record.product_key {
+            if datetime != record.filedate || download_cfg.product_key.0 != record.product_key {
                 // For now, I'm considering this an error. If we've downloaded the same file, it should have the
                 // same characteristics.
                 return Err(AddMetFileError::FileCharacteristicMismatch(
@@ -859,9 +756,9 @@ impl MetFile {
     pub async fn add_met_file_infer_date(
         conn: &mut MySqlConn,
         file: &Path,
-        download_cfg: &config::MetDownloadConfig,
+        download_cfg: config::KeyedMetDownloadConfig<'_>,
     ) -> Result<(), AddMetFileError> {
-        let datetime = Self::date_from_filename(file, download_cfg)?;
+        let datetime = Self::date_from_filename(file, download_cfg.cfg)?;
         Self::add_met_file(conn, file, datetime, download_cfg).await
     }
 
@@ -880,9 +777,9 @@ impl MetFile {
     pub async fn file_exists_by_type(
         conn: &mut MySqlConn,
         file: &Path,
-        file_cfg: &config::MetDownloadConfig,
+        file_cfg: config::KeyedMetDownloadConfig<'_>,
     ) -> anyhow::Result<bool> {
-        let datetime = Self::date_from_filename(file, file_cfg)?;
+        let datetime = Self::date_from_filename(file, file_cfg.cfg)?;
 
         let n = sqlx::query!(
             r#"SELECT COUNT(*) as count FROM MetFiles

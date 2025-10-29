@@ -4,7 +4,11 @@ use chrono::NaiveDate;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::{config::Config, met::CheckMetAvailableError, MySqlConn};
+use crate::{
+    config::{Config, ProcCfgKey},
+    met::CheckMetAvailableError,
+    MySqlConn,
+};
 
 /// Inner structure to serialize the locations requested for a job
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -18,8 +22,7 @@ pub(crate) struct FinalizedRequestValues {
     pub(crate) site_ids: Vec<String>,
     pub(crate) lats: Vec<Option<f32>>,
     pub(crate) lons: Vec<Option<f32>>,
-    pub(crate) ginput_key: Option<String>,
-    pub(crate) met_key: Option<String>,
+    pub(crate) proc_key: Option<ProcCfgKey>,
 }
 
 pub(super) async fn check_and_transform_request_params(
@@ -111,19 +114,17 @@ pub(super) async fn check_and_transform_request_params(
 
     // Check if the user requested a met other than the default and, if so, whether
     // it is a valid key and if the dates are okay.
-    let (met_key, ginput_key) = if let Some(key) = reanalysis {
-        match config.requests.check_met_request(key, start_date, end_date) {
-            Ok(met) => (
-                Some(met.met_key.to_string()),
-                Some(met.ginput_key.to_string()),
-            ),
+    let proc_key = if let Some(key) = reanalysis {
+        let proc_cfg_key = ProcCfgKey(key.to_string());
+        match config.check_user_proc_request(&proc_cfg_key, start_date, end_date) {
+            Ok(_) => Some(proc_cfg_key),
             Err(msg) => {
                 errors.push(format!("Invalid reanalysis: {msg}"));
-                (None, None)
+                None
             }
         }
     } else {
-        (None, None)
+        None
     };
 
     if errors.is_empty() {
@@ -131,8 +132,7 @@ pub(super) async fn check_and_transform_request_params(
             site_ids,
             lats,
             lons,
-            ginput_key,
-            met_key,
+            proc_key,
         })
     } else {
         return Err(errors);
@@ -149,15 +149,14 @@ async fn check_met_available(
     let mut unsupported_dates = vec![];
 
     for date in crate::utils::DateIterator::new_one_range(start_date, end_date) {
-        let (missing, unsupported) = match crate::met::MetFile::is_date_complete_for_default_mets(
-            conn, config, date,
-        )
-        .await
-        {
-            Ok(state) => (!state.is_complete(), false),
-            Err(CheckMetAvailableError::NoDefaultsDefined(_)) => (true, true),
-            Err(CheckMetAvailableError::Other(e)) => return Err(e.into()),
-        };
+        let (missing, unsupported) =
+            match crate::met::MetFile::is_date_complete_for_default_processing(conn, config, date)
+                .await
+            {
+                Ok(state) => (!state.is_complete(), false),
+                Err(CheckMetAvailableError::NoDefaultsDefined(_)) => (true, true),
+                Err(CheckMetAvailableError::Other(e)) => return Err(e.into()),
+            };
 
         if missing {
             missing_dates.push(date);
