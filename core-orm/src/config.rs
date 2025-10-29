@@ -20,6 +20,7 @@ use std::{
     fmt::{Debug, Display},
     fs::File,
     io::{Read, Write},
+    ops::Deref,
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -208,12 +209,27 @@ impl Display for ConfigValErrorCause {
     }
 }
 
-#[derive(Debug, Default, Hash, Deserialize, Serialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Default, Hash, Deserialize, Serialize, PartialEq, Eq, Clone, sqlx::Type)]
+#[sqlx(transparent)]
 pub struct ProcCfgKey(pub String);
 
 impl Display for ProcCfgKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for ProcCfgKey {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for ProcCfgKey {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_str()
     }
 }
 

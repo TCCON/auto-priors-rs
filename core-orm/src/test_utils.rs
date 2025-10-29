@@ -151,10 +151,8 @@ pub fn make_dummy_config(scratch_root: PathBuf) -> anyhow::Result<crate::config:
     let mut cfg: crate::config::Config = toml::from_str(s)?;
 
     cfg.execution.ftp_download_root = scratch_root.clone();
-    for (_, dl_cfgs) in cfg.data.met_download.iter_mut() {
-        for dl_cfg in dl_cfgs.iter_mut() {
-            dl_cfg.download_dir = scratch_root.join(dl_cfg.levels.standard_subdir());
-        }
+    for (_, dl_cfg) in cfg.data.met_download.iter_mut() {
+        dl_cfg.download_dir = scratch_root.join(dl_cfg.ginput_met_type.standard_subdir());
     }
 
     cfg.execution.success_input_file_dir = scratch_root.join("input_success");
@@ -169,12 +167,10 @@ pub fn make_dummy_config_with_temp_dirs(
     let test_dir =
         TestRootDir::new(prefix).with_context(|| "Failed to make parent temporary directory")?;
     let cfg = make_dummy_config(test_dir.path().to_owned())?;
-    for (_, dl_cfgs) in cfg.data.met_download.iter() {
-        for dl_cfg in dl_cfgs.iter() {
-            std::fs::create_dir_all(dl_cfg.download_dir.clone()).with_context(|| {
-                "Failed to create a subdirectory for one of the file sets to download"
-            })?;
-        }
+    for (_, dl_cfg) in cfg.data.met_download.iter() {
+        std::fs::create_dir_all(dl_cfg.download_dir.clone()).with_context(|| {
+            "Failed to create a subdirectory for one of the file sets to download"
+        })?;
     }
 
     std::fs::create_dir_all(&cfg.execution.success_input_file_dir).with_context(|| {

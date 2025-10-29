@@ -10,7 +10,7 @@ use std::{
     str::FromStr,
 };
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use chrono::{NaiveDate, NaiveDateTime};
 use itertools::{izip, Itertools};
@@ -33,7 +33,7 @@ const DEFAULT_MIN_SUB_DATE: NaiveDate = NaiveDate::from_ymd_opt(1970, 1, 1).unwr
 const DEFAULT_MAX_SUB_DATE: NaiveDate = NaiveDate::from_ymd_opt(2100, 1, 1).unwrap();
 
 use crate::{
-    config::{Config, EmailConfig},
+    config::{Config, EmailConfig, ProcCfgKey},
     error::{JobAddError, JobError, JobPriorityError, JobResult},
     siteinfo, utils, MySqlConn, PoolWrapper,
 };
@@ -365,8 +365,7 @@ pub(crate) struct QJob {
     pub(crate) delete_time: Option<NaiveDateTime>,
     pub(crate) priority: i32,
     pub(crate) queue: String,
-    pub(crate) met_key: Option<String>,
-    pub(crate) ginput_key: Option<String>,
+    pub(crate) processing_key: Option<String>,
     pub(crate) save_dir: String,
     pub(crate) save_tarball: i8,
     pub(crate) mod_fmt: String,
@@ -420,8 +419,7 @@ impl TryFrom<Job> for QJob {
             delete_time: j.delete_time,
             priority: j.priority,
             queue: j.queue,
-            met_key: j.met_key,
-            ginput_key: j.ginput_key,
+            processing_key: j.processing_key.map(|k| k.0),
             save_dir: save_dir,
             save_tarball: j.save_tarball as i8,
             mod_fmt: j.mod_fmt.to_string(),
@@ -515,9 +513,8 @@ impl<'j> Display for VerboseDisplayJob<'j> {
         )?;
         writeln!(
             f,
-            "  Met = {}, ginput = {}",
-            self.job.met_key.as_deref().unwrap_or("DEFAULT"),
-            self.job.ginput_key.as_deref().unwrap_or("DEFAULT")
+            "  Processing = {}",
+            self.job.processing_key.as_deref().unwrap_or("DEFAULT"),
         )?;
         Ok(())
     }
@@ -563,13 +560,9 @@ pub struct Job {
     /// Name of the queue in which this job should run; queues are defined in the configuration.
     pub queue: String,
 
-    /// The key from the configuration file corresponding to which meteorology data to use for this
+    /// The key from the configuration file corresponding to which processing configuration to use for this
     /// job. If `None`, that indicates that the default met for the given dates should be used.
-    pub met_key: Option<String>,
-
-    /// The key from the configuration file corresponding to which version of ginput to use for this
-    /// job. If `None`, that indicates that the default version for the given dates should be used.
-    pub ginput_key: Option<String>,
+    pub processing_key: Option<ProcCfgKey>,
 
     /// Where to save the output. This will be the output directory for ALL jobs, a particular job
     /// will have a subdirectory or tarfile under here.
@@ -665,8 +658,7 @@ impl TryFrom<QJob> for Job {
             delete_time: q.delete_time,
             priority: q.priority,
             queue: q.queue,
-            met_key: q.met_key,
-            ginput_key: q.ginput_key,
+            processing_key: q.processing_key.map(|k| k.into()),
             root_save_dir: PathBuf::from(q.save_dir),
             save_tarball: TarChoice::try_from(q.save_tarball)?,
             mod_fmt: ModFmt::from_str(&q.mod_fmt)?,
@@ -811,9 +803,13 @@ impl Job {
         Ok(output_dirs)
     }
 
-    fn get_possible_output_subdirs(&self, config: &Config) -> anyhow::Result<Vec<String>> {
-        if let Some(met_key) = &self.met_key {
-            let subdir = config.get_proc_cfg_ginput_output_subdirs(met_key)?;
+    fn get_possible_output_subdirs<'cfg>(
+        &self,
+        config: &'cfg Config,
+    ) -> anyhow::Result<Vec<&'cfg str>> {
+        if let Some(proc_cfg_key) = &self.processing_key {
+            let subdir = config.get_proc_cfg_ginput_output_subdirs(proc_cfg_key)
+                .with_context(|| anyhow!("Error occurred while getting subdirectory for processing config '{proc_cfg_key}' requested for job {}", self.job_id))?;
             Ok(vec![subdir])
         } else {
             let mut all_subdirs = HashSet::new();
@@ -1541,8 +1537,7 @@ impl Job {
                 None,
                 Some(delete_time),
                 Some(save_tarball),
-                finalized_values.met_key.as_deref(),
-                finalized_values.ginput_key.as_deref(),
+                finalized_values.proc_key.as_ref(),
             )
             .await?;
             all_job_ids.push(this_jid);
@@ -1552,7 +1547,7 @@ impl Job {
         Ok(all_job_ids)
     }
 
-    /// Add a job with extra options, such as the met key and ginput key.
+    /// Add a job with extra options, such as the processing key.
     ///
     /// Note that this DOES NOT check that the values of met_key and ginput_key are valid.
     ///
@@ -1575,8 +1570,7 @@ impl Job {
         priority: Option<i32>,
         delete_time: Option<NaiveDateTime>,
         save_tarball: Option<TarChoice>,
-        met_key: Option<&str>,
-        ginput_key: Option<&str>,
+        processing_key: Option<&ProcCfgKey>,
     ) -> Result<i32, JobAddError> {
         let job_id = Self::add_job_from_args(
             &mut **transaction,
@@ -1597,16 +1591,10 @@ impl Job {
         )
         .await?;
 
-        if let Some(met) = met_key {
-            sqlx::query!("UPDATE Jobs SET met_key = ? WHERE job_id = ?", met, job_id)
-                .execute(&mut **transaction)
-                .await?;
-        }
-
-        if let Some(ginput) = ginput_key {
+        if let Some(proc) = processing_key {
             sqlx::query!(
-                "UPDATE Jobs SET ginput_key = ? WHERE job_id = ?",
-                ginput,
+                "UPDATE Jobs SET processing_key = ? WHERE job_id = ?",
+                proc,
                 job_id
             )
             .execute(&mut **transaction)
@@ -2492,14 +2480,17 @@ fn get_runner_for_date(
     job: &Job,
     config: &Config,
 ) -> anyhow::Result<Box<dyn InnerGinputRunner>> {
-    let ginput_key = if let Some(key) = &job.ginput_key {
+    let proc_cfg_key = if let Some(key) = &job.processing_key {
         key
     } else {
         let defaults = config.get_defaults_for_date(date)
             .with_context(|| format!("Could not get defaults for date {date}; occurred while trying to start ginput for job {}", job.job_id))?;
-        &defaults.ginput
+        &defaults.processing_configuration
     };
 
+    let proc_cfg = config.processing_configurations.get(proc_cfg_key)
+        .ok_or_else(|| anyhow!("Processing key '{proc_cfg_key}' for date {date} of job {} not defined in the config file", job.job_id))?;
+    let ginput_key = &proc_cfg.ginput;
     let ginput = config.execution.ginput.get(ginput_key).ok_or_else(|| {
         anyhow::anyhow!(
             "Ginput key '{ginput_key}', required by job #{}, is not defined in the configuration",
@@ -2525,21 +2516,21 @@ async fn setup_ginput_args_for_date(
     config: &Config,
 ) -> anyhow::Result<GinputAutomationArgs> {
     debug!("Job {}: Getting met key for job", job.job_id);
-    let met_key = if let Some(k) = &job.met_key {
-        k.to_owned()
+    let proc_cfg_key = if let Some(k) = &job.processing_key {
+        k
     } else {
         let defaults = config
             .get_defaults_for_date(date)
             .map_err(|e| JobError::ConfigurationError(e.into()))?;
-        defaults.met.clone()
+        &defaults.processing_configuration
     };
 
     debug!(
-        "Job {}: Getting met and chem paths for met key '{met_key}'",
+        "Job {}: Getting met and chem paths for met key '{proc_cfg_key}'",
         job.job_id
     );
     let (met_path, chem_path, ginput_met_key) = config
-        .get_ginput_met_args(&met_key)
+        .get_ginput_met_args(&proc_cfg_key)
         .map_err(|e| JobError::ConfigurationError(e))?;
 
     debug!("Job {}: Standardize site IDs, lats, and lons", job.job_id);

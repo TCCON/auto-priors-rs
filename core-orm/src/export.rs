@@ -169,7 +169,7 @@ async fn import_db_inner(conn: &mut MySqlConn, db_data: Db) -> anyhow::Result<()
     info!("Filling table Jobs");
     for row in progress_iter(db_data.jobs) {
         sqlx::query!(
-            "INSERT INTO Jobs(job_id, state, site_id, start_date, end_date, lat, lon, email, delete_time, priority, queue, met_key, ginput_key, save_dir, save_tarball, mod_fmt, vmr_fmt, map_fmt, submit_time, complete_time, output_file) VALUE (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO Jobs(job_id, state, site_id, start_date, end_date, lat, lon, email, delete_time, priority, queue, processing_key, save_dir, save_tarball, mod_fmt, vmr_fmt, map_fmt, submit_time, complete_time, output_file) VALUE (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             row.job_id,
             row.state,
             row.site_id,
@@ -181,8 +181,7 @@ async fn import_db_inner(conn: &mut MySqlConn, db_data: Db) -> anyhow::Result<()
             row.delete_time,
             row.priority,
             row.queue,
-            row.met_key,
-            row.ginput_key,
+            row.processing_key,
             row.save_dir,
             row.save_tarball,
             row.mod_fmt,

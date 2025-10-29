@@ -7,7 +7,7 @@ use chrono::{Duration, NaiveDate};
 use clap::{self, Args, Subcommand};
 use itertools::Itertools;
 use log::warn;
-use orm::{siteinfo::StdSite, stdsitejobs, utils::DateIterator, MySqlConn};
+use orm::{config::ProcCfgKey, siteinfo::StdSite, stdsitejobs, utils::DateIterator, MySqlConn};
 use sqlx::Connection;
 
 /// Manage jobs for the standard sites
@@ -200,15 +200,10 @@ pub struct SpecialRunCli {
     #[clap(long)]
     site_ids: Option<String>,
 
-    /// Key from the configuration to specify which ginput version to use.
+    /// Key from the configuration to specify which processing configuration to use.
     /// If not given, the default for each date will be used.
     #[clap(long)]
-    ginput_key: Option<String>,
-
-    /// Key from the configuration to specify which met data to use.
-    /// If not given, the default for each date will be used.
-    #[clap(long)]
-    met_key: Option<String>,
+    proc_key: Option<String>,
 
     /// Number of days per job submitted - if the number of days between the
     /// start and end dates exceeds this number, multiple jobs will be submitted.
@@ -253,8 +248,7 @@ pub async fn special_std_site_run_cli(
         conn,
         config,
         site_ids,
-        args.ginput_key.as_deref(),
-        args.met_key.as_deref(),
+        args.proc_key.map(ProcCfgKey::from),
         args.split_days,
         args.email,
         args.priority,
@@ -269,8 +263,7 @@ pub async fn special_std_site_run(
     conn: &mut MySqlConn,
     config: &orm::config::Config,
     site_ids: Option<Vec<String>>,
-    ginput_key: Option<&str>,
-    met_key: Option<&str>,
+    proc_cfg_key: Option<ProcCfgKey>,
     split_days: Option<u32>,
     email: Option<String>,
     priority: Option<i32>,
@@ -279,15 +272,28 @@ pub async fn special_std_site_run(
     queue: &str,
 ) -> anyhow::Result<()> {
     // Check that our met and ginput keys are defined in the config and the met data we need is available
-    if let Some(met) = met_key {
-        let met_cfgs = config.get_met_configs(met)?;
+    if let Some(key) = &proc_cfg_key {
+        let met_cfgs = config.get_mets_for_processing_config(key)?;
         for date in orm::utils::DateIterator::new_one_range(start_date, end_date) {
             let state =
-                orm::met::MetFile::is_date_complete_for_config_set(conn, date, met_cfgs).await?;
+                orm::met::MetFile::is_date_complete_for_config_set(conn, date, &met_cfgs).await?;
             if !state.is_complete() {
                 anyhow::bail!("Required met not available for {date}");
             }
         }
+
+        let ginput_key = &config
+            .processing_configurations
+            .get(&key)
+            .expect(
+                "A missing processing configuration key should have errored earlier in the code",
+            )
+            .ginput;
+        config
+            .execution
+            .ginput
+            .get(ginput_key)
+            .ok_or_else(|| anyhow::anyhow!("No ginput key name '{ginput_key}"))?;
     } else {
         for date in orm::utils::DateIterator::new_one_range(start_date, end_date) {
             let state =
@@ -297,14 +303,6 @@ pub async fn special_std_site_run(
                 anyhow::bail!("Required met not available for {date}");
             }
         }
-    }
-
-    if let Some(ginput) = ginput_key {
-        config
-            .execution
-            .ginput
-            .get(ginput)
-            .ok_or_else(|| anyhow::anyhow!("No ginput key name '{ginput}"))?;
     }
 
     // Now submit the job or jobs if we're breaking it up into multiple jobs to speed things up.
@@ -329,8 +327,7 @@ pub async fn special_std_site_run(
             priority,
             None,
             Some(orm::jobs::TarChoice::No),
-            met_key,
-            ginput_key,
+            proc_cfg_key.as_ref(),
         )
         .await?;
         transaction.commit().await?;
