@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt::Display,
     path::{Path, PathBuf},
     str::FromStr,
@@ -13,6 +14,7 @@ use sqlx::{self, FromRow, Type};
 use crate::{
     config::{self, MetCfgKey},
     error::DefaultOptsQueryError,
+    utils::DateIterator,
     MySqlConn,
 };
 
@@ -99,38 +101,101 @@ impl Display for CheckMetAvailableError {
 
 impl std::error::Error for CheckMetAvailableError {}
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum MetDayState {
-    Complete,
-    Incomplete(i64, i64),
-    Missing,
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub struct MetDayState {
+    n_found: u64,
+    pub n_expected: u64,
 }
 
 impl AsRef<str> for MetDayState {
     fn as_ref(&self) -> &str {
-        match self {
-            Self::Complete => "complete",
-            Self::Incomplete(_, _) => "incomplete",
-            Self::Missing => "missing",
+        if self.is_complete() {
+            "complete"
+        } else if self.is_missing() {
+            "missing"
+        } else {
+            "incomplete"
         }
     }
 }
 
 impl Display for MetDayState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MetDayState::Complete => write!(f, "complete"),
-            MetDayState::Incomplete(found, expected) => write!(f, "incomplete ({found}/{expected}"),
-            MetDayState::Missing => write!(f, "missing"),
-        }
+        write!(
+            f,
+            "{} ({}/{})",
+            self.as_ref(),
+            self.n_found,
+            self.n_expected
+        )
     }
 }
 
 impl MetDayState {
+    pub fn new(n_found: u64, n_expected: u64) -> Self {
+        Self {
+            n_found,
+            n_expected,
+        }
+    }
+
+    pub fn new_infallible(n_found: i64, n_expected: i64) -> Self {
+        let n_found: u64 = n_found.try_into().unwrap_or(0);
+        let n_expected: u64 = n_expected.try_into().unwrap_or(0);
+        Self {
+            n_found,
+            n_expected,
+        }
+    }
+
+    pub fn new_from_count(n_found: i64, n_expected: i64) -> anyhow::Result<Self> {
+        let n_found: u64 = n_found.try_into().context("n_found cannot be negative")?;
+        let n_expected: u64 = n_expected
+            .try_into()
+            .context("n_expected cannot be negative")?;
+        Ok(Self {
+            n_found,
+            n_expected,
+        })
+    }
+
+    pub fn new_complete(n_expected: u64) -> Self {
+        Self {
+            n_found: n_expected,
+            n_expected,
+        }
+    }
+
+    pub fn new_missing(n_expected: u64) -> Self {
+        Self {
+            n_found: 0,
+            n_expected,
+        }
+    }
+
+    pub fn new_missing_infallible(n_expected: i64) -> Self {
+        let n_expected: u64 = n_expected.try_into().unwrap_or(0);
+        Self {
+            n_found: 0,
+            n_expected,
+        }
+    }
+
     pub fn is_complete(&self) -> bool {
-        match self {
-            Self::Complete => true,
-            Self::Incomplete(_, _) | Self::Missing => false,
+        self.n_found == self.n_expected
+    }
+    pub fn is_missing(&self) -> bool {
+        self.n_found == 0
+    }
+
+    pub fn is_incomplete(&self) -> bool {
+        self.n_found > 0 && self.n_found < self.n_expected
+    }
+
+    pub fn merge(&self, other: &Self) -> Self {
+        Self {
+            n_found: self.n_found + other.n_found,
+            n_expected: self.n_expected + other.n_expected,
         }
     }
 }
@@ -209,7 +274,7 @@ impl MetFile {
     ///
     /// Will error if the frequency specified in the configuration does not divide evenly
     /// into a day (e.g. if the files are provided every 300 minutes)
-    fn num_expected_daily_files(cfg: &config::MetDownloadConfig) -> anyhow::Result<i64> {
+    pub fn num_expected_daily_files(cfg: &config::MetDownloadConfig) -> anyhow::Result<i64> {
         if 1440 % cfg.file_freq_min != 0 {
             let remainder = 1440 % cfg.file_freq_min;
             let msg = format!("A met configuration has a file frequency that does not evenly divide per day, remaining minutes were {remainder} ({cfg})");
@@ -442,11 +507,20 @@ impl MetFile {
 
     /// Returns whether a given date is complete, incomplete, or wholly missing for a given reanalysis download configuration.
     ///
-    /// Note that this only checks a single set of files, e.g. the 2D met files for GEOS FP-IT or GEOS IT. Assume that a met
-    /// dataset may require multiple files for a day to be ready for priors generation. For GEOS for example, we need the
-    /// 2D assimilated met, 3D assimilated met, and 3D chemistry files. To check that, use [`MetFile::is_date_complete_for_config_set`].
+    /// Note that this only checks a single set of files, e.g. the 2D met files for GEOS FP-IT or GEOS IT. Assume that a processing
+    /// configuration dataset may require multiple files for a day to be ready for priors generation. For GEOS for example, we need the
+    /// 2D assimilated met, 3D assimilated met, and 3D chemistry files.
     ///
     /// Will return an `Err` if the database query fails.
+    ///
+    /// # See also
+    ///
+    /// - [`MetFile::is_date_complete_for_config_set`] to check if all of the files needed for a given processing configuration
+    ///   are available for a given date.
+    /// - [`MetFile::are_dates_complete_for_config`] to check if the files of a single reanalysis download configuration have been
+    ///   downloaded for a range of dates. This uses a single database query for all dates.
+    /// - [`MetFile::are_dates_complete_for_config_set`] similar, but to check a suite of met files over a range of dates, rather
+    ///   than a single met file type.
     pub async fn is_date_complete_for_config(
         conn: &mut MySqlConn,
         date: NaiveDate,
@@ -468,13 +542,60 @@ impl MetFile {
             keyed_cfg.product_key
         );
 
-        if n_found == 0 {
-            Ok(MetDayState::Missing)
-        } else if n_found < n_expected {
-            Ok(MetDayState::Incomplete(n_found, n_expected))
-        } else {
-            Ok(MetDayState::Complete)
+        Ok(MetDayState::new_from_count(n_found, n_expected)?)
+    }
+
+    /// Returns whether all dates in a range are complete, incomplete, or wholly missing for a given reanalysis download configuration.
+    ///
+    /// Note that this only checks a single set of files, e.g. the 2D met files for GEOS FP-IT or GEOS IT. Assume that a processing
+    /// configuration dataset may require multiple files for a day to be ready for priors generation. For GEOS for example, we need the
+    /// 2D assimilated met, 3D assimilated met, and 3D chemistry files.
+    ///
+    /// If a date is missing from the map returned, then it was outside the date range specified. All dates inside the range
+    /// should have an entry in the map.
+    ///
+    /// # See also
+    ///
+    /// - [`MetFile::is_date_complete_for_config`] to check if a single met file type is complete for one date.
+    /// - [`MetFile::is_date_complete_for_config_set`] to check if all of the files needed for a given processing configuration
+    ///   are available for a given date.
+    /// - [`MetFile::are_dates_complete_for_config_set`] to check a suite of met files over a range of dates, rather
+    ///   than a single date - this should be more efficient because it uses a single database call.
+    pub async fn are_dates_complete_for_config(
+        conn: &mut MySqlConn,
+        start_date: NaiveDate,
+        end_date: Option<NaiveDate>,
+        keyed_cfg: config::KeyedMetDownloadConfig<'_>,
+    ) -> anyhow::Result<HashMap<NaiveDate, MetDayState>> {
+        let end_date = end_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
+        let n_expected = Self::num_expected_daily_files(keyed_cfg.cfg)?;
+        let n_found_each_day = sqlx::query!(
+            r#"SELECT DATE(filedate) as date, COUNT(filedate) as count FROM MetFiles
+               WHERE DATE(filedate) >= ? AND DATE(filedate) < ? AND product_key = ?
+               GROUP BY date"#,
+            start_date,
+            end_date,
+            keyed_cfg.product_key
+        )
+        .fetch_all(conn)
+        .await?;
+
+        let date_map_iter = n_found_each_day.into_iter().filter_map(|rec| {
+            if let Some(d) = rec.date {
+                let status = MetDayState::new_infallible(rec.count, n_expected);
+                Some((d, status))
+            } else {
+                // Not sure why date would ever be null, so just skip it.
+                None
+            }
+        });
+        let mut map = HashMap::from_iter(date_map_iter);
+        for date in DateIterator::new_one_range(start_date, end_date) {
+            if !map.contains_key(&date) {
+                map.insert(date, MetDayState::new_missing_infallible(n_expected));
+            }
         }
+        Ok(map)
     }
 
     /// Returns whether a given date has all of the met files needed for a given set of configurations.
@@ -487,41 +608,79 @@ impl MetFile {
     /// If there is an error connecting to the database, this returns an `Err`. Otherwise, this returns `MetDayState::Complete` if
     /// all the necessary met files are in the database, `MetDayState::Missing` if none of the met files are present, and
     /// `MetDayState::Incomplete` otherwise (even if only one of several file sets is incomplete).
+    ///
+    /// # See also
+    ///
+    /// - [`MetFile::is_date_complete_for_config`] to check if a single met file type is complete for one date.
+    /// - [`MetFile::are_dates_complete_for_config`] to check if the files of a single reanalysis download configuration have been
+    ///   downloaded for a range of dates. This uses a single database query for all dates.
+    /// - [`MetFile::are_dates_complete_for_config_set`] similar, but to check a suite of met files over a range of dates, rather
+    ///   than a single met file type.
     pub async fn is_date_complete_for_config_set(
         conn: &mut MySqlConn,
         date: NaiveDate,
         keyed_cfgs: &[config::KeyedMetDownloadConfig<'_>],
     ) -> anyhow::Result<MetDayState> {
         let mut states = vec![];
-        let mut num_expected = vec![];
         for keyed_cfg in keyed_cfgs {
             let this_state = Self::is_date_complete_for_config(conn, date, *keyed_cfg).await?;
             debug!("Met {} {date} -> {this_state:?}", keyed_cfg.product_key);
             states.push(this_state);
-            num_expected.push(Self::num_expected_daily_files(keyed_cfg.cfg)?);
         }
 
-        if states.iter().all(|&s| s == MetDayState::Complete) {
-            Ok(MetDayState::Complete)
-        } else if states.iter().all(|&s| s == MetDayState::Missing) {
-            Ok(MetDayState::Missing)
-        } else {
-            let (total_found, total_expected) =
-                states
-                    .iter()
-                    .zip(num_expected.into_iter())
-                    .fold((0i64, 0i64), |mut acc, el| {
-                        match el.0 {
-                            MetDayState::Complete => acc.0 += el.1, // complete day, add the number expected to the number found
-                            MetDayState::Incomplete(found, _) => acc.0 += found,
-                            MetDayState::Missing => (), // missing day, add nothing to found
-                        }
-                        // Assume that the second integer in Incomplete will match the number expected (it should)
-                        acc.1 += el.1;
-                        acc
-                    });
-            Ok(MetDayState::Incomplete(total_found, total_expected))
+        let overall_state = states
+            .iter()
+            .fold(MetDayState::default(), |out, s| out.merge(s));
+        Ok(overall_state)
+    }
+
+    /// Returns whether all dates in a range are complete, incomplete, or wholly missing for a given set of
+    /// reanalysis download configuration.
+    ///
+    /// If a date is missing from the map returned, then it was outside the date range specified. All dates inside the range
+    /// should have an entry in the map.
+    ///
+    /// # See also
+    ///
+    /// - [`MetFile::is_date_complete_for_config`] to check if a single met file type is complete for one date.
+    /// - [`MetFile::is_date_complete_for_config_set`] to check if all of the files needed for a given processing configuration
+    ///   are available for a given date.
+    /// - [`MetFile::are_dates_complete_for_config`] to check if the files of a single reanalysis download configuration have been
+    ///   downloaded for a range of dates. This uses a single database query for all dates.
+    pub async fn are_dates_complete_for_config_set(
+        conn: &mut MySqlConn,
+        start_date: NaiveDate,
+        end_date: Option<NaiveDate>,
+        keyed_cfgs: &[config::KeyedMetDownloadConfig<'_>],
+    ) -> anyhow::Result<HashMap<NaiveDate, MetDayState>> {
+        fn get_state<'a>(
+            m: &'a HashMap<NaiveDate, MetDayState>,
+            date: &NaiveDate,
+        ) -> &'a MetDayState {
+            m.get(date)
+                .expect("get_state should not be called for a date not in the date -> state map")
         }
+        let end_date = end_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
+        let mut states = vec![];
+        for keyed_cfg in keyed_cfgs {
+            let these_states =
+                Self::are_dates_complete_for_config(conn, start_date, Some(end_date), *keyed_cfg)
+                    .await?;
+            states.push(these_states);
+        }
+
+        let mut set_states = HashMap::new();
+
+        for date in DateIterator::new_one_range(start_date, end_date) {
+            let overall_state = states
+                .iter()
+                .map(|m| get_state(m, &date))
+                .fold(MetDayState::default(), |out, s| out.merge(s));
+
+            set_states.insert(date, overall_state);
+        }
+
+        Ok(set_states)
     }
 
     /// Get the [`MetFile`] instance for a met file from the database with the basename `filename`

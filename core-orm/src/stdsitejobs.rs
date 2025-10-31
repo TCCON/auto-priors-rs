@@ -400,8 +400,9 @@ impl StdSiteJob {
         .collect_vec();
 
         for date in dates_missing_met {
-            if let met::MetDayState::Complete =
-                met::MetFile::is_date_complete_for_default_processing(conn, config, date).await?
+            if met::MetFile::is_date_complete_for_default_processing(conn, config, date)
+                .await?
+                .is_complete()
             {
                 // Assumes that if a date was missing met, it can't have an output file, so we only need to set the state
                 let res = sqlx::query!(

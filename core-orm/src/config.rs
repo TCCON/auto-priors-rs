@@ -16,7 +16,7 @@ use lettre::message::{Mailbox, Mailboxes};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::{Debug, Display},
     fs::File,
     io::{Read, Write},
@@ -121,6 +121,7 @@ pub enum ConfigValErrorCause {
         key1: String,
         key2: String,
     },
+    Other(String),
 }
 
 impl Display for ConfigValErrorCause {
@@ -205,6 +206,9 @@ impl Display for ConfigValErrorCause {
             ConfigValErrorCause::ProcCfgConflict { key1, key2 } => {
                 write!(f, "The processing configurations {key1} and {key2} output to the same tarball directory and overlap in time")
             }
+            ConfigValErrorCause::Other(msg) => {
+                write!(f, "{msg}")
+            }
         }
     }
 }
@@ -225,6 +229,15 @@ impl From<String> for ProcCfgKey {
     }
 }
 
+impl FromStr for ProcCfgKey {
+    // used so that this can be a type in a CLI
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_string()))
+    }
+}
+
 impl Deref for ProcCfgKey {
     type Target = str;
 
@@ -240,6 +253,14 @@ pub struct MetCfgKey(pub String);
 impl Display for MetCfgKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for MetCfgKey {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_string()))
     }
 }
 
@@ -352,6 +373,24 @@ impl Config {
                 anyhow!("Requested processing configuration '{proc_cfg_key}' not defined")
             })?;
         proc_cfg.get_met_configs(self).with_context(|| anyhow!("Error occurred while getting required mets for processing configuration '{proc_cfg_key}'"))
+    }
+
+    pub fn get_mets_for_defaults(&self) -> anyhow::Result<Vec<KeyedMetDownloadConfig>> {
+        let mut all_mets = vec![];
+        for default in self.default_options.iter() {
+            let mets = self.get_mets_for_processing_config(&default.processing_configuration)?;
+            all_mets.extend(mets.into_iter());
+        }
+        all_mets.dedup_by_key(|met| met.product_key);
+        Ok(all_mets)
+    }
+
+    pub fn get_all_mets(&self) -> Vec<KeyedMetDownloadConfig<'_>> {
+        let mut mets = vec![];
+        for (product_key, cfg) in self.data.met_download.iter() {
+            mets.push(KeyedMetDownloadConfig { product_key, cfg });
+        }
+        mets
     }
 
     /// Get the GEOS and chemistry directories required to pass to version 1 ginput instances
@@ -474,6 +513,16 @@ impl Config {
         for (key, proc_cfg) in self.processing_configurations.iter() {
             if proc_cfg.contains_date(date) {
                 proc_cfgs.push(key)
+            }
+        }
+        proc_cfgs
+    }
+
+    pub fn get_proc_cfgs_with_auto_met_download(&self) -> Vec<&ProcCfgKey> {
+        let mut proc_cfgs = vec![];
+        for (key, proc_cfg) in self.processing_configurations.iter() {
+            if proc_cfg.download_met_automatically {
+                proc_cfgs.push(key);
             }
         }
         proc_cfgs

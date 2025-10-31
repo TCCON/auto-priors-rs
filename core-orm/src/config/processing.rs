@@ -9,9 +9,12 @@ use chrono::NaiveDate;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{
-    ConfigValErrorCause, ConfigValidationError, GinputCfgKey, KeyedMetDownloadConfig, MetCfgKey,
-    ProcCfgKey,
+use crate::{
+    config::{
+        ConfigValErrorCause, ConfigValidationError, GinputCfgKey, KeyedMetDownloadConfig,
+        MetCfgKey, ProcCfgKey,
+    },
+    utils::{date_range_contains, DateRangeOverlap},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,19 +62,24 @@ pub struct ProcessingConfig {
     /// The top-level subdirectory that `ginput` places output for this met type, e.g. "fpit" for GEOS FP-IT.
     /// If the `ginput_met_key` value is "XXX-eta", then this is usually "XXX".
     pub ginput_output_subdir: String,
+
+    /// Set to false to avoid downloading the required mets automatically. Defaults to true when not specified
+    /// in a config file.
+    #[serde(default = "crate::utils::default_true")]
+    pub download_met_automatically: bool,
 }
 
 impl ProcessingConfig {
     /// If this configuration will be generated automatically, this defines the
     /// earliest date that will be produced automatically.
-    fn auto_start_date(&self) -> NaiveDate {
+    pub fn auto_start_date(&self) -> NaiveDate {
         self.auto_start_date.unwrap_or(self.start_date)
     }
 
     /// If this configuration will be generated automatically, this defines the
     /// latest date that will be produced automatically. If this returns `None`,
     /// then this configuration should be produced indefinitely.
-    fn auto_end_date(&self) -> Option<NaiveDate> {
+    pub fn auto_end_date(&self) -> Option<NaiveDate> {
         self.auto_end_date.or(self.end_date)
     }
 
@@ -134,6 +142,7 @@ impl ProcessingConfig {
             }
         }
 
+        // Check that the required ginput key is in the parent config
         if !cfg.execution.ginput.contains_key(&self.ginput) {
             errors.push(ConfigValErrorCause::UnknownGinputKey {
                 key: self.ginput.clone(),
@@ -141,17 +150,71 @@ impl ProcessingConfig {
             });
         }
 
-        if self.end_date.is_some_and(|d| d <= self.start_date) {
-            errors.push(ConfigValErrorCause::DateRangeInverted {
-                location: Self::location(my_key),
-            });
-        }
+        // Check that the date ranges are sane and inside the dates for which
+        // the met products should be available
+        self.check_date_ranges(cfg, my_key, errors);
 
+        // Check that this has an output directory if generating automatically.
         if self.generate_automatically && self.auto_tarball_dir.is_none() {
             errors.push(ConfigValErrorCause::MissingPath(format!(
                 "automatically-generating {} auto_tarball_dir",
                 Self::location(my_key)
             )));
+        }
+    }
+
+    fn check_date_ranges(
+        &self,
+        cfg: &super::Config,
+        my_key: &ProcCfgKey,
+        errors: &mut ConfigValidationError,
+    ) {
+        // Check that defined date ranges have the start dates first
+        if self.end_date.is_some_and(|d| d <= self.start_date) {
+            errors.push(ConfigValErrorCause::DateRangeInverted {
+                location: format!("{} (start_date and end_date)", Self::location(my_key)),
+            });
+        }
+
+        if self
+            .auto_end_date()
+            .is_some_and(|d| d < self.auto_start_date())
+        {
+            errors.push(ConfigValErrorCause::DateRangeInverted {
+                location: format!("{} (automatic start and end dates)", Self::location(my_key)),
+            });
+        }
+
+        // Check that the start and end dates are within the range for which
+        // the met files are available. Assume that if get_met_configs errors,
+        // it is because of an unknown met key that is handled elsewhere in
+        // validation.
+        if let Ok(met_cfgs) = self.get_met_configs(cfg) {
+            if !met_cfgs.is_empty() {
+                let last_met_start_date = met_cfgs
+                    .iter()
+                    .map(|c| c.cfg.earliest_date)
+                    .max()
+                    .expect("should be at least one met defined");
+                let first_met_end_date = met_cfgs.iter().filter_map(|c| c.cfg.latest_date).min();
+
+                if !date_range_contains(
+                    Some(last_met_start_date),
+                    first_met_end_date,
+                    Some(self.start_date),
+                    self.end_date,
+                ) {
+                    errors.push(ConfigValErrorCause::Other(format!("The start and/or end dates for processing '{my_key}' extend outside at least one of its required mets")));
+                }
+                if !date_range_contains(
+                    Some(last_met_start_date),
+                    first_met_end_date,
+                    Some(self.auto_start_date()),
+                    self.auto_end_date(),
+                ) {
+                    errors.push(ConfigValErrorCause::Other(format!("The automatic start and/or end dates for processing '{my_key}' extend outside at least one of its required mets")));
+                }
+            }
         }
     }
 
@@ -190,11 +253,12 @@ pub(super) fn validate_processing_configs(cfg: &super::Config) -> ConfigValidati
     for (processing_key, processing_cfg) in cfg.processing_configurations.iter() {
         processing_cfg.validate(cfg, &processing_key, &mut errors);
     }
+    check_for_conflicting_output_paths(&cfg.processing_configurations, &mut errors);
     errors
 }
 
 fn check_for_conflicting_output_paths(
-    proc_cfgs: &HashMap<String, ProcessingConfig>,
+    proc_cfgs: &HashMap<ProcCfgKey, ProcessingConfig>,
     errors: &mut ConfigValidationError,
 ) {
     for ((k1, proc1), (k2, proc2)) in proc_cfgs.iter().tuple_combinations() {

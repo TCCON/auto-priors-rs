@@ -40,6 +40,40 @@ pub fn date_ranges_overlap(
     DateRangeOverlap::classify(r1_start, r1_end, r2_start, r2_end).has_overlap()
 }
 
+pub fn date_range_contains(
+    r1_start: Option<NaiveDate>,
+    r1_end: Option<NaiveDate>,
+    r2_start: Option<NaiveDate>,
+    r2_end: Option<NaiveDate>,
+) -> bool {
+    let cls = DateRangeOverlap::classify(r1_start, r1_end, r2_start, r2_end);
+    if let DateRangeOverlap::AContainsB = cls {
+        true
+    } else {
+        false
+    }
+}
+
+/// Given two possibly open date ranges, return the intersection of them
+/// (i.e. the range of dates included in both). Returns an `Err` if the
+/// ranges do not overlap.
+pub fn get_date_range_intersection(
+    r1_start: Option<NaiveDate>,
+    r1_end: Option<NaiveDate>,
+    r2_start: Option<NaiveDate>,
+    r2_end: Option<NaiveDate>,
+) -> Result<(Option<NaiveDate>, Option<NaiveDate>), &'static str> {
+    let cls = DateRangeOverlap::classify(r1_start, r1_end, r2_start, r2_end);
+    match cls {
+        DateRangeOverlap::AContainsB => Ok((r2_start, r2_end)),
+        DateRangeOverlap::AInsideB => Ok((r1_start, r1_end)),
+        DateRangeOverlap::AEndsInB => Ok((r2_start, r1_end)),
+        DateRangeOverlap::AStartsInB => Ok((r1_start, r2_end)),
+        DateRangeOverlap::AEqualsB => Ok((r1_start, r1_end)),
+        DateRangeOverlap::None => Err("Date ranges do not overlap"),
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum DateRangeOverlap {
     /// The second date range is fully within the first, meaning that all dates from the second are also in the first
@@ -303,6 +337,14 @@ impl Iterator for DateIterator {
     }
 }
 
+pub fn later_end_date(d1: Option<NaiveDate>, d2: Option<NaiveDate>) -> Option<NaiveDate> {
+    match (d1, d2) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        // If either is None, then the result is None - treat None like infinity
+        _ => None,
+    }
+}
+
 pub fn format_lat_str(lat: f32, prec: u8) -> String {
     let ns = if lat >= 0.0 { "N" } else { "S" };
     let lat = lat.abs();
@@ -334,6 +376,11 @@ pub fn format_lon_str(lon: f32, prec: u8) -> String {
         7 => format!("{lon:.7}{ew}"),
         _ => unimplemented!("precision > 7 not implemented"),
     }
+}
+
+/// Helper function to default boolean fields to true during deserialization
+pub fn default_true() -> bool {
+    true
 }
 
 pub fn softwrap<R: std::io::BufRead>(reader: R, buf: &mut String) -> std::io::Result<()> {
