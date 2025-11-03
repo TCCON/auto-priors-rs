@@ -90,10 +90,9 @@ impl MetManager {
         let err_handler = self.error_handler.clone();
 
         let child = tokio::spawn(async move {
-            let res = download_missing_files(
-                &mut conn, None, None, None, false, &config, downloader, false,
-            )
-            .await;
+            let res =
+                download_missing_files(&mut conn, None, None, None, &config, downloader, false)
+                    .await;
 
             if let Err(e) = res {
                 err_handler.report_error(e.as_ref())

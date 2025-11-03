@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use orm::{
-    config::Config,
+    config::{Config, GinputCfgKey},
     jobs::{start_lut_regen_job, start_priors_gen_job, GinputHandle, Job, JobState},
     MySqlPC, PoolWrapper,
 };
@@ -267,7 +267,7 @@ impl<T: Queueable> JobManager<T> {
                 .execution
                 .ginput
                 .keys()
-                .map(|k| k.to_string())
+                .map(|k| k.to_owned())
                 .collect()
         };
 
@@ -648,7 +648,7 @@ pub(crate) trait Queueable {
     fn new_from_job(job: Job, config: &Config) -> Self;
 
     /// Create a new instance of this type that will regenerate LUTs for the given `ginput` configuration.
-    fn new_lut_job(ginput_key: String) -> Self;
+    fn new_lut_job(ginput_key: GinputCfgKey) -> Self;
 
     /// Start the job, updating the database if needed.
     async fn start(&mut self, pool: PoolWrapper, config: &Config) -> anyhow::Result<()>;
@@ -827,7 +827,7 @@ pub enum ServiceJobRunner {
         force_cleanup: bool,
     },
     LutRegenJob {
-        ginput_key: String,
+        ginput_key: GinputCfgKey,
         join_handle: Option<GinputHandle>,
         force_cleanup: bool,
     },
@@ -873,7 +873,7 @@ impl ServiceJobRunner {
     }
 
     async fn is_lut_job_done(
-        ginput_key: &str,
+        ginput_key: &GinputCfgKey,
         join_handle: &mut Option<GinputHandle>,
     ) -> anyhow::Result<bool> {
         let task = if let Some(runner) = join_handle {
@@ -913,7 +913,7 @@ impl ServiceJobRunner {
     }
 
     async fn start_lut_job(
-        ginput_key: String,
+        ginput_key: GinputCfgKey,
         join_handle: &mut Option<GinputHandle>,
         config: Config,
     ) -> anyhow::Result<()> {
@@ -950,7 +950,7 @@ impl ServiceJobRunner {
     }
 
     async fn cancel_lut_job(
-        ginput_key: &str,
+        ginput_key: &GinputCfgKey,
         join_handle: &mut Option<GinputHandle>,
     ) -> anyhow::Result<bool> {
         if let Some(task) = join_handle {
@@ -994,7 +994,7 @@ impl Queueable for ServiceJobRunner {
         }
     }
 
-    fn new_lut_job(ginput_key: String) -> Self {
+    fn new_lut_job(ginput_key: GinputCfgKey) -> Self {
         Self::LutRegenJob {
             ginput_key,
             join_handle: None,
@@ -1138,7 +1138,7 @@ mod tests {
             Self::new_from_seconds(5)
         }
 
-        fn new_lut_job(_ginput_key: String) -> Self {
+        fn new_lut_job(_ginput_key: GinputCfgKey) -> Self {
             Self::new_from_seconds(5)
         }
 
@@ -1228,7 +1228,7 @@ mod tests {
             "Did not have the correct number of standard jobs running"
         );
 
-        let lut_job = DummyJobRunner::new_lut_job("bob".to_string());
+        let lut_job = DummyJobRunner::new_lut_job(GinputCfgKey::from("bob".to_string()));
         let mut lut_queue = Queue::new_blocking(usize::MAX, LUT_REGEN_BLOCKING_PRIORITY);
         lut_queue.add(lut_job).await;
         manager.job_queues.insert("LUT".to_string(), lut_queue);
@@ -1279,7 +1279,7 @@ mod tests {
             .add(test_job)
             .await;
 
-        let lut_job = DummyJobRunner::new_lut_job("bob".to_string());
+        let lut_job = DummyJobRunner::new_lut_job(GinputCfgKey::from("bob".to_string()));
         let mut lut_queue = Queue::new_blocking(usize::MAX, LUT_REGEN_BLOCKING_PRIORITY);
         lut_queue.add(lut_job).await;
         manager.job_queues.insert("LUT".to_string(), lut_queue);
@@ -1323,7 +1323,7 @@ mod tests {
             .job_queues
             .insert(TEST_QUEUE_NAME.to_string(), std_queue);
 
-        let lut_job = DummyJobRunner::new_lut_job("bob".to_string());
+        let lut_job = DummyJobRunner::new_lut_job(GinputCfgKey::from("bob".to_string()));
         let mut lut_queue = Queue::new_blocking(usize::MAX, LUT_REGEN_BLOCKING_PRIORITY);
         lut_queue.add(lut_job).await;
 
