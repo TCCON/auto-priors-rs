@@ -100,8 +100,7 @@ async fn main() -> anyhow::Result<()> {
             command: MetActions::RemoveDates(subargs),
         }) => {
             let mut conn = db.get_connection().await?;
-            let loaded_config = load_config()?;
-            met_download::remove_dates_cli(&mut conn, &loaded_config, subargs, wget_dl).await?;
+            met_download::remove_dates_cli(&mut conn, subargs).await?;
         }
 
         Commands::Met(MetCli {

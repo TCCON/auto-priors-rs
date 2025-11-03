@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
 use chrono::{Duration, NaiveDate};
+use itertools::Itertools;
 use orm::{
-    met::{MetDataType, MetDayState, MetFile, MetLevels},
+    config::{MetCfgKey, ProcCfgKey},
+    met::MetFile,
     test_utils::{
         make_dummy_config, make_dummy_config_with_temp_dirs, multiline_sql, multiline_sql_init,
         open_test_database,
@@ -173,7 +175,7 @@ async fn test_check_met() {
     let stat_map = check_one_config_set_files_for_dates(
         &mut conn,
         &config,
-        common::TEST_MET_KEY,
+        &common::test_proc_key(),
         NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
         Some(NaiveDate::from_ymd_opt(2020, 1, 2).unwrap()),
     )
@@ -182,20 +184,15 @@ async fn test_check_met() {
 
     let stat = stat_map
         .get(&NaiveDate::from_ymd_opt(2020, 1, 1).unwrap())
-        .unwrap()
         .unwrap();
-    assert_eq!(
-        stat,
-        MetDayState::Complete,
-        "Day expected to be complete was not"
-    );
+    assert!(stat.is_complete(), "Day expected to be complete was not");
 
     // Should be marked as incomplete because they are each missing one of one type of file
 
     let stat_map = check_one_config_set_files_for_dates(
         &mut conn,
         &config,
-        common::TEST_MET_KEY,
+        &common::test_proc_key(),
         NaiveDate::from_ymd_opt(2020, 2, 1).unwrap(),
         Some(NaiveDate::from_ymd_opt(2020, 2, 4).unwrap()),
     )
@@ -204,35 +201,57 @@ async fn test_check_met() {
 
     let stat = stat_map
         .get(&NaiveDate::from_ymd_opt(2020, 2, 1).unwrap())
-        .unwrap()
         .unwrap();
-    assert_eq!(stat, MetDayState::Incomplete(23, 24), "Day missing one surface met file was not marked Incomplete or has the wrong number of files");
+    assert!(
+        stat.is_incomplete(),
+        "Day missing one surface met file was not marked as incomplete"
+    );
+    assert_eq!(
+        stat.n_found, 23,
+        "Day missing one surface file has the wrong number of files found"
+    );
+    assert_eq!(
+        stat.n_expected, 24,
+        "Day missing one surface file has the wrong number of files expected"
+    );
 
     let stat = stat_map
         .get(&NaiveDate::from_ymd_opt(2020, 2, 2).unwrap())
-        .unwrap()
         .unwrap();
+    assert!(
+        stat.is_incomplete(),
+        "Day missing one eta met file was not marked as incomplete"
+    );
     assert_eq!(
-        stat,
-        MetDayState::Incomplete(23, 24),
-        "Day missing one eta met file was not marked Incomplete or has the wrong number of files"
+        stat.n_found, 23,
+        "Day missing one eta met file has the wrong number of files found"
+    );
+    assert_eq!(
+        stat.n_expected, 24,
+        "Day missing one eta met file has the wrong number of files expected"
     );
 
     let stat = stat_map
         .get(&NaiveDate::from_ymd_opt(2020, 2, 3).unwrap())
-        .unwrap()
         .unwrap();
-    assert_eq!(
-        stat,
-        MetDayState::Incomplete(23, 24),
+    assert!(
+        stat.is_incomplete(),
         "Day missing one eta chem file not marked Incomplete or has the wrong number of files"
+    );
+    assert_eq!(
+        stat.n_found, 23,
+        "Day missing one eta chem file has the wrong number of files found"
+    );
+    assert_eq!(
+        stat.n_expected, 24,
+        "Day missing one eta chem file has the wrong number of files expected"
     );
 
     // Should also be marked as incomplete - missing all of one type of file
     let stat_map = check_one_config_set_files_for_dates(
         &mut conn,
         &config,
-        common::TEST_MET_KEY,
+        &common::test_proc_key(),
         NaiveDate::from_ymd_opt(2020, 3, 1).unwrap(),
         Some(NaiveDate::from_ymd_opt(2020, 3, 4).unwrap()),
     )
@@ -241,39 +260,57 @@ async fn test_check_met() {
 
     let stat = stat_map
         .get(&NaiveDate::from_ymd_opt(2020, 3, 1).unwrap())
-        .unwrap()
         .unwrap();
+    assert!(
+        stat.is_incomplete(),
+        "Day missing all surface met files not marked as incomplete"
+    );
     assert_eq!(
-        stat,
-        MetDayState::Incomplete(16, 24),
-        "Day missing all surface met files not marked Incomplete or has the wrong number of files"
+        stat.n_found, 16,
+        "Day missing all surface met files has the wrong number of files found"
+    );
+    assert_eq!(
+        stat.n_expected, 24,
+        "Day missing all surface met files has the wrong number of files expected"
     );
 
     let stat = stat_map
         .get(&NaiveDate::from_ymd_opt(2020, 3, 2).unwrap())
-        .unwrap()
         .unwrap();
+    assert!(
+        stat.is_incomplete(),
+        "Day missing all eta met files not marked as incomplete"
+    );
     assert_eq!(
-        stat,
-        MetDayState::Incomplete(16, 24),
-        "Day missing all eta met files not marked Incomplete or has the wrong number of files"
+        stat.n_found, 16,
+        "Day missing all eta met files has the wrong number of files found"
+    );
+    assert_eq!(
+        stat.n_expected, 24,
+        "Day missing all eta met files has the wrong number of files expected"
     );
 
     let stat = stat_map
         .get(&NaiveDate::from_ymd_opt(2020, 3, 3).unwrap())
-        .unwrap()
         .unwrap();
-    assert_eq!(
-        stat,
-        MetDayState::Incomplete(16, 24),
+    assert!(
+        stat.is_incomplete(),
         "Day missing all eta chem files not marked Incomplete or has the wrong number of files"
+    );
+    assert_eq!(
+        stat.n_found, 16,
+        "Day missing all eta chem files has the wrong number of files found"
+    );
+    assert_eq!(
+        stat.n_expected, 24,
+        "Day missing all eta chem files has the wrong number of files expected"
     );
 
     // This day isn't in the database at all, should be marked as missing
     let stat_map = check_one_config_set_files_for_dates(
         &mut conn,
         &config,
-        common::TEST_MET_KEY,
+        &common::test_proc_key(),
         NaiveDate::from_ymd_opt(2020, 4, 1).unwrap(),
         Some(NaiveDate::from_ymd_opt(2020, 4, 2).unwrap()),
     )
@@ -281,12 +318,10 @@ async fn test_check_met() {
     .unwrap();
     let stat = stat_map
         .get(&NaiveDate::from_ymd_opt(2020, 4, 1).unwrap())
-        .unwrap()
         .unwrap();
-    assert_eq!(
-        stat,
-        MetDayState::Missing,
-        "Day missing all files not marked Missing"
+    assert!(
+        stat.is_missing(),
+        "Day missing all files not marked as missing"
     );
 }
 
@@ -308,7 +343,7 @@ async fn test_geosfpit_download_by_dates() {
 
     met_download::download_files_for_dates(
         &mut conn,
-        "geosfpit",
+        &common::test_geosfpit_met_keys().iter().collect_vec(),
         NaiveDate::from_ymd_opt(2018, 1, 2).unwrap(),
         Some(NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()),
         &config,
@@ -343,7 +378,7 @@ async fn test_geosit_download_by_dates() {
 
     met_download::download_files_for_dates(
         &mut conn,
-        "geosit",
+        &common::test_geosit_met_keys().iter().collect_vec(),
         NaiveDate::from_ymd_opt(2023, 7, 2).unwrap(),
         Some(NaiveDate::from_ymd_opt(2023, 7, 3).unwrap()),
         &config,
@@ -381,7 +416,6 @@ async fn test_geosfpit_to_geos_it_download_by_dates() {
         Some(NaiveDate::from_ymd_opt(2023, 5, 31).unwrap()),
         Some(NaiveDate::from_ymd_opt(2023, 6, 2).unwrap()),
         None,
-        false,
         &config,
         downloader,
         false,
@@ -410,7 +444,6 @@ async fn test_download_default_geosfpit_missing() {
         None, // should pick up the start date from the existing files
         Some(NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()),
         None,
-        false,
         &config,
         downloader,
         false,
@@ -452,7 +485,6 @@ async fn test_download_default_geosit_missing() {
         None, // should pick up the start date from the existing files
         Some(NaiveDate::from_ymd_opt(2023, 7, 3).unwrap()),
         None,
-        false,
         &config,
         downloader,
         false,
@@ -495,7 +527,6 @@ async fn test_download_default_geosfpit_to_geosit_missing() {
         None, // should pick up the start date from the existing files
         Some(NaiveDate::from_ymd_opt(2023, 7, 2).unwrap()),
         None,
-        false,
         &config,
         downloader,
         false,
@@ -537,7 +568,6 @@ async fn test_download_partial_day_from_start() {
         None, // should pick up the start date from the existing files
         Some(NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()),
         None,
-        false,
         &config,
         downloader,
         false,
@@ -588,7 +618,6 @@ async fn test_download_partial_day_scattered() {
         None, // should pick up the start date from the existing files
         Some(NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()),
         None,
-        false,
         &config,
         downloader,
         false,
@@ -642,16 +671,16 @@ async fn test_met_rescanning() {
     // Let's use the TestDownloader to "download" some files without adding them to the database
     let test_date = NaiveDate::from_ymd_opt(2018, 1, 2).unwrap();
     let geos_fpit_cfgs = config
-        .get_met_configs("geosfpit")
+        .get_mets_for_processing_config(&ProcCfgKey("std-geosfpit".to_string()))
         .expect("geosfpit key missing from test download configs");
     for dl_cfg in geos_fpit_cfgs {
         let mut downloader = common::TestDownloader::new();
-        for file_time in dl_cfg.times_on_day(test_date) {
-            let file_url = file_time.format(&dl_cfg.url_pattern).to_string();
+        for file_time in dl_cfg.cfg.times_on_day(test_date) {
+            let file_url = file_time.format(&dl_cfg.cfg.url_pattern).to_string();
             downloader.add_file_to_download(file_url).unwrap();
         }
         downloader
-            .download_files(&dl_cfg.download_dir)
+            .download_files(&dl_cfg.cfg.download_dir)
             .expect("Downloading files failed");
     }
 
@@ -662,7 +691,6 @@ async fn test_met_rescanning() {
         Some(test_date + Duration::days(1)),
         &config,
         None,
-        false,
         false,
     )
     .await
@@ -684,7 +712,7 @@ async fn test_met_dates_defaults_empty_db() {
         .expect("Failed to acquire connection to database");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
-    let mut date_iter = met_download::get_date_iter(&mut conn, &config, None, None, None, false)
+    let mut date_iter = met_download::get_date_iter_for_defaults(&mut conn, None, None, &config)
         .await
         .unwrap();
 
@@ -716,7 +744,7 @@ async fn test_met_dates_user_empty_db() {
     let end = NaiveDate::from_ymd_opt(2011, 1, 1).unwrap();
 
     let mut date_iter =
-        met_download::get_date_iter(&mut conn, &config, Some(start), Some(end), None, false)
+        met_download::get_date_iter_for_defaults(&mut conn, Some(start), Some(end), &config)
             .await
             .unwrap();
 
@@ -737,7 +765,7 @@ async fn test_met_dates_default_fpit_in_db() {
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
-    let mut date_iter = met_download::get_date_iter(&mut conn, &config, None, None, None, false)
+    let mut date_iter = met_download::get_date_iter_for_defaults(&mut conn, None, None, &config)
         .await
         .unwrap();
 
@@ -760,7 +788,7 @@ async fn test_met_dates_user_override_fpit_in_db() {
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let start = Some(NaiveDate::from_ymd_opt(2005, 6, 1).unwrap());
-    let mut date_iter = met_download::get_date_iter(&mut conn, &config, start, None, None, false)
+    let mut date_iter = met_download::get_date_iter_for_defaults(&mut conn, start, None, &config)
         .await
         .unwrap();
 
@@ -782,7 +810,7 @@ async fn test_met_dates_default_it_in_db() {
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_it_next_date.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
-    let mut date_iter = met_download::get_date_iter(&mut conn, &config, None, None, None, false)
+    let mut date_iter = met_download::get_date_iter_for_defaults(&mut conn, None, None, &config)
         .await
         .unwrap();
 
@@ -804,7 +832,7 @@ async fn test_met_dates_default_fpit_plus_partial_it_in_db() {
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_next_date.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
-    let mut date_iter = met_download::get_date_iter(&mut conn, &config, None, None, None, false)
+    let mut date_iter = met_download::get_date_iter_for_defaults(&mut conn, None, None, &config)
         .await
         .unwrap();
 
@@ -830,13 +858,12 @@ async fn test_single_met_dates_user_override() {
     let start = NaiveDate::from_ymd_opt(2014, 5, 1).unwrap();
     let end = NaiveDate::from_ymd_opt(2016, 3, 1).unwrap();
 
-    let mut date_iter = met_download::get_date_iter(
+    let mut date_iter = met_download::get_date_iter_for_specified_met(
         &mut conn,
-        &config,
         Some(start),
         Some(end),
-        Some("geosfpit"),
-        false,
+        &config,
+        &common::test_geosfpit_met_keys()[0],
     )
     .await
     .unwrap();
@@ -859,12 +886,18 @@ async fn test_single_met_dates_start_from_db() {
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
-    let mut date_iter =
-        met_download::get_date_iter(&mut conn, &config, None, None, Some("geosfpit"), false)
-            .await
-            .unwrap();
+    let mut date_iter = met_download::get_date_iter_for_specified_met(
+        &mut conn,
+        None,
+        None,
+        &config,
+        &common::test_geosfpit_met_keys()[0],
+    )
+    .await
+    .unwrap();
 
     // should start on the day after we have fpit met data and stop on the last day before geos-it is set to start
+    // note - might need updated to reflect new processing configuration approach.
     assert_eq!(
         date_iter.next(),
         Some(NaiveDate::from_ymd_opt(2018, 1, 2).unwrap()),
@@ -890,10 +923,17 @@ async fn test_single_met_start_from_dl_config() {
     let mut config =
         make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
-    let mut date_iter =
-        met_download::get_date_iter(&mut conn, &config, None, None, Some("geosfpit"), false)
-            .await
-            .unwrap();
+    let geos_fpit_key = common::test_geosfpit_met_keys()[0].clone();
+
+    let mut date_iter = met_download::get_date_iter_for_specified_met(
+        &mut conn,
+        None,
+        None,
+        &config,
+        &geos_fpit_key,
+    )
+    .await
+    .unwrap();
 
     // should start on the day defined as the earliest day FPIT is available and stop on the last day before geos-it is set to start
     assert_eq!(
@@ -907,14 +947,19 @@ async fn test_single_met_start_from_dl_config() {
         "Final date in iterator was incorrect when all files have the same earliest_date values"
     );
 
-    let fpit_cfg = config.data.met_download.get_mut("geosfpit").unwrap();
-    fpit_cfg[0].earliest_date = NaiveDate::from_ymd_opt(2011, 1, 1).unwrap();
+    let fpit_cfg = config.data.met_download.get_mut(&geos_fpit_key).unwrap();
+    fpit_cfg.earliest_date = NaiveDate::from_ymd_opt(2011, 1, 1).unwrap();
 
     // Redo the test with the different files having different start dates - should take the latest one
-    let mut date_iter =
-        met_download::get_date_iter(&mut conn, &config, None, None, Some("geosfpit"), false)
-            .await
-            .unwrap();
+    let mut date_iter = met_download::get_date_iter_for_specified_met(
+        &mut conn,
+        None,
+        None,
+        &config,
+        &geos_fpit_key,
+    )
+    .await
+    .unwrap();
 
     // should start on the day defined as the earliest day FPIT is available and stop on the last day before geos-it is set to start
     assert_eq!(
@@ -930,90 +975,18 @@ async fn test_single_met_start_from_dl_config() {
 }
 
 #[tokio::test]
-async fn test_single_met_start_from_defaults() {
-    // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = open_test_database(true)
-        .await
-        .expect("Failed to open test database");
-    let mut conn = pool
-        .get_connection()
-        .await
-        .expect("Failed to acquire connection to database");
-    let mut config =
-        make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
-
-    // This is deliberately contrived - someone would really have to write a funky TOML file
-    // for this to happen, but it could.
-    config
-        .data
-        .met_download
-        .insert("geosfpit".to_owned(), vec![]);
-    // The test config doesn't define a start date for GEOS-FPIT, so let's change that.
-    config.default_options.get_mut(0).unwrap().start_date =
-        Some(NaiveDate::from_ymd_opt(2004, 7, 1).unwrap());
-
-    let mut date_iter =
-        met_download::get_date_iter(&mut conn, &config, None, None, Some("geosfpit"), false)
-            .await
-            .unwrap();
-
-    // should start on the day defined as the earliest day FPIT is available and stop on the last day before geos-it is set to start
-    assert_eq!(
-        date_iter.next(),
-        Some(NaiveDate::from_ymd_opt(2004, 7, 1).unwrap()),
-        "First date in iterator was incorrect when all files have the same earliest_date values"
-    );
-    assert_eq!(
-        date_iter.last(),
-        Some(NaiveDate::from_ymd_opt(2023, 5, 31).unwrap()),
-        "Final date in iterator was incorrect when all files have the same earliest_date values"
-    );
-}
-
-#[tokio::test]
-async fn test_single_met_no_valid_start_err() {
-    // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = open_test_database(true)
-        .await
-        .expect("Failed to open test database");
-    let mut conn = pool
-        .get_connection()
-        .await
-        .expect("Failed to acquire connection to database");
-    let mut config =
-        make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
-
-    // This is deliberately contrived - someone would really have to write a funky TOML file
-    // for this to happen, but it could. Now there should be no way for it to find a start date.
-    config
-        .data
-        .met_download
-        .insert("geosfpit".to_owned(), vec![]);
-
-    let res =
-        met_download::get_date_iter(&mut conn, &config, None, None, Some("geosfpit"), false).await;
-
-    // should start on the day defined as the earliest day FPIT is available and stop on the last day before geos-it is set to start
-    assert!(
-        res.is_err(),
-        "Date iterator call did not error when no valid start date could be determined."
-    );
-}
-
-#[tokio::test]
 async fn test_single_met_cross_boundary_with_defaults() {
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let start = NaiveDate::from_ymd_opt(2023, 5, 20).unwrap();
     let end = NaiveDate::from_ymd_opt(2023, 8, 1).unwrap();
-    let mut date_iter = met_download::get_date_iter(
+    let mut date_iter = met_download::get_date_iter_for_specified_met(
         &mut conn,
-        &config,
         Some(start),
         Some(end),
-        Some("geosfpit"),
-        false,
+        &config,
+        &common::test_geosfpit_met_keys()[0],
     )
     .await
     .unwrap();
@@ -1038,13 +1011,12 @@ async fn test_single_met_cross_boundary_ignoring_defaults() {
 
     let start = NaiveDate::from_ymd_opt(2023, 5, 20).unwrap();
     let end = NaiveDate::from_ymd_opt(2023, 8, 1).unwrap();
-    let mut date_iter = met_download::get_date_iter(
+    let mut date_iter = met_download::get_date_iter_for_specified_met(
         &mut conn,
-        &config,
         Some(start),
         Some(end),
-        Some("geosfpit"),
-        true,
+        &config,
+        &common::test_geosfpit_met_keys()[0],
     )
     .await
     .unwrap();
@@ -1123,12 +1095,10 @@ fn test_geosfp_download() {
         make_dummy_config(tmp_dir.path().to_owned()).expect("Failed to make test configuration");
 
     let fp_dl_cfg = config
-        .get_met_configs("geosfp")
-        .expect("Could not get geosfp met configs");
-    let fp_dl_cfg = fp_dl_cfg
-        .iter()
-        .find(|&cfg| cfg.levels == MetLevels::Surf && cfg.data_type == MetDataType::Met)
-        .expect("Could not find the surface met GEOS FP download config");
+        .data
+        .met_download
+        .get(&MetCfgKey("geosfp-met-2d".to_string()))
+        .expect("Test config should define the 2D GEOS-FP met file type for download");
 
     std::fs::create_dir(&fp_dl_cfg.download_dir)
         .expect("Could not create temporary download directory for GEOS FP");

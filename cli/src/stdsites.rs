@@ -283,7 +283,7 @@ pub async fn special_std_site_run(
         }
 
         let ginput_key = &config
-            .processing_configurations
+            .processing_configuration
             .get(&key)
             .expect(
                 "A missing processing configuration key should have errored earlier in the code",

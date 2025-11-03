@@ -103,7 +103,7 @@ impl std::error::Error for CheckMetAvailableError {}
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct MetDayState {
-    n_found: u64,
+    pub n_found: u64,
     pub n_expected: u64,
 }
 

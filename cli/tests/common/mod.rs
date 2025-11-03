@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use anyhow::Context;
+use orm::config::{MetCfgKey, ProcCfgKey};
 use orm::met::MetFile;
 use orm::{self, MySqlConn};
 use std::fs::File;
@@ -7,7 +8,33 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use tccon_priors_cli::utils::Downloader;
 
-pub const TEST_MET_KEY: &'static str = "geosfpit";
+pub fn test_proc_key() -> ProcCfgKey {
+    ProcCfgKey("std-geosfpit".to_string())
+}
+
+pub fn test_geosfpit_met_keys() -> [MetCfgKey; 3] {
+    [
+        MetCfgKey("geosfpit-met-eta".to_string()),
+        MetCfgKey("geosfpit-met-2d".to_string()),
+        MetCfgKey("geosfpit-chem-eta".to_string()),
+    ]
+}
+
+pub fn test_geosit_met_keys() -> [MetCfgKey; 3] {
+    [
+        MetCfgKey("geosit-met-eta".to_string()),
+        MetCfgKey("geosit-met-2d".to_string()),
+        MetCfgKey("geosit-chem-eta".to_string()),
+    ]
+}
+
+pub fn test_geosfp_met_keys() -> [MetCfgKey; 3] {
+    [
+        MetCfgKey("geosfp-met-eta".to_string()),
+        MetCfgKey("geosfp-met-2d".to_string()),
+        MetCfgKey("geosfp-chem-eta".to_string()),
+    ]
+}
 
 pub(crate) fn md5sum(p: &Path) -> anyhow::Result<Vec<u8>> {
     use md5::Digest;

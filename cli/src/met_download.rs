@@ -1,13 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::process::Termination;
-use std::str::FromStr;
 
 use anyhow::{anyhow, Context};
 use chrono::{Duration, NaiveDate};
 use clap::{self, Args, Subcommand};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
-use orm::config::MetDownloadConfig;
 use orm::utils::get_date_range_intersection;
 use orm::{
     self,
@@ -103,7 +101,7 @@ fn check_start_end_date(
 ///   and ends at the correct dates for all mets needed by a specific met file type.
 /// - [`get_date_iter_for_specified_proc_config`] if you need an iterator that starts
 ///   and ends at the correct dates for all mets needed by a processing config.
-async fn get_date_iter_for_defaults(
+pub async fn get_date_iter_for_defaults(
     conn: &mut orm::MySqlConn,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
@@ -319,7 +317,7 @@ async fn get_date_iter_for_specified_proc_config(
 ///   and ends at the correct dates for all mets needed by a processing config.
 /// - [`get_date_iter_for_defaults`] if you need an iterator that starts and ends at
 ///   the correct dates for the default processing configs.
-async fn get_date_iter_for_specified_met(
+pub async fn get_date_iter_for_specified_met(
     conn: &mut orm::MySqlConn,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
@@ -590,7 +588,7 @@ pub async fn print_met_availability_table_cli(
     print_met_availability_table(conn, config, table_mets, start_date, args.end_date).await
 }
 
-enum TableMetSelection {
+pub enum TableMetSelection {
     Defaults,
     All,
     Specific(Vec<MetCfgKey>),
@@ -840,7 +838,7 @@ fn met_keys_from_target_keys(
         for k in target_keys {
             let k = ProcCfgKey::from(k.to_string());
             let proc_cfg = config
-                .processing_configurations
+                .processing_configuration
                 .get(&k)
                 .ok_or_else(|| anyhow!("Unknown processing configuration, '{k}'"))?;
             keys.extend(proc_cfg.required_mets.iter());
@@ -953,7 +951,7 @@ fn collect_required_date_ranges_for_proc_mets<'cfg>(
     let mut met_keys: HashMap<&MetCfgKey, (NaiveDate, Option<NaiveDate>)> = HashMap::new();
     for proc_key in proc_keys {
         let proc_cfg = config
-            .processing_configurations
+            .processing_configuration
             .get(proc_key)
             .ok_or_else(|| anyhow!("Unknown processing config key, '{proc_key}'"))?;
 
@@ -1124,7 +1122,7 @@ pub async fn rescan_met_files(
         let mut v = HashSet::new();
         for proc_k in config.get_proc_cfgs_with_auto_met_download() {
             let proc = config
-                .processing_configurations
+                .processing_configuration
                 .get(proc_k)
                 .ok_or_else(|| anyhow!("Unknown processing configuration '{proc_k}'"))?;
             v.extend(proc.required_mets.iter());
@@ -1240,14 +1238,10 @@ pub struct RemoveDatesCli {
 
 pub async fn remove_dates_cli(
     conn: &mut orm::MySqlConn,
-    config: &orm::config::Config,
     args: RemoveDatesCli,
-    downloader: impl utils::Downloader + Clone,
 ) -> anyhow::Result<()> {
     remove_dates(
         conn,
-        config,
-        downloader,
         args.start_date,
         args.end_date,
         args.met_product,
@@ -1258,8 +1252,6 @@ pub async fn remove_dates_cli(
 
 pub async fn remove_dates(
     conn: &mut orm::MySqlConn,
-    config: &orm::config::Config,
-    downloader: impl utils::Downloader + Clone,
     start_date: NaiveDate,
     end_date: NaiveDate,
     met_product: Option<MetCfgKey>,

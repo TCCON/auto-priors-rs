@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use float_cmp::approx_eq;
 use itertools::Itertools;
 use orm::{
-    config::Config,
+    config::{Config, MetCfgKey},
     input_files,
     jobs::{Job, MapFmt, ModFmt, TarChoice, VmrFmt},
     siteinfo::{SiteInfo, SiteType, StdSite},
@@ -81,7 +81,7 @@ async fn test_successful_input_files() {
         let new_db_jobs = &db_jobs[prev_n_jobs_in_db..];
         for (i_job, (db_job, exp_job)) in new_db_jobs.into_iter().zip(expected.iter()).enumerate() {
             assert!(
-                exp_job.matches_job(db_job, &config),
+                exp_job.matches_job(db_job),
                 "Job {}/{} for input file {} does not match expected. {db_job:#?}\n\n{exp_job:#?}",
                 i_job + 1,
                 new_db_jobs.len(),
@@ -299,7 +299,11 @@ async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
 
     met_download::download_files_for_dates(
         conn,
-        "geosfpit",
+        &[
+            &MetCfgKey("geosfpit-met-eta".to_string()),
+            &MetCfgKey("geosfpit-met-2d".to_string()),
+            &MetCfgKey("geosfpit-chem-eta".to_string()),
+        ],
         NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(),
         Some(NaiveDate::from_ymd_opt(2018, 2, 1).unwrap()),
         &config,
@@ -311,7 +315,11 @@ async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
 
     met_download::download_files_for_dates(
         conn,
-        "geosit",
+        &[
+            &MetCfgKey("geosit-met-eta".to_string()),
+            &MetCfgKey("geosit-met-2d".to_string()),
+            &MetCfgKey("geosit-chem-eta".to_string()),
+        ],
         NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(),
         Some(NaiveDate::from_ymd_opt(2018, 2, 1).unwrap()),
         &config,
@@ -324,7 +332,11 @@ async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
     log::info!("Populating database with late May/early June 2023 transition met files");
     met_download::download_files_for_dates(
         conn,
-        "geosfpit",
+        &[
+            &MetCfgKey("geosfpit-met-eta".to_string()),
+            &MetCfgKey("geosfpit-met-2d".to_string()),
+            &MetCfgKey("geosfpit-chem-eta".to_string()),
+        ],
         NaiveDate::from_ymd_opt(2023, 5, 30).unwrap(),
         Some(NaiveDate::from_ymd_opt(2023, 6, 1).unwrap()),
         &config,
@@ -336,7 +348,11 @@ async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
 
     met_download::download_files_for_dates(
         conn,
-        "geosit",
+        &[
+            &MetCfgKey("geosit-met-eta".to_string()),
+            &MetCfgKey("geosit-met-2d".to_string()),
+            &MetCfgKey("geosit-chem-eta".to_string()),
+        ],
         NaiveDate::from_ymd_opt(2023, 6, 1).unwrap(),
         Some(NaiveDate::from_ymd_opt(2023, 6, 3).unwrap()),
         &config,
@@ -735,7 +751,7 @@ struct ExpectedJob {
     mod_fmt: ModFmt,
     vmr_fmt: VmrFmt,
     map_fmt: MapFmt,
-    alt_met: Option<&'static str>,
+    alt_reanalysis: Option<&'static str>,
     is_egi: bool,
     confirmation: bool,
 }
@@ -760,7 +776,7 @@ impl ExpectedJob {
             mod_fmt: ModFmt::default(),
             vmr_fmt: VmrFmt::default(),
             map_fmt: MapFmt::default(),
-            alt_met: None,
+            alt_reanalysis: None,
             is_egi: false,
             confirmation: true,
         }
@@ -788,7 +804,7 @@ impl ExpectedJob {
     }
 
     fn with_alt_met(mut self, alt_met: &'static str) -> Self {
-        self.alt_met = Some(alt_met);
+        self.alt_reanalysis = Some(alt_met);
         self
     }
 
@@ -802,7 +818,7 @@ impl ExpectedJob {
         self
     }
 
-    fn matches_job(&self, db_job: &Job, config: &Config) -> bool {
+    fn matches_job(&self, db_job: &Job) -> bool {
         // Special case: user could input a single site ID for multiple locations
         if self.site_ids.len() == 1 && db_job.site_id.len() > 1 {
             if db_job.site_id.iter().any(|i| i != self.site_ids[0]) {
@@ -878,18 +894,9 @@ impl ExpectedJob {
             }
         }
 
-        if let Some(alt_met) = self.alt_met {
-            let alt_cfg = config
-                .requests
-                .allowed_processing_cfgs
-                .get(alt_met)
-                .expect("Alternate met should be defined in the test config");
-            if alt_cfg.met_key != db_job.met_key.as_deref().unwrap_or("???") {
-                log::error!("met_key (from alternate met request) did not match");
-                return false;
-            }
-            if alt_cfg.ginput_key != db_job.ginput_key.as_deref().unwrap_or("???") {
-                log::error!("ginput_key (from alternate met request) did not match");
+        if let Some(alt_re_key) = self.alt_reanalysis {
+            if Some(alt_re_key) != db_job.processing_key.as_deref() {
+                log::error!("processing key (from alternate reanalysis request) did not match");
                 return false;
             }
         }

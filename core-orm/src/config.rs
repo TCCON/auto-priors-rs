@@ -16,7 +16,7 @@ use lettre::message::{Mailbox, Mailboxes};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt::{Debug, Display},
     fs::File,
     io::{Read, Write},
@@ -308,7 +308,7 @@ pub struct Config {
     pub execution: ExecutionConfig,
     pub data: DataConfig,
     #[serde(default)]
-    pub processing_configurations: HashMap<ProcCfgKey, ProcessingConfig>,
+    pub processing_configuration: HashMap<ProcCfgKey, ProcessingConfig>,
     #[serde(default)]
     pub email: EmailConfig,
     #[serde(default)]
@@ -367,7 +367,7 @@ impl Config {
         proc_cfg_key: &ProcCfgKey,
     ) -> anyhow::Result<Vec<KeyedMetDownloadConfig<'cfg>>> {
         let proc_cfg = self
-            .processing_configurations
+            .processing_configuration
             .get(proc_cfg_key)
             .ok_or_else(|| {
                 anyhow!("Requested processing configuration '{proc_cfg_key}' not defined")
@@ -419,7 +419,7 @@ impl Config {
         proc_cfg_key: &ProcCfgKey,
     ) -> anyhow::Result<(PathBuf, PathBuf, String)> {
         let proc_cfg = self
-            .processing_configurations
+            .processing_configuration
             .get(proc_cfg_key)
             .ok_or_else(|| anyhow!("Unknown processing configuration '{proc_cfg_key}'"))?;
         let dl_cfgs = proc_cfg.get_met_configs(self).with_context(|| {
@@ -510,7 +510,7 @@ impl Config {
 
     pub fn get_possible_proc_cfgs_for_date(&self, date: NaiveDate) -> Vec<&ProcCfgKey> {
         let mut proc_cfgs = vec![];
-        for (key, proc_cfg) in self.processing_configurations.iter() {
+        for (key, proc_cfg) in self.processing_configuration.iter() {
             if proc_cfg.contains_date(date) {
                 proc_cfgs.push(key)
             }
@@ -520,7 +520,7 @@ impl Config {
 
     pub fn get_proc_cfgs_with_auto_met_download(&self) -> Vec<&ProcCfgKey> {
         let mut proc_cfgs = vec![];
-        for (key, proc_cfg) in self.processing_configurations.iter() {
+        for (key, proc_cfg) in self.processing_configuration.iter() {
             if proc_cfg.download_met_automatically {
                 proc_cfgs.push(key);
             }
@@ -535,7 +535,7 @@ impl Config {
         proc_cfg_key: &ProcCfgKey,
     ) -> anyhow::Result<&'a str> {
         let proc_cfg = self
-            .processing_configurations
+            .processing_configuration
             .get(proc_cfg_key)
             .ok_or_else(|| anyhow!("Processing configuration '{proc_cfg_key}' not defined"))?;
         Ok(&proc_cfg.ginput_output_subdir)
@@ -673,7 +673,7 @@ impl Config {
         request_end: NaiveDate,
     ) -> anyhow::Result<()> {
         let proc_cfg = self
-            .processing_configurations
+            .processing_configuration
             .get(proc_cfg_key)
             .ok_or_else(|| anyhow!("Unknown processing configuration: '{proc_cfg_key}'"))?;
 
@@ -724,7 +724,7 @@ impl Config {
 
         for (idx, default_opts) in self.default_options.iter().enumerate() {
             if !self
-                .processing_configurations
+                .processing_configuration
                 .contains_key(&default_opts.processing_configuration)
             {
                 errors.push(ConfigValErrorCause::UnknownProcCfgKey {
@@ -890,7 +890,7 @@ impl Config {
         }
 
         // Confirm that all processing configurations are valid for ginput
-        for proc_cfg_key in self.processing_configurations.keys() {
+        for proc_cfg_key in self.processing_configuration.keys() {
             if let Err(e) = self.get_ginput_met_args(proc_cfg_key) {
                 errors.push(ConfigValErrorCause::BadMetConfig {
                     key: proc_cfg_key.to_string(),
@@ -1113,7 +1113,8 @@ pub struct MetDownloadConfig {
     ///   latter is recommended.
     pub download_dir: PathBuf,
 
-    /// A string describing
+    /// A string describing which of the GEOS file types ginput requires this represents.
+    /// See [`GinputMetType`] for allowed values.
     pub ginput_met_type: GinputMetType,
 
     /// How many days to allow before failing to download files is an error

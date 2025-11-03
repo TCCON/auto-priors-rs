@@ -2488,7 +2488,7 @@ fn get_runner_for_date(
         &defaults.processing_configuration
     };
 
-    let proc_cfg = config.processing_configurations.get(proc_cfg_key)
+    let proc_cfg = config.processing_configuration.get(proc_cfg_key)
         .ok_or_else(|| anyhow!("Processing key '{proc_cfg_key}' for date {date} of job {} not defined in the config file", job.job_id))?;
     let ginput_key = &proc_cfg.ginput;
     let ginput = config.execution.ginput.get(ginput_key).ok_or_else(|| {

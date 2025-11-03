@@ -14,7 +14,7 @@ use crate::{
         ConfigValErrorCause, ConfigValidationError, GinputCfgKey, KeyedMetDownloadConfig,
         MetCfgKey, ProcCfgKey,
     },
-    utils::{date_range_contains, DateRangeOverlap},
+    utils::date_range_contains,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,10 +250,10 @@ impl ProcessingConfig {
 
 pub(super) fn validate_processing_configs(cfg: &super::Config) -> ConfigValidationError {
     let mut errors = ConfigValidationError::default();
-    for (processing_key, processing_cfg) in cfg.processing_configurations.iter() {
+    for (processing_key, processing_cfg) in cfg.processing_configuration.iter() {
         processing_cfg.validate(cfg, &processing_key, &mut errors);
     }
-    check_for_conflicting_output_paths(&cfg.processing_configurations, &mut errors);
+    check_for_conflicting_output_paths(&cfg.processing_configuration, &mut errors);
     errors
 }
 
