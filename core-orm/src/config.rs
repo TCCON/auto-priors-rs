@@ -375,14 +375,26 @@ impl Config {
         proc_cfg.get_met_configs(self).with_context(|| anyhow!("Error occurred while getting required mets for processing configuration '{proc_cfg_key}'"))
     }
 
-    pub fn get_mets_for_defaults(&self) -> anyhow::Result<Vec<KeyedMetDownloadConfig>> {
+    pub fn get_unique_mets_for_processing_configs<'cfg>(
+        &'cfg self,
+        proc_cfg_keys: &[&ProcCfgKey],
+    ) -> anyhow::Result<Vec<KeyedMetDownloadConfig<'cfg>>> {
         let mut all_mets = vec![];
-        for default in self.default_options.iter() {
-            let mets = self.get_mets_for_processing_config(&default.processing_configuration)?;
+        for key in proc_cfg_keys {
+            let mets = self.get_mets_for_processing_config(&key)?;
             all_mets.extend(mets.into_iter());
         }
         all_mets.dedup_by_key(|met| met.product_key);
         Ok(all_mets)
+    }
+
+    pub fn get_mets_for_defaults(&self) -> anyhow::Result<Vec<KeyedMetDownloadConfig>> {
+        let proc_cfgs = self
+            .default_options
+            .iter()
+            .map(|def| &def.processing_configuration)
+            .collect_vec();
+        self.get_unique_mets_for_processing_configs(&proc_cfgs)
     }
 
     pub fn get_all_mets(&self) -> Vec<KeyedMetDownloadConfig<'_>> {
