@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT MIN(tbl.date) as min_date\n                FROM (\n                    SELECT DATE(filedate) AS date,COUNT(filedate) AS count\n                    FROM MetFiles\n                    WHERE product_key = ?\n                    GROUP BY DATE(filedate)\n                ) AS tbl\n                WHERE tbl.count = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "min_date",
+        "type_info": {
+          "type": "Date",
+          "flags": "BINARY",
+          "char_set": 63,
+          "max_size": 10
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "e6a0bd96810198a14f95bf05fc384f25bfde333f6ab65bfd8eb1f1a3865a9b8e"
+}

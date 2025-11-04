@@ -1,16 +1,16 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT DISTINCT(product) FROM MetFiles WHERE filedate >= ? AND filedate < ?",
+  "query": "SELECT DISTINCT(product_key) FROM MetFiles WHERE filedate >= ? AND filedate < ?",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "product",
+        "name": "product_key",
         "type_info": {
           "type": "VarString",
           "flags": "NOT_NULL | NO_DEFAULT_VALUE",
           "char_set": 224,
-          "max_size": 32
+          "max_size": 256
         }
       }
     ],
@@ -21,5 +21,5 @@
       false
     ]
   },
-  "hash": "6f4cbaa9700f16b09ccdec14bbe264372902b7ae1e36ead4243d66afa6c3a130"
+  "hash": "177ddf4119aaf40b69c79115d9867299023b1f58033f4e92160f7ee29ba3720f"
 }

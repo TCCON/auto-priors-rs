@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT MAX(tbl.date) as max_date\n                FROM (\n                    SELECT DATE(filedate) AS date,COUNT(filedate) AS count\n                    FROM MetFiles\n                    WHERE product_key = ?\n                    GROUP BY DATE(filedate)\n                ) AS tbl\n                WHERE tbl.count = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "max_date",
+        "type_info": {
+          "type": "Date",
+          "flags": "BINARY",
+          "char_set": 63,
+          "max_size": 10
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "c562bec7b9d3dffc3242aff46da74e9253268f9c517eca189ad6ac526ab55e7e"
+}

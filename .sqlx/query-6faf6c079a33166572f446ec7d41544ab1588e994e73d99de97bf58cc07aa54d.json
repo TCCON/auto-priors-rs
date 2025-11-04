@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT * From MetFiles WHERE filedate >= ? AND filedate < ? AND product = ?",
+  "query": "SELECT * From MetFiles WHERE filedate >= ? AND filedate < ? AND product_key = ?",
   "describe": {
     "columns": [
       {
@@ -35,16 +35,6 @@
       },
       {
         "ordinal": 3,
-        "name": "product",
-        "type_info": {
-          "type": "VarString",
-          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
-          "char_set": 224,
-          "max_size": 32
-        }
-      },
-      {
-        "ordinal": 4,
         "name": "filedate",
         "type_info": {
           "type": "Datetime",
@@ -54,23 +44,13 @@
         }
       },
       {
-        "ordinal": 5,
-        "name": "levels",
+        "ordinal": 4,
+        "name": "product_key",
         "type_info": {
           "type": "VarString",
           "flags": "NOT_NULL | NO_DEFAULT_VALUE",
           "char_set": 224,
-          "max_size": 32
-        }
-      },
-      {
-        "ordinal": 6,
-        "name": "data_type",
-        "type_info": {
-          "type": "VarString",
-          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
-          "char_set": 224,
-          "max_size": 32
+          "max_size": 256
         }
       }
     ],
@@ -82,10 +62,8 @@
       false,
       true,
       false,
-      false,
-      false,
       false
     ]
   },
-  "hash": "ea23649abda7b4a92e460d369404d13fd698b7f8806786681a6937fffb5ce61a"
+  "hash": "6faf6c079a33166572f446ec7d41544ab1588e994e73d99de97bf58cc07aa54d"
 }

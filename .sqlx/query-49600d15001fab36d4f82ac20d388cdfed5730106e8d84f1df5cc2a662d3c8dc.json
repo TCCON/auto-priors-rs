@@ -115,26 +115,6 @@
       },
       {
         "ordinal": 11,
-        "name": "met_key",
-        "type_info": {
-          "type": "VarString",
-          "flags": "",
-          "char_set": 224,
-          "max_size": 128
-        }
-      },
-      {
-        "ordinal": 12,
-        "name": "ginput_key",
-        "type_info": {
-          "type": "VarString",
-          "flags": "",
-          "char_set": 224,
-          "max_size": 128
-        }
-      },
-      {
-        "ordinal": 13,
         "name": "save_dir",
         "type_info": {
           "type": "Blob",
@@ -144,7 +124,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 12,
         "name": "save_tarball",
         "type_info": {
           "type": "Tiny",
@@ -154,7 +134,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 13,
         "name": "mod_fmt",
         "type_info": {
           "type": "VarString",
@@ -164,7 +144,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 14,
         "name": "vmr_fmt",
         "type_info": {
           "type": "VarString",
@@ -174,7 +154,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 15,
         "name": "map_fmt",
         "type_info": {
           "type": "VarString",
@@ -184,7 +164,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 16,
         "name": "submit_time",
         "type_info": {
           "type": "Datetime",
@@ -194,7 +174,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 17,
         "name": "complete_time",
         "type_info": {
           "type": "Datetime",
@@ -204,13 +184,23 @@
         }
       },
       {
-        "ordinal": 20,
+        "ordinal": 18,
         "name": "output_file",
         "type_info": {
           "type": "Blob",
           "flags": "BLOB",
           "char_set": 224,
           "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "processing_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "char_set": 224,
+          "max_size": 256
         }
       }
     ],
@@ -229,14 +219,13 @@
       true,
       false,
       false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
       true,
-      true,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
       true,
       true
     ]

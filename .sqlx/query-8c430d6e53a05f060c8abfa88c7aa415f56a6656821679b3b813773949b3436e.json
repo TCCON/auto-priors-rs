@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT COUNT(filedate) as count FROM MetFiles\n               WHERE DATE(filedate) = ? and levels = ? AND data_type = ? AND product = ?",
+  "query": "SELECT COUNT(*) as count FROM MetFiles\n               WHERE filedate = ? AND product_key = ?",
   "describe": {
     "columns": [
       {
@@ -15,11 +15,11 @@
       }
     ],
     "parameters": {
-      "Right": 4
+      "Right": 2
     },
     "nullable": [
       false
     ]
   },
-  "hash": "1eb3206b52b0cafebcc1d08ab3929efda83c31ad3bae41fce13a934f52ee983a"
+  "hash": "8c430d6e53a05f060c8abfa88c7aa415f56a6656821679b3b813773949b3436e"
 }

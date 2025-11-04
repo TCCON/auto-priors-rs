@@ -1,0 +1,36 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT DATE(filedate) as date, COUNT(filedate) as count FROM MetFiles\n               WHERE DATE(filedate) >= ? AND DATE(filedate) < ? AND product_key = ?\n               GROUP BY date",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "date",
+        "type_info": {
+          "type": "Date",
+          "flags": "BINARY",
+          "char_set": 63,
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "count",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "char_set": 63,
+          "max_size": 21
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "418f1d0ecbc84f93c15c5d4da67a829738894a57a3646edee629d5c1137a4e62"
+}

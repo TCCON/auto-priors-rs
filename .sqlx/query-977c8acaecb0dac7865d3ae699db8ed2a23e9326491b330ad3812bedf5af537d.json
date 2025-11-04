@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO MetFiles (file_path, filedate, product_key) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "977c8acaecb0dac7865d3ae699db8ed2a23e9326491b330ad3812bedf5af537d"
+}
