@@ -343,9 +343,12 @@ pub async fn get_date_iter_for_specified_met(
         let start = d + Duration::days(1);
         debug!("Setting start date to {start} given the last complete date for met '{met_key}' was {d}");
         start
+    } else if let Some(d) = find_earliest_date_met_needed_for_processing(config, met_key) {
+        debug!("Setting start date to {} as the earliest date met '{met_key}' is needed according to the configured processing configurations", met_cfg.earliest_date);
+        d
     } else {
-        debug!("Setting start date to {} as the earliest available date for met '{met_key}' according to the config", met_cfg.earliest_date);
-        met_cfg.earliest_date
+        debug!("Met '{met_key}' does not appear to be needed by any processing configurations, returning an empty date iterator");
+        return Ok(DateIterator::new_empty());
     };
 
     let end_date = if let Some(end) = end_date {
@@ -359,6 +362,25 @@ pub async fn get_date_iter_for_specified_met(
     };
 
     Ok(DateIterator::new_one_range(start_date, end_date))
+}
+
+fn find_earliest_date_met_needed_for_processing(
+    config: &orm::config::Config,
+    met_key: &MetCfgKey,
+) -> Option<NaiveDate> {
+    let mut earliest_date: Option<NaiveDate> = None;
+
+    for (_, proc_cfg) in config.processing_configuration.iter() {
+        if proc_cfg.required_mets.contains(met_key) {
+            let proc_start_date = proc_cfg.start_date;
+            match earliest_date {
+                Some(d) => earliest_date = Some(d.min(proc_start_date)),
+                None => earliest_date = Some(proc_start_date),
+            }
+        }
+    }
+
+    earliest_date
 }
 
 /// Check whether the required model files are present for a range of dates.
@@ -907,18 +929,21 @@ pub async fn download_missing_files(
     } else {
         config.get_proc_cfgs_with_auto_met_download()
     };
+    debug!("Collecting required date ranges");
+    // TODO: replace this with a function on config that gets the mets needed for the request
     let met_keys_and_dates = collect_required_date_ranges_for_proc_mets(config, &proc_keys)?;
 
     // Download each met for either the input date range or the date range it is needed by
     // the processing configurations. Don't stop for errors, try all files and summarize
     // errors at the end.
     let mut errors = vec![];
-    for (met_key, (default_start, default_end)) in met_keys_and_dates {
+    for (met_key, _) in met_keys_and_dates {
+        debug!("Downloading missing files for {met_key}");
         let res = download_missing_files_for_met(
             conn,
             config,
-            start_date.or(Some(default_start)),
-            end_date.or(default_end),
+            start_date,
+            end_date,
             met_key,
             downloader.clone(),
             dry_run,
@@ -991,6 +1016,7 @@ async fn download_missing_files_for_met(
     let mut missed_dates = vec![];
 
     for curr_date in date_iter {
+        debug!("Checking {curr_date} for {met_cfg_key}");
         let state =
             orm::met::MetFile::is_date_complete_for_config(conn, curr_date, key_and_cfg).await?;
 

@@ -265,6 +265,10 @@ impl DateIterator {
         Self::new(vec![(start_date, end_date)])
     }
 
+    pub fn new_empty() -> Self {
+        Self::new(vec![])
+    }
+
     /// Create a new date iterator that will skip dates before and/or after given dates
     ///
     /// # Inputs
