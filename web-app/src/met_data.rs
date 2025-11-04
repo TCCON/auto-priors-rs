@@ -29,12 +29,20 @@ struct MetDateStatus {
 
 impl MetDateStatus {
     fn get_status_str(&self, product: &str) -> &'static str {
-        match self.prod_status.get(product) {
-            Some(MetDayState::Complete) => "Complete",
-            Some(MetDayState::Incomplete(_, _)) => "Partial",
-            Some(MetDayState::Missing) => "Missing",
-            None => "Unknown",
+        let opt_state = self.prod_status.get(product);
+        if let Some(state) = opt_state {
+            if state.is_complete() {
+                return "Complete";
+            }
+            if state.is_incomplete() {
+                return "Partial";
+            }
+            if state.is_missing() {
+                return "Missing";
+            }
         }
+
+        return "Unknown";
     }
 }
 
