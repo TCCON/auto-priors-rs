@@ -7,4 +7,4 @@ email=test@test.com
 mod_fmt=text
 vmr_fmt=text
 map_fmt=none
-reanalysis=co_reprocessing
+reanalysis=altco-geosfpit

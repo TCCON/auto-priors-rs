@@ -4,4 +4,4 @@ end_date=20180122
 lat=0
 lon=0
 email=test@test.com
-reanalysis=co_reprocessing
+reanalysis=altco-geosfpit

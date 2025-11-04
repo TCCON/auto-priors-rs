@@ -377,8 +377,6 @@ async fn populate_standard_sites_in_db(conn: &mut MySqlConn, config: &Config) {
             "Pasadena, CA, USA".to_string(),
             34.1362,
             -118.1269,
-            2012,
-            9,
         ),
         (
             "oc",
@@ -386,8 +384,6 @@ async fn populate_standard_sites_in_db(conn: &mut MySqlConn, config: &Config) {
             "Lamont, OK, USA".to_string(),
             36.604,
             -97.486,
-            2008,
-            7,
         ),
         (
             "pa",
@@ -395,22 +391,23 @@ async fn populate_standard_sites_in_db(conn: &mut MySqlConn, config: &Config) {
             "Park Falls, WI, USA".to_string(),
             45.945,
             -90.273,
-            2004,
-            5,
         ),
     ];
-
-    for (sid, name, loc, lat, lon, start_year, start_month) in sites {
+    // To avoid a profileration of warning messages, we limit the sites to the period that we
+    // populate test met data for.
+    let start_date = NaiveDate::from_ymd_opt(2018, 1, 1).unwrap();
+    let end_date = NaiveDate::from_ymd_opt(2018, 2, 1).unwrap();
+    for (sid, name, loc, lat, lon) in sites {
         StdSite::create(conn, sid, name, SiteType::TCCON)
             .await
             .expect("Should be able to add new site");
-        let start_date = NaiveDate::from_ymd_opt(start_year, start_month, 1).unwrap();
+
         SiteInfo::set_site_info_for_dates(
             conn,
             config,
             sid,
             start_date,
-            None,
+            Some(end_date),
             Some(loc),
             Some(lon),
             Some(lat),
@@ -591,7 +588,7 @@ fn get_expected_job(file_name: &OsStr) -> Vec<ExpectedJob> {
                     .with_mod_fmt(ModFmt::Text)
                     .with_vmr_fmt(VmrFmt::Text)
                     .with_map_fmt(MapFmt::None)
-                    .with_alt_met("co_reprocessing"),
+                    .with_alt_met("altco-geosfpit"),
             ]
         }
         "short_all_keys.txt" => {
@@ -607,7 +604,7 @@ fn get_expected_job(file_name: &OsStr) -> Vec<ExpectedJob> {
             vec![
                 ExpectedJob::new(vec!["ka"], (2018, 1, 1), (2018, 1, 2), "test@test.com")
                     .with_lat_lon(vec![0.0], vec![0.0])
-                    .with_alt_met("co_reprocessing"),
+                    .with_alt_met("altco-geosfpit"),
             ]
         }
         "split_days.txt" => {
@@ -650,10 +647,10 @@ fn get_expected_error_list(file_name: &OsStr) -> Option<&'static [&'static str]>
     let file_name = file_name.to_string_lossy();
     match file_name.as_ref() {
         "alt_met_out_of_range.txt" => {
-            Some(&["Invalid reanalysis: met 'co_reprocessing' spans dates from 2018-01-01 up to but not including 2018-01-08 but you requested dates (2018-01-21 to 2018-01-22) outside this range"])
+            Some(&["Invalid reanalysis: processing configuration 'altco-geosfpit' spans dates from 2018-01-01 up to but not including 2018-01-08 but you requested dates (2018-01-21 to 2018-01-22) outside this range"])
         }
         "bad_alt_met.txt" => {
-            Some(&["Invalid reanalysis: 'all_the_reprocessing' is not a valid met"])
+            Some(&["Invalid reanalysis: Unknown processing configuration: 'all_the_reprocessing'"])
         }
         "bad_date_fmt.txt" => {
             Some(&[

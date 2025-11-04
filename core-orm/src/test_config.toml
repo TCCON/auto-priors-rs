@@ -26,6 +26,15 @@ generate_automatically = false                                               # l
 ginput_met_key = "fpit-eta"
 ginput_output_subdir = "fpit"
 
+[processing_configuration.altco-geosfpit]
+required_mets = ["geosfpit-met-eta", "geosfpit-met-2d", "geosit-chem-eta"]
+ginput = "v1.2.0"
+start_date = "2018-01-01"
+end_date = "2018-01-08"
+generate_automatically = false                                             # left as false for now to simplify tests
+ginput_met_key = "it-eta"
+ginput_output_subdir = "it"
+
 [processing_configuration.std-geosit]
 required_mets = ["geosit-met-eta", "geosit-met-2d", "geosit-chem-eta"]
 ginput = "v1.2.0"
@@ -115,7 +124,7 @@ download_dir = './cli/tests/common/config_met_dl_dummy/Nx'
 days_latency = 1
 ginput_met_type = 'met-2d'
 
-[data.download.geosit-chem-eta]
+[data.met_download.geosit-chem-eta]
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_CHM_I3_L_V72.5.29.4/%Y/%j/.hidden/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
@@ -140,7 +149,7 @@ download_dir = './cli/tests/common/config_met_dl_dummy/Nx'
 days_latency = 1
 ginput_met_type = 'met-2d'
 
-[data.download.geosfp-chem-eta]
+[data.met_download.geosfp-chem-eta]
 url_pattern = "https://portal.nccs.nasa.gov/datashare/gmao_ops/pub/fp/das/Y%Y/M%m/D%d/GEOS.fp.asm.inst3_3d_chm_Nv.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
