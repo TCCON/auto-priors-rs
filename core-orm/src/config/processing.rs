@@ -64,9 +64,10 @@ pub struct ProcessingConfig {
     pub ginput_output_subdir: String,
 
     /// Set to false to avoid downloading the required mets automatically. Defaults to true when not specified
-    /// in a config file.
+    /// in a config file. If `generate_automatically` is `true`, then this setting will be ignored and the
+    /// met should always be downloaded automatically.
     #[serde(default = "crate::utils::default_true")]
-    pub download_met_automatically: bool,
+    download_met_automatically: bool,
 }
 
 impl ProcessingConfig {
@@ -81,6 +82,14 @@ impl ProcessingConfig {
     /// then this configuration should be produced indefinitely.
     pub fn auto_end_date(&self) -> Option<NaiveDate> {
         self.auto_end_date.or(self.end_date)
+    }
+
+    pub fn download_met_automatically(&self) -> bool {
+        if self.generate_automatically {
+            true
+        } else {
+            self.download_met_automatically
+        }
     }
 
     pub(super) fn contains_date(&self, date: NaiveDate) -> bool {

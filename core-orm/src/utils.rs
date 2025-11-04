@@ -341,7 +341,18 @@ impl Iterator for DateIterator {
     }
 }
 
-pub fn later_end_date(d1: Option<NaiveDate>, d2: Option<NaiveDate>) -> Option<NaiveDate> {
+/// Return the earlier of two optional dates, treating `None` like an infinitely late date.
+pub fn earlier_opt_date(d1: Option<NaiveDate>, d2: Option<NaiveDate>) -> Option<NaiveDate> {
+    match (d1, d2) {
+        (None, None) => None,
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (Some(a), Some(b)) => Some(a.min(b)),
+    }
+}
+
+/// Return the later of two optional dates, treating `None` like an infinitely late date.
+pub fn later_opt_date(d1: Option<NaiveDate>, d2: Option<NaiveDate>) -> Option<NaiveDate> {
     match (d1, d2) {
         (Some(a), Some(b)) => Some(a.max(b)),
         // If either is None, then the result is None - treat None like infinity

@@ -67,92 +67,6 @@ fn check_start_end_date(
     };
 }
 
-/// Get a date iterator describing the period to try to download met data for.
-///
-/// This function should usually be called through [`get_date_iter`]. This should be more
-/// commonly used than [`get_date_iter_for_defaults`], as this one accounts for how the
-/// default meteorlogy can change for different time periods. The time period it returns
-/// depends on the inputs:
-///
-/// 1. If no start date provided, it tries to find the last day which has a complete set of
-///    met data (based on the defaults defined in the config) and starts with the next day
-/// 2. If no full days of existing data found, it takes the list of default option sets from
-///    the config, gets the chronologically first set of defaults, and looks at the met type
-///    used in that set. It takes the latest of the "earliest available" dates across all the
-///    files for that met type as the start date.
-/// 3. If no end date provided, use today as the end date.
-///
-/// Note that unlike [`check_start_end_date`] this does NOT verify that the end date is after the
-/// start date; it assumes that if that's the case, whatever iteration over days you have will just
-/// do nothing.
-///
-/// # Returns
-/// An iterator over all the dates to check for met, either from the input or using the defaults described above.
-/// Returns an `Err` if:
-///
-/// * the met key from the first defaults set is not a valid met section in the config,
-/// * any of the database queries fail,
-/// * no start date is provided and there are (somehow) no met sections or default option sets to get
-///   the default start date from, or
-/// * one of more of the default option sets overlap in time
-///
-/// # See also
-/// - [`get_date_iter_for_specified_met`] if you need an iterator that starts
-///   and ends at the correct dates for all mets needed by a specific met file type.
-/// - [`get_date_iter_for_specified_proc_config`] if you need an iterator that starts
-///   and ends at the correct dates for all mets needed by a processing config.
-pub async fn get_date_iter_for_defaults(
-    conn: &mut orm::MySqlConn,
-    start_date: Option<NaiveDate>,
-    end_date: Option<NaiveDate>,
-    config: &orm::config::Config,
-) -> anyhow::Result<orm::utils::DateIterator> {
-    let start_date = if let Some(start) = start_date {
-        start
-    } else if let Some(d) =
-        orm::met::MetFile::get_last_complete_date_for_default_processing(conn, config).await?
-    {
-        // If no start date, use the first day we don't have met data for. If no data previously downloaded, use the
-        // start date defined for the meteorology. If no meteorology datasets defined, return an error.
-        d + Duration::days(1)
-    } else {
-        info!("Found no complete days, starting from the beginning of the meteorology");
-        let defaults = config.get_all_defaults_check_overlap()?;
-        let first_defaults = defaults
-            .first()
-            .ok_or_else(|| anyhow::Error::msg("No default option sets configured"))?;
-
-        // Take the later of the earliest date for which this meteorology is available and the start of the
-        // default set - assuming that if the default set starts after the met, then we don't need the full
-        // met record.
-        let first_met_configs =
-            config.get_mets_for_processing_config(&first_defaults.processing_configuration)?;
-        let met_start_date = first_met_configs
-            .iter()
-            .map(|c| c.cfg.earliest_date)
-            .max()
-            .expect("Should have been at least one file configured for the first meteorology"); // get_met_configs should have errored if 0 met files defined
-
-        let defaults_start_date = first_defaults.start_date.unwrap_or(met_start_date);
-        if defaults_start_date > met_start_date {
-            defaults_start_date
-        } else {
-            met_start_date
-        }
-    };
-
-    let end_date = if let Some(end) = end_date {
-        end
-    } else {
-        // Assume we use today
-        let end = chrono::offset::Utc::now().naive_utc().date();
-        debug!("No end date specified, using {end}");
-        end
-    };
-
-    Ok(orm::utils::DateIterator::new(vec![(start_date, end_date)]))
-}
-
 /// Return an iterator of dates to download/recheck/etc. for a single type of met file.
 ///
 /// The start and end of the date iterator will depend on:
@@ -181,6 +95,7 @@ pub async fn get_date_iter_for_specified_met(
     end_date: Option<NaiveDate>,
     config: &orm::config::Config,
     met_key: &MetCfgKey,
+    respect_proc_cfgs: bool,
 ) -> anyhow::Result<DateIterator> {
     // While we only need these if start and end date aren't specified, it makes the logic
     // for start date cleaner if we have them ready.
@@ -192,7 +107,7 @@ pub async fn get_date_iter_for_specified_met(
         cfg: &met_cfg,
     };
 
-    let start_date = if let Some(start) = start_date {
+    let mut start_date = if let Some(start) = start_date {
         debug!("Setting start date to {start} from the input argument");
         start
     } else if let Some(d) =
@@ -209,7 +124,7 @@ pub async fn get_date_iter_for_specified_met(
         return Ok(DateIterator::new_empty());
     };
 
-    let end_date = if let Some(end) = end_date {
+    let mut end_date = if let Some(end) = end_date {
         // the user provided end date takes precedence
         debug!("Setting end date to {end} from the command line");
         end
@@ -219,6 +134,22 @@ pub async fn get_date_iter_for_specified_met(
         chrono::offset::Utc::now().naive_utc().date()
     };
 
+    // If we are to truncate to dates when this met is used by any processing configuration, get the
+    // earliest and latest dates that is true, then truncate if needed. If the met isn't needed at
+    // all, return an empty date iterator so that we don't download it if not needed.
+    if respect_proc_cfgs {
+        if let Some((first_needed, last_needed)) =
+            config.get_dates_met_needed_for_processing(met_key)
+        {
+            start_date = start_date.max(first_needed);
+            end_date = orm::utils::earlier_opt_date(Some(end_date), last_needed).expect(
+                "earlier_opt_date must return a Some(_) when either of the inputs is Some(_)",
+            );
+        } else {
+            return Ok(DateIterator::new_empty());
+        }
+    }
+
     Ok(DateIterator::new_one_range(start_date, end_date))
 }
 
@@ -226,19 +157,9 @@ fn find_earliest_date_met_needed_for_processing(
     config: &orm::config::Config,
     met_key: &MetCfgKey,
 ) -> Option<NaiveDate> {
-    let mut earliest_date: Option<NaiveDate> = None;
-
-    for (_, proc_cfg) in config.processing_configuration.iter() {
-        if proc_cfg.required_mets.contains(met_key) {
-            let proc_start_date = proc_cfg.start_date;
-            match earliest_date {
-                Some(d) => earliest_date = Some(d.min(proc_start_date)),
-                None => earliest_date = Some(proc_start_date),
-            }
-        }
-    }
-
-    earliest_date
+    config
+        .get_dates_met_needed_for_processing(met_key)
+        .map(|(start, _)| start)
 }
 
 /// Check whether the required model files are present for a range of dates.
@@ -480,7 +401,7 @@ impl TableMetSelection {
         cfg: &orm::config::Config,
     ) -> anyhow::Result<Vec<KeyedMetDownloadConfig<'_>>> {
         match self {
-            TableMetSelection::Defaults => cfg.get_mets_for_defaults(),
+            TableMetSelection::Defaults => cfg.get_unique_mets_for_auto_proc_cfgs(),
             TableMetSelection::All => Ok(cfg.get_all_mets()),
             TableMetSelection::Specific(items) => Ok(cfg
                 .get_all_mets()
@@ -679,6 +600,7 @@ pub struct DownloadDatesCli {
     /// be downloaded. Without this, only the mets specified in the list are downloaded.
     /// Note that this means TARGET_KEYS can be met keys OR processing keys, but not
     /// a mixture.
+    #[clap(short = 'p', long)]
     pub proc_keys: bool,
     /// Print what would be downloaded but do not download anything.
     #[clap(short = 'd', long = "dry-run")]
@@ -745,7 +667,9 @@ pub struct DownloadMissingCli {
     #[clap(short = 'e', long = "end-date")]
     pub end_date: Option<NaiveDate>,
 
-    #[clap(short = 'm', long = "met")]
+    /// If given, only download missing files for this processing configuration key, not all
+    /// enabled processing configurations.
+    #[clap(short = 'p', long)]
     pub proc_key: Option<ProcCfgKey>,
 
     /// Set this flag to print what would be downloaded, but not actually download anything.
@@ -832,8 +756,10 @@ async fn download_missing_files_for_met(
     downloader: impl utils::Downloader + Clone,
     dry_run: bool,
 ) -> anyhow::Result<()> {
+    debug!("Getting dates to try downloading between {start_date:?} and {end_date:?} for met {met_cfg_key}");
     let date_iter =
-        get_date_iter_for_specified_met(conn, start_date, end_date, config, met_cfg_key).await?;
+        get_date_iter_for_specified_met(conn, start_date, end_date, config, met_cfg_key, true)
+            .await?;
 
     let met_cfg =
         config.data.met_download.get(met_cfg_key).ok_or_else(|| {
@@ -1161,7 +1087,7 @@ pub async fn download_files_for_dates(
     // First check that the dates are valid
     let end_date = check_start_end_date(start_date, end_date)?;
 
-    // Then check that the requested met was defined in the configuration
+    // Then check that the requested mets were defined in the configuration
     let met_cfgs: Vec<KeyedMetDownloadConfig<'_>> = met_keys
         .iter()
         .map(|k| {

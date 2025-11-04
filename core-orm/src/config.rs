@@ -362,6 +362,7 @@ impl Config {
         (start_date, end_date)
     }
 
+    /// Return references to each met file type required by a single processing configuration.
     pub fn get_mets_for_processing_config<'cfg>(
         &'cfg self,
         proc_cfg_key: &ProcCfgKey,
@@ -375,6 +376,7 @@ impl Config {
         proc_cfg.get_met_configs(self).with_context(|| anyhow!("Error occurred while getting required mets for processing configuration '{proc_cfg_key}'"))
     }
 
+    /// Return references to each met file type required by the given processing configurations.
     pub fn get_unique_mets_for_processing_configs<'cfg>(
         &'cfg self,
         proc_cfg_keys: &[&ProcCfgKey],
@@ -388,21 +390,51 @@ impl Config {
         Ok(all_mets)
     }
 
-    pub fn get_mets_for_defaults(&self) -> anyhow::Result<Vec<KeyedMetDownloadConfig>> {
+    /// Return references to each met file type required by any of the processing configurations
+    /// set to need met downloaded automatically.
+    pub fn get_unique_mets_for_auto_proc_cfgs(
+        &self,
+    ) -> anyhow::Result<Vec<KeyedMetDownloadConfig>> {
         let proc_cfgs = self
-            .default_options
-            .iter()
-            .map(|def| &def.processing_configuration)
+            .get_proc_cfgs_with_auto_met_download()
+            .into_iter()
             .collect_vec();
         self.get_unique_mets_for_processing_configs(&proc_cfgs)
     }
 
+    /// Return references to all met file types defined in the configuration along with their config keys.
     pub fn get_all_mets(&self) -> Vec<KeyedMetDownloadConfig<'_>> {
         let mut mets = vec![];
         for (product_key, cfg) in self.data.met_download.iter() {
             mets.push(KeyedMetDownloadConfig { product_key, cfg });
         }
         mets
+    }
+
+    /// Return the earliest and latest dates a particular met is required, based on
+    /// the defined processing configurations. The end date may be `None` if the
+    /// need is open-ended. The entire return value will be `None` if the met is
+    /// not required by any processing configurations.
+    pub fn get_dates_met_needed_for_processing(
+        &self,
+        met_key: &MetCfgKey,
+    ) -> Option<(NaiveDate, Option<NaiveDate>)> {
+        let mut cfg_dates = self.processing_configuration.iter().filter_map(|(_, pc)| {
+            if pc.required_mets.contains(met_key) {
+                Some((pc.start_date, pc.end_date))
+            } else {
+                None
+            }
+        });
+
+        // This lets us return early if there are no processing configs that rely on this
+        // met without allocating a vector to check its length.
+        let (mut start, mut end) = cfg_dates.next()?;
+        for (this_start, this_end) in cfg_dates {
+            start = start.min(this_start);
+            end = crate::utils::later_opt_date(end, this_end);
+        }
+        Some((start, end))
     }
 
     /// Get the GEOS and chemistry directories required to pass to version 1 ginput instances
@@ -533,7 +565,7 @@ impl Config {
     pub fn get_proc_cfgs_with_auto_met_download(&self) -> Vec<&ProcCfgKey> {
         let mut proc_cfgs = vec![];
         for (key, proc_cfg) in self.processing_configuration.iter() {
-            if proc_cfg.download_met_automatically {
+            if proc_cfg.download_met_automatically() {
                 proc_cfgs.push(key);
             }
         }
