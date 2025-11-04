@@ -169,6 +169,7 @@ static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 48] = [
 
 #[tokio::test]
 async fn test_check_met() {
+    common::init_logging();
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -185,7 +186,10 @@ async fn test_check_met() {
     let stat = stat_map
         .get(&NaiveDate::from_ymd_opt(2020, 1, 1).unwrap())
         .unwrap();
-    assert!(stat.is_complete(), "Day expected to be complete was not");
+    assert!(
+        stat.is_complete(),
+        "2020-01-01 expected to be complete, was not (state = {stat:?})"
+    );
 
     // Should be marked as incomplete because they are each missing one of one type of file
 
@@ -204,15 +208,15 @@ async fn test_check_met() {
         .unwrap();
     assert!(
         stat.is_incomplete(),
-        "Day missing one surface met file was not marked as incomplete"
+        "Day missing one surface met file (2020-02-01) was not marked as incomplete (state = {stat:?})"
     );
     assert_eq!(
         stat.n_found, 23,
-        "Day missing one surface file has the wrong number of files found"
+        "Day missing one surface file (2020-02-01) has the wrong number of files found (state = {stat:?})"
     );
     assert_eq!(
         stat.n_expected, 24,
-        "Day missing one surface file has the wrong number of files expected"
+        "Day missing one surface file (2020-02-01) has the wrong number of files expected (state = {stat:?})"
     );
 
     let stat = stat_map
@@ -220,15 +224,15 @@ async fn test_check_met() {
         .unwrap();
     assert!(
         stat.is_incomplete(),
-        "Day missing one eta met file was not marked as incomplete"
+        "Day missing one eta met file (2020-02-02) was not marked as incomplete (state = {stat:?})"
     );
     assert_eq!(
         stat.n_found, 23,
-        "Day missing one eta met file has the wrong number of files found"
+        "Day missing one eta met file (2020-02-02) has the wrong number of files found (state = {stat:?})"
     );
     assert_eq!(
         stat.n_expected, 24,
-        "Day missing one eta met file has the wrong number of files expected"
+        "Day missing one eta met file (2020-02-02) has the wrong number of files expected (state = {stat:?})"
     );
 
     let stat = stat_map
@@ -236,15 +240,15 @@ async fn test_check_met() {
         .unwrap();
     assert!(
         stat.is_incomplete(),
-        "Day missing one eta chem file not marked Incomplete or has the wrong number of files"
+        "Day missing one eta chem file (2020-02-03) not marked as incomplete or has the wrong number of files (state = {stat:?})"
     );
     assert_eq!(
         stat.n_found, 23,
-        "Day missing one eta chem file has the wrong number of files found"
+        "Day missing one eta chem file (2020-02-03) has the wrong number of files found (state = {stat:?})"
     );
     assert_eq!(
         stat.n_expected, 24,
-        "Day missing one eta chem file has the wrong number of files expected"
+        "Day missing one eta chem file (2020-02-03) has the wrong number of files expected (state = {stat:?})"
     );
 
     // Should also be marked as incomplete - missing all of one type of file
@@ -263,15 +267,15 @@ async fn test_check_met() {
         .unwrap();
     assert!(
         stat.is_incomplete(),
-        "Day missing all surface met files not marked as incomplete"
+        "Day missing all surface met files (2020-03-01) not marked as incomplete (state = {stat:?})"
     );
     assert_eq!(
         stat.n_found, 16,
-        "Day missing all surface met files has the wrong number of files found"
+        "Day missing all surface met files (2020-03-01) has the wrong number of files found (state = {stat:?})"
     );
     assert_eq!(
         stat.n_expected, 24,
-        "Day missing all surface met files has the wrong number of files expected"
+        "Day missing all surface met files (2020-03-01) has the wrong number of files expected (state = {stat:?})"
     );
 
     let stat = stat_map
@@ -279,15 +283,15 @@ async fn test_check_met() {
         .unwrap();
     assert!(
         stat.is_incomplete(),
-        "Day missing all eta met files not marked as incomplete"
+        "Day missing all eta met files (2020-03-02) not marked as incomplete (state = {stat:?})"
     );
     assert_eq!(
         stat.n_found, 16,
-        "Day missing all eta met files has the wrong number of files found"
+        "Day missing all eta met files (2020-03-02) has the wrong number of files found (state = {stat:?})"
     );
     assert_eq!(
         stat.n_expected, 24,
-        "Day missing all eta met files has the wrong number of files expected"
+        "Day missing all eta met files (2020-03-02) has the wrong number of files expected (state = {stat:?})"
     );
 
     let stat = stat_map
@@ -295,15 +299,15 @@ async fn test_check_met() {
         .unwrap();
     assert!(
         stat.is_incomplete(),
-        "Day missing all eta chem files not marked Incomplete or has the wrong number of files"
+        "Day missing all eta chem files (2020-03-03) not marked as incomplete or has the wrong number of files (state = {stat:?})"
     );
     assert_eq!(
         stat.n_found, 16,
-        "Day missing all eta chem files has the wrong number of files found"
+        "Day missing all eta chem files (2020-03-03) has the wrong number of files found (state = {stat:?})"
     );
     assert_eq!(
         stat.n_expected, 24,
-        "Day missing all eta chem files has the wrong number of files expected"
+        "Day missing all eta chem files (2020-03-03) has the wrong number of files expected (state = {stat:?})"
     );
 
     // This day isn't in the database at all, should be marked as missing
@@ -321,12 +325,14 @@ async fn test_check_met() {
         .unwrap();
     assert!(
         stat.is_missing(),
-        "Day missing all files not marked as missing"
+        "Day missing all files (2020-04-01) not marked as missing (state = {stat:?})"
     );
 }
 
 #[tokio::test]
 async fn test_geosfpit_download_by_dates() {
+    common::init_logging();
+
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
         .await
@@ -362,6 +368,8 @@ async fn test_geosfpit_download_by_dates() {
 
 #[tokio::test]
 async fn test_geosit_download_by_dates() {
+    common::init_logging();
+
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
         .await
@@ -397,6 +405,8 @@ async fn test_geosit_download_by_dates() {
 
 #[tokio::test]
 async fn test_geosfpit_to_geos_it_download_by_dates() {
+    common::init_logging();
+
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
         .await
@@ -434,6 +444,8 @@ async fn test_geosfpit_to_geos_it_download_by_dates() {
 
 #[tokio::test]
 async fn test_download_default_geosfpit_missing() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
     let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_fpit")
         .expect("Failed to set up test config and temp directories");
@@ -443,7 +455,7 @@ async fn test_download_default_geosfpit_missing() {
         &mut conn,
         None, // should pick up the start date from the existing files
         Some(NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()),
-        None,
+        Some(&ProcCfgKey("std-geosfpit".to_string())),
         &config,
         downloader,
         false,
@@ -475,6 +487,8 @@ async fn test_download_default_geosfpit_missing() {
 
 #[tokio::test]
 async fn test_download_default_geosit_missing() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_it_next_date.sql");
     let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_it")
         .expect("Failed to set up test config and temp directories");
@@ -516,6 +530,8 @@ async fn test_download_default_geosit_missing() {
 
 #[tokio::test]
 async fn test_download_default_geosfpit_to_geosit_missing() {
+    common::init_logging();
+
     let (mut conn, _test_db) =
         multiline_sql_init!("sql/check_geos_fpit_to_it_transition_next_date.sql");
     let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_fpit_and_it")
@@ -558,6 +574,8 @@ async fn test_download_default_geosfpit_to_geosit_missing() {
 
 #[tokio::test]
 async fn test_download_partial_day_from_start() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_partial.sql");
     let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_fpit_partial")
         .expect("Failed to set up test config and temp directories");
@@ -607,6 +625,8 @@ async fn test_download_partial_day_from_start() {
 
 #[tokio::test]
 async fn test_download_partial_day_scattered() {
+    common::init_logging();
+
     let (mut conn, _test_db) =
         multiline_sql_init!("sql/check_geos_fpit_next_partial_scattered.sql");
     let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_fpit_partial_scattered")
@@ -657,6 +677,8 @@ async fn test_download_partial_day_scattered() {
 
 #[tokio::test]
 async fn test_met_rescanning() {
+    common::init_logging();
+
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
         .await
@@ -702,6 +724,8 @@ async fn test_met_rescanning() {
 
 #[tokio::test]
 async fn test_met_dates_defaults_empty_db() {
+    common::init_logging();
+
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
         .await
@@ -730,6 +754,8 @@ async fn test_met_dates_defaults_empty_db() {
 
 #[tokio::test]
 async fn test_met_dates_user_empty_db() {
+    common::init_logging();
+
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
         .await
@@ -762,6 +788,8 @@ async fn test_met_dates_user_empty_db() {
 
 #[tokio::test]
 async fn test_met_dates_default_fpit_in_db() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -784,6 +812,8 @@ async fn test_met_dates_default_fpit_in_db() {
 
 #[tokio::test]
 async fn test_met_dates_user_override_fpit_in_db() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -807,6 +837,8 @@ async fn test_met_dates_user_override_fpit_in_db() {
 
 #[tokio::test]
 async fn test_met_dates_default_it_in_db() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_it_next_date.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -829,6 +861,8 @@ async fn test_met_dates_default_it_in_db() {
 
 #[tokio::test]
 async fn test_met_dates_default_fpit_plus_partial_it_in_db() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_next_date.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -852,6 +886,8 @@ async fn test_met_dates_default_fpit_plus_partial_it_in_db() {
 
 #[tokio::test]
 async fn test_single_met_dates_user_override() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -883,6 +919,8 @@ async fn test_single_met_dates_user_override() {
 
 #[tokio::test]
 async fn test_single_met_dates_start_from_db() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -912,6 +950,8 @@ async fn test_single_met_dates_start_from_db() {
 
 #[tokio::test]
 async fn test_single_met_start_from_dl_config() {
+    common::init_logging();
+
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
         .await
@@ -976,6 +1016,8 @@ async fn test_single_met_start_from_dl_config() {
 
 #[tokio::test]
 async fn test_single_met_cross_boundary_with_defaults() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -1006,6 +1048,8 @@ async fn test_single_met_cross_boundary_with_defaults() {
 
 #[tokio::test]
 async fn test_single_met_cross_boundary_ignoring_defaults() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -1036,6 +1080,8 @@ async fn test_single_met_cross_boundary_ignoring_defaults() {
 
 #[tokio::test]
 async fn test_find_met_file_by_name() {
+    common::init_logging();
+
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_finding_met_file.sql");
     let check_some = MetFile::get_file_by_name(&mut conn, "geos_surf_test_20200101_0000.nc")
         .await
@@ -1062,6 +1108,8 @@ async fn test_find_met_file_by_name() {
 
 #[tokio::test]
 async fn test_find_met_file_by_path() {
+    common::init_logging();
+
     let test_path = PathBuf::from("/data/met/Nx/geos_surf_test_20200101_0000.nc");
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_finding_met_file.sql");
     let check_some = MetFile::get_file_by_full_path(&mut conn, &test_path)
@@ -1089,6 +1137,8 @@ async fn test_find_met_file_by_path() {
 #[test]
 #[ignore = "requires downloading a file"]
 fn test_geosfp_download() {
+    common::init_logging();
+
     let tmp_dir =
         tempdir::TempDir::new("test_geosfp_download").expect("Failed to make temporary directory");
     let config =

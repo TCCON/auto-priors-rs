@@ -567,6 +567,10 @@ impl MetFile {
         end_date: Option<NaiveDate>,
         keyed_cfg: config::KeyedMetDownloadConfig<'_>,
     ) -> anyhow::Result<HashMap<NaiveDate, MetDayState>> {
+        debug!(
+            "Checking if met download complete for met config '{}'",
+            keyed_cfg.product_key
+        );
         let end_date = end_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
         let n_expected = Self::num_expected_daily_files(keyed_cfg.cfg)?;
         let n_found_each_day = sqlx::query!(
@@ -653,6 +657,7 @@ impl MetFile {
         end_date: Option<NaiveDate>,
         keyed_cfgs: &[config::KeyedMetDownloadConfig<'_>],
     ) -> anyhow::Result<HashMap<NaiveDate, MetDayState>> {
+        // helper function to clean up the queries below
         fn get_state<'a>(
             m: &'a HashMap<NaiveDate, MetDayState>,
             date: &NaiveDate,
@@ -660,6 +665,7 @@ impl MetFile {
             m.get(date)
                 .expect("get_state should not be called for a date not in the date -> state map")
         }
+
         let end_date = end_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
         let mut states = vec![];
         for keyed_cfg in keyed_cfgs {

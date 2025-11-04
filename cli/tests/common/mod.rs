@@ -36,6 +36,13 @@ pub fn test_geosfp_met_keys() -> [MetCfgKey; 3] {
     ]
 }
 
+pub fn init_logging() {
+    let _ = env_logger::builder()
+        .filter_module("sqlx", log::LevelFilter::Warn)
+        .is_test(true)
+        .try_init();
+}
+
 pub(crate) fn md5sum(p: &Path) -> anyhow::Result<Vec<u8>> {
     use md5::Digest;
     let mut hasher = md5::Md5::new();

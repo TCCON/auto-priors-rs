@@ -41,7 +41,7 @@ If not, `podman machine start` should handle that.
 Although the test code should default to using the test containers, running local tests without mariadb running is safest.
 
 ```
-SQLX_OFFLINE=true cargo test -- --test-threads=1
+SQLX_OFFLINE=true cargo test --features=container-tests -- --test-threads=1
 ```
 
 If you haven't exported `DOCKER_HOST` as given in the `podman machine start` output, include it as a one-off environmental variable here just like `SQLX_OFFLINE`.

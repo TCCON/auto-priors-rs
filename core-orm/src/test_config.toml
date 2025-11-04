@@ -18,37 +18,37 @@ std_site_job_queue = "standard"
 error_handler = { type = "Logging" }
 
 [processing_configuration.std-geosfpit]
-required_mets = ["geosfpit-met-eta", "geosfpit-met-2d", "geosfpit-chem-eta"]
+required_mets = ["geosfpit-surf-met", "geosfpit-eta-met", "geosfpit-eta-chm"]
 ginput = "v1.0.6"
 start_date = "2000-01-01"
 end_date = "2023-06-01"
-generate_automatically = false                                               # left as false for now to simplify tests
+generate_automatically = false                                                # left as false for now to simplify tests
 ginput_met_key = "fpit-eta"
 ginput_output_subdir = "fpit"
 
 [processing_configuration.altco-geosfpit]
-required_mets = ["geosfpit-met-eta", "geosfpit-met-2d", "geosit-chem-eta"]
+required_mets = ["geosfpit-surf-met", "geosfpit-eta-met", "geosit-eta-chm"]
 ginput = "v1.2.0"
 start_date = "2018-01-01"
 end_date = "2018-01-08"
-generate_automatically = false                                             # left as false for now to simplify tests
+generate_automatically = false                                              # left as false for now to simplify tests
 ginput_met_key = "it-eta"
 ginput_output_subdir = "it"
 
 [processing_configuration.std-geosit]
-required_mets = ["geosit-met-eta", "geosit-met-2d", "geosit-chem-eta"]
+required_mets = ["geosit-surf-met", "geosit-eta-met", "geosit-eta-chm"]
 ginput = "v1.2.0"
 start_date = "2000-01-01"
 end_date = "2023-06-01"
-generate_automatically = false                                         # left as false for now to simplify tests
+generate_automatically = false                                          # left as false for now to simplify tests
 ginput_met_key = "it-eta"
 ginput_output_subdir = "it"
 
 [processing_configuration.std-geosfp]
-required_mets = ["geosfp-met-eta", "geosfp-met-2d", "geosfp-chem-eta"]
+required_mets = ["geosfp-surf-met", "geosfp-eta-met", "geosfp-eta-chm"]
 ginput = "v1.2.0"
 start_date = "2000-01-01"
-generate_automatically = false                                         # left as false for now to simplify tests
+generate_automatically = false                                          # left as false for now to simplify tests
 ginput_met_key = "fpit-eta"
 ginput_output_subdir = "fpit"
 
@@ -83,7 +83,7 @@ end_date = "2018-01-08"
 zgrid_file = './cli/tests/common/config_target_dummy'
 base_vmr_file = './cli/tests/common/config_target_dummy'
 
-[data.met_download.geosfpit-met-eta]
+[data.met_download.geosfpit-eta-met]
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NVASM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
@@ -91,7 +91,7 @@ download_dir = './cli/tests/common/config_met_dl_dummy/Nv'
 days_latency = 1
 ginput_met_type = 'met-eta'
 
-[data.met_download.geosfpit-met-2d]
+[data.met_download.geosfpit-surf-met]
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NXASM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
@@ -99,7 +99,7 @@ download_dir = './cli/tests/common/config_met_dl_dummy/Nx'
 days_latency = 1
 ginput_met_type = 'met-2d'
 
-[data.met_download.geosfpit-chem-eta]
+[data.met_download.geosfpit-eta-chm]
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NVCHM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
@@ -108,7 +108,7 @@ days_latency = 1
 ginput_met_type = 'chem-eta'
 
 
-[data.met_download.geosit-met-eta]
+[data.met_download.geosit-eta-met]
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_ASM_I3_L_V72.5.29.4/%Y/%j/.hidden/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
@@ -116,7 +116,7 @@ download_dir = './cli/tests/common/config_met_dl_dummy/Nv'
 days_latency = 1
 ginput_met_type = 'met-eta'
 
-[data.met_download.geosit-met-2d]
+[data.met_download.geosit-surf-met]
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_ASM_I1_L_SLV.5.29.4/%T/%j/.hidden/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
@@ -124,7 +124,7 @@ download_dir = './cli/tests/common/config_met_dl_dummy/Nx'
 days_latency = 1
 ginput_met_type = 'met-2d'
 
-[data.met_download.geosit-chem-eta]
+[data.met_download.geosit-eta-chm]
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOSIT/GEOSIT_CHM_I3_L_V72.5.29.4/%Y/%j/.hidden/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
@@ -133,7 +133,7 @@ days_latency = 1
 ginput_met_type = 'chem-eta'
 
 
-[data.met_download.geosfp-met-eta]
+[data.met_download.geosfp-eta-met]
 url_pattern = "https://portal.nccs.nasa.gov/datashare/gmao_ops/pub/fp/das/Y%Y/M%m/D%d/GEOS.fp.asm.inst3_3d_asm_Nv.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
@@ -141,7 +141,7 @@ download_dir = './cli/tests/common/config_met_dl_dummy/Nv'
 days_latency = 1
 ginput_met_type = 'met-eta'
 
-[data.met_download.geosfp-met-2d]
+[data.met_download.geosfp-surf-met]
 url_pattern = "https://portal.nccs.nasa.gov/datashare/gmao_ops/pub/fp/das/Y%Y/M%m/D%d/GEOS.fp.asm.inst3_2d_asm_Nx.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
@@ -149,7 +149,7 @@ download_dir = './cli/tests/common/config_met_dl_dummy/Nx'
 days_latency = 1
 ginput_met_type = 'met-2d'
 
-[data.met_download.geosfp-chem-eta]
+[data.met_download.geosfp-eta-chm]
 url_pattern = "https://portal.nccs.nasa.gov/datashare/gmao_ops/pub/fp/das/Y%Y/M%m/D%d/GEOS.fp.asm.inst3_3d_chm_Nv.%Y%m%d_%H%M.V01.nc4"
 file_freq_min = 180
 earliest_date = "2000-01-01"
