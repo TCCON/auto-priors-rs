@@ -631,7 +631,7 @@ fn get_expected_error_list(file_name: &OsStr) -> Option<&'static [&'static str]>
     let file_name = file_name.to_string_lossy();
     match file_name.as_ref() {
         "alt_met_out_of_range.txt" => {
-            Some(&["Invalid reanalysis: processing configuration 'altco-geosfpit' spans dates from 2018-01-01 up to but not including 2018-01-08 but you requested dates (2018-01-21 to 2018-01-22) outside this range"])
+            Some(&["Invalid reanalysis: processing configuration 'altco-geosfpit' spans dates from 2000-01-01 up to but not including 2023-06-01 but you requested dates (2023-06-02 to 2023-06-02) outside this range"])
         }
         "bad_alt_met.txt" => {
             Some(&["Invalid reanalysis: Unknown processing configuration: 'all_the_reprocessing'"])
