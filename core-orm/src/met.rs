@@ -348,6 +348,11 @@ impl MetFile {
         .await?
         .max_date;
 
+        debug!(
+            "Latest complete date found for {} is {:?}",
+            keyed_cfg.product_key, this_max_date
+        );
+
         Ok(this_max_date)
     }
 

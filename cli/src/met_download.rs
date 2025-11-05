@@ -117,7 +117,7 @@ pub async fn get_date_iter_for_specified_met(
         debug!("Setting start date to {start} given the last complete date for met '{met_key}' was {d}");
         start
     } else if let Some(d) = find_earliest_date_met_needed_for_processing(config, met_key) {
-        debug!("Setting start date to {} as the earliest date met '{met_key}' is needed according to the configured processing configurations", met_cfg.earliest_date);
+        debug!("Setting start date to {} as the earliest date met '{met_key}' is needed according to the configured processing configurations", d);
         d
     } else {
         debug!("Met '{met_key}' does not appear to be needed by any processing configurations, returning an empty date iterator");
@@ -401,7 +401,7 @@ impl TableMetSelection {
         cfg: &orm::config::Config,
     ) -> anyhow::Result<Vec<KeyedMetDownloadConfig<'_>>> {
         match self {
-            TableMetSelection::Defaults => cfg.get_unique_mets_for_auto_proc_cfgs(),
+            TableMetSelection::Defaults => cfg.get_unique_mets_for_auto_proc_cfgs(None, None),
             TableMetSelection::All => Ok(cfg.get_all_mets()),
             TableMetSelection::Specific(items) => Ok(cfg
                 .get_all_mets()
@@ -709,11 +709,10 @@ pub async fn download_missing_files(
     let proc_keys = if let Some(k) = proc_key_requested {
         vec![k]
     } else {
-        config.get_proc_cfgs_with_auto_met_download()
+        config.get_proc_cfgs_with_auto_met_download(start_date, end_date)
     };
-    debug!("Collecting required date ranges");
+    debug!("Collecting required date ranges for processing keys: {proc_keys:?}");
     let met_keys_and_cfgs = config.get_unique_mets_for_processing_configs(&proc_keys)?;
-
     // Download each met for either the input date range or the date range it is needed by
     // the processing configurations. Don't stop for errors, try all files and summarize
     // errors at the end.
@@ -747,6 +746,8 @@ pub async fn download_missing_files(
     }
 }
 
+/// Download files missing for one specific met file type. If omitted, `start_date`
+/// and `end_date` will be inferred from existing files first, then the configuration.
 async fn download_missing_files_for_met(
     conn: &mut orm::MySqlConn,
     config: &orm::config::Config,
@@ -903,7 +904,7 @@ pub async fn rescan_met_files(
         Vec::from_iter(keys.iter())
     } else {
         let mut v = HashSet::new();
-        for proc_k in config.get_proc_cfgs_with_auto_met_download() {
+        for proc_k in config.get_proc_cfgs_with_auto_met_download(start_date, end_date) {
             let proc = config
                 .processing_configuration
                 .get(proc_k)

@@ -22,25 +22,24 @@ required_mets = ["geosfpit-surf-met", "geosfpit-eta-met", "geosfpit-eta-chm"]
 ginput = "v1.0.6"
 start_date = "2000-01-01"
 end_date = "2023-06-01"
-generate_automatically = false                                                # left as false for now to simplify tests
+generate_automatically = true
 ginput_met_key = "fpit-eta"
 ginput_output_subdir = "fpit"
 
 [processing_configuration.altco-geosfpit]
 required_mets = ["geosfpit-surf-met", "geosfpit-eta-met", "geosit-eta-chm"]
 ginput = "v1.2.0"
-start_date = "2018-01-01"
-end_date = "2018-01-08"
-generate_automatically = false                                              # left as false for now to simplify tests
+start_date = "2000-01-01"
+end_date = "2023-06-01"
+generate_automatically = true
 ginput_met_key = "it-eta"
 ginput_output_subdir = "it"
 
 [processing_configuration.std-geosit]
 required_mets = ["geosit-surf-met", "geosit-eta-met", "geosit-eta-chm"]
 ginput = "v1.2.0"
-start_date = "2000-01-01"
-end_date = "2023-06-01"
-generate_automatically = false                                          # left as false for now to simplify tests
+start_date = "2023-06-01"
+generate_automatically = true
 ginput_met_key = "it-eta"
 ginput_output_subdir = "it"
 
@@ -48,7 +47,8 @@ ginput_output_subdir = "it"
 required_mets = ["geosfp-surf-met", "geosfp-eta-met", "geosfp-eta-chm"]
 ginput = "v1.2.0"
 start_date = "2000-01-01"
-generate_automatically = false                                          # left as false for now to simplify tests
+generate_automatically = false                                          # left as false because FP is only for download testing
+download_met_automatically = false
 ginput_met_key = "fpit-eta"
 ginput_output_subdir = "fpit"
 

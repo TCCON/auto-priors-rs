@@ -43,46 +43,69 @@ static EXPECTED_GEOSFPIT_FILES_20180102: [&'static str; 24] = [
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_2100.V01.nc4",
 ];
 
-static EXPECTED_GEOSFPIT_FILES_20180102_PARTIAL_A: [&'static str; 18] = [
-    "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_0600.V01.nc4",
+static EXPECTED_GEOSIT_FILES_20180102: [&'static str; 8] = [
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T0000.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T0300.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T0600.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T0900.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T1200.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T1500.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T1800.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T2100.V01.nc4",
+];
+
+static EXPECTED_GEOSFPIT_FILES_20180102_PARTIAL_A: [&'static str; 24] = [
+    "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_0600.V01.nc4", // FPIT 3d met
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_0900.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_1200.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_1500.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_1800.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_2100.V01.nc4",
-    "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_0600.V01.nc4",
+    "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_0600.V01.nc4", // FPIT 3d chm
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_0900.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_1200.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_1500.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_1800.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_2100.V01.nc4",
-    "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_0600.V01.nc4",
+    "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_0600.V01.nc4", // FPIT 2d met
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_0900.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_1200.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_1500.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_1800.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_2100.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T0600.V01.nc4", // IT 3d chm
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T0900.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T1200.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T1500.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T1800.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T2100.V01.nc4",
 ];
 
-static EXPECTED_GEOSFPIT_FILES_20180102_PARTIAL_B: [&'static str; 18] = [
-    "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_0000.V01.nc4",
+static EXPECTED_GEOSFPIT_FILES_20180102_PARTIAL_B: [&'static str; 24] = [
+    "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_0000.V01.nc4", // FPIT 3d met
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_0600.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_0900.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_1500.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_1800.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20180102_2100.V01.nc4",
-    "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_0000.V01.nc4",
+    "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_0000.V01.nc4", // FPIT 3d chm
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_0600.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_0900.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_1500.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_1800.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20180102_2100.V01.nc4",
-    "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_0000.V01.nc4",
+    "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_0000.V01.nc4", // FPIT 2d met
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_0600.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_0900.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_1500.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_1800.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20180102_2100.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T0000.V01.nc4", // IT 3d chm
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T0600.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T0900.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T1500.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T1800.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2018-01-02T2100.V01.nc4",
 ];
 
 static EXPECTED_GEOSIT_FILES_20180702: [&'static str; 24] = [
@@ -112,8 +135,8 @@ static EXPECTED_GEOSIT_FILES_20180702: [&'static str; 24] = [
     "./Nx/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-07-02T2100.V01.nc4",
 ];
 
-static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 48] = [
-    "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_0000.V01.nc4",
+static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 56] = [
+    "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_0000.V01.nc4", // FPIT 3d met
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_0300.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_0600.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_0900.V01.nc4",
@@ -121,7 +144,7 @@ static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 48] = [
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_1500.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_1800.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_2100.V01.nc4",
-    "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20230531_0000.V01.nc4",
+    "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20230531_0000.V01.nc4", // FPIT 3d chm
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20230531_0300.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20230531_0600.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20230531_0900.V01.nc4",
@@ -129,7 +152,15 @@ static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 48] = [
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20230531_1500.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20230531_1800.V01.nc4",
     "./Nv/GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.20230531_2100.V01.nc4",
-    "./Nv/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T0000.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-05-31T0000.V01.nc4", // IT 3d chm - since we use this
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-05-31T0300.V01.nc4", // in the alternate configuration
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-05-31T0600.V01.nc4", // before the transition, these
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-05-31T0900.V01.nc4", // are needed
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-05-31T1200.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-05-31T1500.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-05-31T1800.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-05-31T2100.V01.nc4",
+    "./Nv/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T0000.V01.nc4", // IT 3d met (post transition)
     "./Nv/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T0300.V01.nc4",
     "./Nv/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T0600.V01.nc4",
     "./Nv/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T0900.V01.nc4",
@@ -137,7 +168,7 @@ static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 48] = [
     "./Nv/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T1500.V01.nc4",
     "./Nv/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T1800.V01.nc4",
     "./Nv/GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T2100.V01.nc4",
-    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T0000.V01.nc4",
+    "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T0000.V01.nc4", // IT 3d chm (post transition)
     "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T0300.V01.nc4",
     "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T0600.V01.nc4",
     "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T0900.V01.nc4",
@@ -145,7 +176,7 @@ static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 48] = [
     "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T1500.V01.nc4",
     "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T1800.V01.nc4",
     "./Nv/GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.2023-06-01T2100.V01.nc4",
-    "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20230531_0000.V01.nc4",
+    "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20230531_0000.V01.nc4", // FPIT 2d met
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20230531_0300.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20230531_0600.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20230531_0900.V01.nc4",
@@ -153,7 +184,7 @@ static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 48] = [
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20230531_1500.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20230531_1800.V01.nc4",
     "./Nx/GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.20230531_2100.V01.nc4",
-    "./Nx/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T0000.V01.nc4",
+    "./Nx/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T0000.V01.nc4", // IT 2d met (post transition)
     "./Nx/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T0300.V01.nc4",
     "./Nx/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T0600.V01.nc4",
     "./Nx/GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T0900.V01.nc4",
@@ -167,6 +198,9 @@ static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 48] = [
 // own database, we have to call the tests as `$ cargo test -- --test-threads=1` to ensure only
 // one test runs at a time.
 
+/// Test that a single processing configuration's files are correctly marked as complete, incomplete,
+/// and missing for different combinations of files (i.e., all present, all missing, one file from one
+/// type missing, all files of one type missing).
 #[tokio::test]
 async fn test_check_met() {
     common::init_logging();
@@ -329,6 +363,11 @@ async fn test_check_met() {
     );
 }
 
+/// Test that "downloading" a particular set of met files for a particular date
+/// correctly stores them to disk and records them in the database. Specifically,
+/// tests GEOS FP-IT for a period it should be available. (This does not actually
+/// download from Goddard, only mocks that, so the test is based only on the
+/// configured date ranges.)
 #[tokio::test]
 async fn test_geosfpit_download_by_dates() {
     common::init_logging();
@@ -366,6 +405,11 @@ async fn test_geosfpit_download_by_dates() {
         .expect("Not all 'FP-IT' files for 2018-01-02 stored in the database");
 }
 
+/// Test that "downloading" a particular set of met files for a particular date
+/// correctly stores them to disk and records them in the database. Specifically,
+/// tests GEOS IT for a period it should be available. (This does not actually
+/// download from Goddard, only mocks that, so the test is based only on the
+/// configured date ranges.)
 #[tokio::test]
 async fn test_geosit_download_by_dates() {
     common::init_logging();
@@ -403,8 +447,10 @@ async fn test_geosit_download_by_dates() {
         .expect("Not all 'IT' files for 2023-07-02 stored in the database");
 }
 
+/// Tests that a transition between required met files for automatic processing
+/// correctly handles the transition for a specific set of dates.
 #[tokio::test]
-async fn test_geosfpit_to_geos_it_download_by_dates() {
+async fn test_transition_in_automatic_required_mets() {
     common::init_logging();
 
     // Don't need any initial values in the database, just a connection to a blank database
@@ -442,8 +488,10 @@ async fn test_geosfpit_to_geos_it_download_by_dates() {
         );
 }
 
+/// Tests that downloading a specific processing configuration's missing met files
+/// successfully adds them to disk and the database.
 #[tokio::test]
-async fn test_download_default_geosfpit_missing() {
+async fn test_download_one_proc_cfg_missing() {
     common::init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
@@ -485,18 +533,76 @@ async fn test_download_default_geosfpit_missing() {
     );
 }
 
+/// Tests that downloading the missing files before the test transition gets the expected
+/// sets of files, accounting for both the standard and alternate processing configuration.
 #[tokio::test]
-async fn test_download_default_geosit_missing() {
+async fn test_download_pre_transition_missing() {
     common::init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_it_next_date.sql");
-    let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_it")
+    let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
+    let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_pre_transition")
         .expect("Failed to set up test config and temp directories");
     let downloader = common::TestDownloader::new();
 
     met_download::download_missing_files(
         &mut conn,
         None, // should pick up the start date from the existing files
+        Some(NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()),
+        None,
+        &config,
+        downloader,
+        false,
+    )
+    .await
+    .expect("'Downloading' missing files did not complete successfully");
+
+    // Check for both the full set of GEOS FP-IT files and the chemistry IT files - doing this
+    // separately only so I can reuse the expected FPIT files list
+    common::are_met_files_present_on_disk(tmp_dir.path(), &EXPECTED_GEOSFPIT_FILES_20180102)
+        .expect("Not all missing GEOS FP-IT files for 2018-01-02 downloaded");
+    common::are_met_files_present_on_disk(tmp_dir.path(), &EXPECTED_GEOSIT_FILES_20180102)
+        .expect("Not all missing GEOS IT files for 2018-01-02 downloaded");
+    common::are_met_file_present_in_database(&mut conn, &EXPECTED_GEOSFPIT_FILES_20180102)
+        .await
+        .expect("Not all missing GEOS FP-IT files for 2018-01-02 entered in the database");
+    common::are_met_file_present_in_database(&mut conn, &EXPECTED_GEOSIT_FILES_20180102)
+        .await
+        .expect("Not all missing GEOS IT files for 2018-01-02 entered in the database");
+
+    // Double check that no files before the previously available day were downloaded
+    let res = sqlx::query!(
+        "SELECT COUNT(*) as count FROM MetFiles WHERE filedate < ?",
+        NaiveDate::from_ymd_opt(2018, 1, 1).unwrap()
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .expect("Query to check for too-early files failed")
+    .count;
+
+    assert_eq!(
+        res, 0,
+        "Files before 2018-01-01 should not have been added to the database, but were."
+    );
+}
+
+/// Tests that downloading the missing files after the test transition gets the expected
+/// sets of files.
+#[tokio::test]
+async fn test_download_post_transition_missing() {
+    common::init_logging();
+
+    let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_it_next_date.sql");
+    let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_post_transition")
+        .expect("Failed to set up test config and temp directories");
+    let downloader = common::TestDownloader::new();
+
+    // We set the start date to 2023-07-01 to exclude the pre-transition processing configurations.
+    // Otherwise, it does what it is supposed to, which is finds that all of the files needed for
+    // the pre-transition period are missing and tries to download them. We can't set it to 2023-06-01
+    // because then it will (again correctly) see that June is missing and "download" it.
+    met_download::download_missing_files(
+        &mut conn,
+        Some(NaiveDate::from_ymd_opt(2023, 7, 1).unwrap()),
         Some(NaiveDate::from_ymd_opt(2023, 7, 3).unwrap()),
         None,
         &config,
@@ -528,8 +634,11 @@ async fn test_download_default_geosit_missing() {
     );
 }
 
+/// Tests that the download correctly handles a transition between two different sets
+/// of auto-required met files, basing the start date off of existing files, rather
+/// than it being specified (as in `test_transition_in_automatic_required_mets`).
 #[tokio::test]
-async fn test_download_default_geosfpit_to_geosit_missing() {
+async fn test_transition_in_automatic_required_mets_missing() {
     common::init_logging();
 
     let (mut conn, _test_db) =
@@ -541,7 +650,7 @@ async fn test_download_default_geosfpit_to_geosit_missing() {
     met_download::download_missing_files(
         &mut conn,
         None, // should pick up the start date from the existing files
-        Some(NaiveDate::from_ymd_opt(2023, 7, 2).unwrap()),
+        Some(NaiveDate::from_ymd_opt(2023, 6, 2).unwrap()),
         None,
         &config,
         downloader,
@@ -572,6 +681,8 @@ async fn test_download_default_geosfpit_to_geosit_missing() {
     );
 }
 
+/// Tests that the right files are automatically downloaded when the last day
+/// for that automatic set of met files was partially complete.
 #[tokio::test]
 async fn test_download_partial_day_from_start() {
     common::init_logging();
@@ -623,6 +734,10 @@ async fn test_download_partial_day_from_start() {
     );
 }
 
+/// Tests that the right files are automatically downloaded when the last day
+/// for that automatic set of met files was partially complete with the files
+/// being more scattered in time, whereas `test_download_partial_day_from_start`
+/// gives it a day that just cut off partway through.
 #[tokio::test]
 async fn test_download_partial_day_scattered() {
     common::init_logging();
@@ -675,6 +790,7 @@ async fn test_download_partial_day_scattered() {
     );
 }
 
+/// Tests the ability to add already-downloaded met files to the database.
 #[tokio::test]
 async fn test_met_rescanning() {
     common::init_logging();
@@ -691,6 +807,7 @@ async fn test_met_rescanning() {
         .expect("Failed to set up test config and temp directories");
 
     // Let's use the TestDownloader to "download" some files without adding them to the database
+    // This should only download the 3 FPIT file types.
     let test_date = NaiveDate::from_ymd_opt(2018, 1, 2).unwrap();
     let geos_fpit_cfgs = config
         .get_mets_for_processing_config(&ProcCfgKey("std-geosfpit".to_string()))
@@ -722,168 +839,8 @@ async fn test_met_rescanning() {
         .expect("Rescanning 2018-01-02 failed to find all expected files");
 }
 
-#[tokio::test]
-async fn test_met_dates_defaults_empty_db() {
-    common::init_logging();
-
-    // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = open_test_database(true)
-        .await
-        .expect("Failed to open test database");
-    let mut conn = pool
-        .get_connection()
-        .await
-        .expect("Failed to acquire connection to database");
-    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
-
-    let mut date_iter = met_download::get_date_iter_for_defaults(&mut conn, None, None, &config)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        date_iter.next(),
-        Some(NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
-        "First date in iterator was incorrect"
-    );
-    assert_eq!(
-        date_iter.last(),
-        Some(chrono::offset::Utc::now().naive_utc().date() - Duration::days(1)),
-        "Final date in iterator was incorrect"
-    );
-}
-
-#[tokio::test]
-async fn test_met_dates_user_empty_db() {
-    common::init_logging();
-
-    // Don't need any initial values in the database, just a connection to a blank database
-    let (pool, _test_db) = open_test_database(true)
-        .await
-        .expect("Failed to open test database");
-    let mut conn = pool
-        .get_connection()
-        .await
-        .expect("Failed to acquire connection to database");
-    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
-
-    let start = NaiveDate::from_ymd_opt(2010, 1, 1).unwrap();
-    let end = NaiveDate::from_ymd_opt(2011, 1, 1).unwrap();
-
-    let mut date_iter =
-        met_download::get_date_iter_for_defaults(&mut conn, Some(start), Some(end), &config)
-            .await
-            .unwrap();
-
-    assert_eq!(
-        date_iter.next(),
-        Some(start),
-        "First date in iterator was incorrect"
-    );
-    assert_eq!(
-        date_iter.last(),
-        Some(end - Duration::days(1)),
-        "Final date in iterator was incorrect"
-    );
-}
-
-#[tokio::test]
-async fn test_met_dates_default_fpit_in_db() {
-    common::init_logging();
-
-    let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
-    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
-
-    let mut date_iter = met_download::get_date_iter_for_defaults(&mut conn, None, None, &config)
-        .await
-        .unwrap();
-
-    // the database has 2018-01-01 in it, so this should return 2018-01-02 as the start date
-    assert_eq!(
-        date_iter.next(),
-        Some(NaiveDate::from_ymd_opt(2018, 1, 2).unwrap()),
-        "First date in iterator was incorrect"
-    );
-    assert_eq!(
-        date_iter.last(),
-        Some(chrono::offset::Utc::now().naive_utc().date() - Duration::days(1)),
-        "Final date in iterator was incorrect"
-    );
-}
-
-#[tokio::test]
-async fn test_met_dates_user_override_fpit_in_db() {
-    common::init_logging();
-
-    let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
-    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
-
-    let start = Some(NaiveDate::from_ymd_opt(2005, 6, 1).unwrap());
-    let mut date_iter = met_download::get_date_iter_for_defaults(&mut conn, start, None, &config)
-        .await
-        .unwrap();
-
-    // the database has 2018-01-01 in it, but we're overriding that, so this should return our specified start date
-    assert_eq!(
-        date_iter.next(),
-        start,
-        "First date in iterator was incorrect"
-    );
-    assert_eq!(
-        date_iter.last(),
-        Some(chrono::offset::Utc::now().naive_utc().date() - Duration::days(1)),
-        "Final date in iterator was incorrect"
-    );
-}
-
-#[tokio::test]
-async fn test_met_dates_default_it_in_db() {
-    common::init_logging();
-
-    let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_it_next_date.sql");
-    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
-
-    let mut date_iter = met_download::get_date_iter_for_defaults(&mut conn, None, None, &config)
-        .await
-        .unwrap();
-
-    // the database has 2023-07-01 in it, so this should return 2023-07-02 as the start date
-    assert_eq!(
-        date_iter.next(),
-        Some(NaiveDate::from_ymd_opt(2023, 7, 2).unwrap()),
-        "First date in iterator was incorrect"
-    );
-    assert_eq!(
-        date_iter.last(),
-        Some(chrono::offset::Utc::now().naive_utc().date() - Duration::days(1)),
-        "Final date in iterator was incorrect"
-    );
-}
-
-#[tokio::test]
-async fn test_met_dates_default_fpit_plus_partial_it_in_db() {
-    common::init_logging();
-
-    let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_next_date.sql");
-    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
-
-    let mut date_iter = met_download::get_date_iter_for_defaults(&mut conn, None, None, &config)
-        .await
-        .unwrap();
-
-    // the database has 2018-01-01 in it for FPIT and only part of 2023-07-01 for IT, so this should return 2018-01-02 as the start date
-    // this tests both that it will correctly look back for different met and that it ignores partial days
-    assert_eq!(
-        date_iter.next(),
-        Some(NaiveDate::from_ymd_opt(2018, 1, 2).unwrap()),
-        "First date in iterator was incorrect"
-    );
-    assert_eq!(
-        date_iter.last(),
-        Some(chrono::offset::Utc::now().naive_utc().date() - Duration::days(1)),
-        "Final date in iterator was incorrect"
-    );
-}
-
+/// Test that met_download::get_date_iter_for_specified_met prioritizes
+/// input start and end dates over anything in the database.
 #[tokio::test]
 async fn test_single_met_dates_user_override() {
     common::init_logging();
@@ -900,6 +857,7 @@ async fn test_single_met_dates_user_override() {
         Some(end),
         &config,
         &common::test_geosfpit_met_keys()[0],
+        false,
     )
     .await
     .unwrap();
@@ -917,6 +875,9 @@ async fn test_single_met_dates_user_override() {
     );
 }
 
+/// Tests that met_download::get_date_iter_for_specified_met can correctly pick up
+/// the last day a single type of met files was downloaded and figure out to end
+/// when it is no longer required by any of the processing.
 #[tokio::test]
 async fn test_single_met_dates_start_from_db() {
     common::init_logging();
@@ -930,12 +891,13 @@ async fn test_single_met_dates_start_from_db() {
         None,
         &config,
         &common::test_geosfpit_met_keys()[0],
+        true,
     )
     .await
     .unwrap();
 
-    // should start on the day after we have fpit met data and stop on the last day before geos-it is set to start
-    // note - might need updated to reflect new processing configuration approach.
+    // should start on the day after we have FPIT met data and stop on the last day before the pure GEOS IT
+    // processing starts.
     assert_eq!(
         date_iter.next(),
         Some(NaiveDate::from_ymd_opt(2018, 1, 2).unwrap()),
@@ -948,6 +910,9 @@ async fn test_single_met_dates_start_from_db() {
     );
 }
 
+/// Tests that met_download::get_date_iter_for_specified_met can correctly pick up
+/// the first day needed across the processing configurations and figure out to end
+/// when it is no longer required by any of the processing.
 #[tokio::test]
 async fn test_single_met_start_from_dl_config() {
     common::init_logging();
@@ -960,8 +925,7 @@ async fn test_single_met_start_from_dl_config() {
         .get_connection()
         .await
         .expect("Failed to acquire connection to database");
-    let mut config =
-        make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
+    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let geos_fpit_key = common::test_geosfpit_met_keys()[0].clone();
 
@@ -971,11 +935,12 @@ async fn test_single_met_start_from_dl_config() {
         None,
         &config,
         &geos_fpit_key,
+        true, // we need to respect the defaults to get the iterator to end at the last date the processing wants it, rather than today
     )
     .await
     .unwrap();
 
-    // should start on the day defined as the earliest day FPIT is available and stop on the last day before geos-it is set to start
+    // should start on the day defined as the earliest day FPIT is needed and stop on the last day before geos-it is set to start
     assert_eq!(
         date_iter.next(),
         Some(NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
@@ -986,34 +951,11 @@ async fn test_single_met_start_from_dl_config() {
         Some(NaiveDate::from_ymd_opt(2023, 5, 31).unwrap()),
         "Final date in iterator was incorrect when all files have the same earliest_date values"
     );
-
-    let fpit_cfg = config.data.met_download.get_mut(&geos_fpit_key).unwrap();
-    fpit_cfg.earliest_date = NaiveDate::from_ymd_opt(2011, 1, 1).unwrap();
-
-    // Redo the test with the different files having different start dates - should take the latest one
-    let mut date_iter = met_download::get_date_iter_for_specified_met(
-        &mut conn,
-        None,
-        None,
-        &config,
-        &geos_fpit_key,
-    )
-    .await
-    .unwrap();
-
-    // should start on the day defined as the earliest day FPIT is available and stop on the last day before geos-it is set to start
-    assert_eq!(
-        date_iter.next(),
-        Some(NaiveDate::from_ymd_opt(2011, 1, 1).unwrap()),
-        "First date in iterator was incorrect when files have different earliest_date values"
-    );
-    assert_eq!(
-        date_iter.last(),
-        Some(NaiveDate::from_ymd_opt(2023, 5, 31).unwrap()),
-        "Final date in iterator was incorrect when files have different earliest_date values"
-    );
 }
 
+/// Tests that met_download::get_date_iter_for_specified_met can correctly pick up
+/// the first day needed across the processing configurations and figure out to end
+/// when it is no longer required by any of the processing.
 #[tokio::test]
 async fn test_single_met_cross_boundary_with_defaults() {
     common::init_logging();
@@ -1029,6 +971,7 @@ async fn test_single_met_cross_boundary_with_defaults() {
         Some(end),
         &config,
         &common::test_geosfpit_met_keys()[0],
+        true,
     )
     .await
     .unwrap();
@@ -1046,6 +989,9 @@ async fn test_single_met_cross_boundary_with_defaults() {
     );
 }
 
+/// Tests that met_download::get_date_iter_for_specified_met can correctly pick up
+/// the first day needed across the processing configurations and ignore the set
+/// processing configuration dates.
 #[tokio::test]
 async fn test_single_met_cross_boundary_ignoring_defaults() {
     common::init_logging();
@@ -1061,6 +1007,7 @@ async fn test_single_met_cross_boundary_ignoring_defaults() {
         Some(end),
         &config,
         &common::test_geosfpit_met_keys()[0],
+        false,
     )
     .await
     .unwrap();
@@ -1078,6 +1025,8 @@ async fn test_single_met_cross_boundary_ignoring_defaults() {
     );
 }
 
+/// Tests the function `MetFile::get_file_by_name`, which must retrieve a single
+/// file from the database given its basename.
 #[tokio::test]
 async fn test_find_met_file_by_name() {
     common::init_logging();
@@ -1106,12 +1055,14 @@ async fn test_find_met_file_by_name() {
     );
 }
 
+/// Tests the function `MetFile::get_file_by_full_path`, which must retrieve a single
+/// file from the database given its full path.
 #[tokio::test]
 async fn test_find_met_file_by_path() {
     common::init_logging();
 
     let test_path = PathBuf::from("/data/met/Nx/geos_surf_test_20200101_0000.nc");
-    let (mut conn, _test_db) = multiline_sql_init!("sql/check_finding_met_file.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/check_finding_met_path.sql");
     let check_some = MetFile::get_file_by_full_path(&mut conn, &test_path)
         .await
         .expect("Database query for full path failed or returned >1 file");
@@ -1134,6 +1085,7 @@ async fn test_find_met_file_by_path() {
     );
 }
 
+/// Tests truly downloading a file, specifically one of the freely-available GEOS FP surface files.
 #[test]
 #[ignore = "requires downloading a file"]
 fn test_geosfp_download() {
@@ -1147,7 +1099,7 @@ fn test_geosfp_download() {
     let fp_dl_cfg = config
         .data
         .met_download
-        .get(&MetCfgKey("geosfp-met-2d".to_string()))
+        .get(&MetCfgKey("geosfp-surf-met".to_string()))
         .expect("Test config should define the 2D GEOS-FP met file type for download");
 
     std::fs::create_dir(&fp_dl_cfg.download_dir)

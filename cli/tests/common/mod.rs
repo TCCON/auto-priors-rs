@@ -14,31 +14,32 @@ pub fn test_proc_key() -> ProcCfgKey {
 
 pub fn test_geosfpit_met_keys() -> [MetCfgKey; 3] {
     [
-        MetCfgKey("geosfpit-met-eta".to_string()),
-        MetCfgKey("geosfpit-met-2d".to_string()),
-        MetCfgKey("geosfpit-chem-eta".to_string()),
+        MetCfgKey("geosfpit-eta-met".to_string()),
+        MetCfgKey("geosfpit-surf-met".to_string()),
+        MetCfgKey("geosfpit-eta-chm".to_string()),
     ]
 }
 
 pub fn test_geosit_met_keys() -> [MetCfgKey; 3] {
     [
-        MetCfgKey("geosit-met-eta".to_string()),
-        MetCfgKey("geosit-met-2d".to_string()),
-        MetCfgKey("geosit-chem-eta".to_string()),
+        MetCfgKey("geosit-eta-met".to_string()),
+        MetCfgKey("geosit-surf-met".to_string()),
+        MetCfgKey("geosit-eta-chm".to_string()),
     ]
 }
 
 pub fn test_geosfp_met_keys() -> [MetCfgKey; 3] {
     [
-        MetCfgKey("geosfp-met-eta".to_string()),
-        MetCfgKey("geosfp-met-2d".to_string()),
-        MetCfgKey("geosfp-chem-eta".to_string()),
+        MetCfgKey("geosfp-eta-met".to_string()),
+        MetCfgKey("geosfp-surf-met".to_string()),
+        MetCfgKey("geosfp-eta-chm".to_string()),
     ]
 }
 
 pub fn init_logging() {
     let _ = env_logger::builder()
         .filter_module("sqlx", log::LevelFilter::Warn)
+        .format_source_path(true)
         .is_test(true)
         .try_init();
 }

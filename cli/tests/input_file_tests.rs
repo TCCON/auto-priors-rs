@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use float_cmp::approx_eq;
 use itertools::Itertools;
 use orm::{
-    config::{Config, MetCfgKey},
+    config::Config,
     input_files,
     jobs::{Job, MapFmt, ModFmt, TarChoice, VmrFmt},
     siteinfo::{SiteInfo, SiteType, StdSite},
@@ -299,11 +299,7 @@ async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
 
     met_download::download_files_for_dates(
         conn,
-        &[
-            &MetCfgKey("geosfpit-met-eta".to_string()),
-            &MetCfgKey("geosfpit-met-2d".to_string()),
-            &MetCfgKey("geosfpit-chem-eta".to_string()),
-        ],
+        &common::test_geosfpit_met_keys().iter().collect_vec(),
         NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(),
         Some(NaiveDate::from_ymd_opt(2018, 2, 1).unwrap()),
         &config,
@@ -315,11 +311,7 @@ async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
 
     met_download::download_files_for_dates(
         conn,
-        &[
-            &MetCfgKey("geosit-met-eta".to_string()),
-            &MetCfgKey("geosit-met-2d".to_string()),
-            &MetCfgKey("geosit-chem-eta".to_string()),
-        ],
+        &common::test_geosit_met_keys().iter().collect_vec(),
         NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(),
         Some(NaiveDate::from_ymd_opt(2018, 2, 1).unwrap()),
         &config,
@@ -332,11 +324,7 @@ async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
     log::info!("Populating database with late May/early June 2023 transition met files");
     met_download::download_files_for_dates(
         conn,
-        &[
-            &MetCfgKey("geosfpit-met-eta".to_string()),
-            &MetCfgKey("geosfpit-met-2d".to_string()),
-            &MetCfgKey("geosfpit-chem-eta".to_string()),
-        ],
+        &common::test_geosfpit_met_keys().iter().collect_vec(),
         NaiveDate::from_ymd_opt(2023, 5, 30).unwrap(),
         Some(NaiveDate::from_ymd_opt(2023, 6, 1).unwrap()),
         &config,
@@ -348,11 +336,7 @@ async fn populate_met_in_db(conn: &mut MySqlConn, config: &Config) {
 
     met_download::download_files_for_dates(
         conn,
-        &[
-            &MetCfgKey("geosit-met-eta".to_string()),
-            &MetCfgKey("geosit-met-2d".to_string()),
-            &MetCfgKey("geosit-chem-eta".to_string()),
-        ],
+        &common::test_geosit_met_keys().iter().collect_vec(),
         NaiveDate::from_ymd_opt(2023, 6, 1).unwrap(),
         Some(NaiveDate::from_ymd_opt(2023, 6, 3).unwrap()),
         &config,

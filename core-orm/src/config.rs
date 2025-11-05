@@ -246,7 +246,9 @@ impl Deref for ProcCfgKey {
     }
 }
 
-#[derive(Debug, Hash, Deserialize, Serialize, PartialEq, Eq, Clone, sqlx::Type)]
+#[derive(
+    Debug, Hash, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Clone, sqlx::Type,
+)]
 #[sqlx(transparent)]
 pub struct MetCfgKey(pub String);
 
@@ -386,17 +388,26 @@ impl Config {
             let mets = self.get_mets_for_processing_config(&key)?;
             all_mets.extend(mets.into_iter());
         }
+        // Sorting is necessary for de-deduplication to work.
+        all_mets.sort_unstable_by_key(|met| met.product_key);
         all_mets.dedup_by_key(|met| met.product_key);
+        debug!(
+            "Found {} unique mets for the given product configs ({proc_cfg_keys:?}",
+            all_mets.len()
+        );
         Ok(all_mets)
     }
 
     /// Return references to each met file type required by any of the processing configurations
-    /// set to need met downloaded automatically.
+    /// set to need met downloaded automatically. Providing `start_date` and `end_date` will limit
+    /// the values returned to processing configurations that could be run for that period.
     pub fn get_unique_mets_for_auto_proc_cfgs(
         &self,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
     ) -> anyhow::Result<Vec<KeyedMetDownloadConfig>> {
         let proc_cfgs = self
-            .get_proc_cfgs_with_auto_met_download()
+            .get_proc_cfgs_with_auto_met_download(start_date, end_date)
             .into_iter()
             .collect_vec();
         self.get_unique_mets_for_processing_configs(&proc_cfgs)
@@ -419,8 +430,12 @@ impl Config {
         &self,
         met_key: &MetCfgKey,
     ) -> Option<(NaiveDate, Option<NaiveDate>)> {
-        let mut cfg_dates = self.processing_configuration.iter().filter_map(|(_, pc)| {
+        let mut cfg_dates = self.processing_configuration.iter().filter_map(|(pk, pc)| {
             if pc.required_mets.contains(met_key) {
+                debug!(
+                    "{pk} needs met {met_key} for {:?} to {:?}",
+                    pc.start_date, pc.end_date
+                );
                 Some((pc.start_date, pc.end_date))
             } else {
                 None
@@ -434,6 +449,7 @@ impl Config {
             start = start.min(this_start);
             end = crate::utils::later_opt_date(end, this_end);
         }
+        debug!("Met {met_key} is needed between {start:?} and {end:?}");
         Some((start, end))
     }
 
@@ -562,10 +578,27 @@ impl Config {
         proc_cfgs
     }
 
-    pub fn get_proc_cfgs_with_auto_met_download(&self) -> Vec<&ProcCfgKey> {
+    /// Return a list of processing configurations that require met data to be automatically downloaded.
+    /// Providing `start_date` and `end_date` will limit the values returned to processing configurations
+    /// that could be run for that period.
+    pub fn get_proc_cfgs_with_auto_met_download(
+        &self,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> Vec<&ProcCfgKey> {
         let mut proc_cfgs = vec![];
         for (key, proc_cfg) in self.processing_configuration.iter() {
-            if proc_cfg.download_met_automatically() {
+            // We only want to return a processing configuration if it overlaps with the date range requested.
+            // That way if we're only interested in downloaded mets for a period that covers a subset of
+            // processing configs, we don't accidentally download uninvolved processing configs' data.
+            if proc_cfg.download_met_automatically()
+                && crate::utils::date_ranges_overlap(
+                    start_date,
+                    end_date,
+                    Some(proc_cfg.start_date),
+                    proc_cfg.end_date,
+                )
+            {
                 proc_cfgs.push(key);
             }
         }
