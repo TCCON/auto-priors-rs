@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT COUNT(*) as count FROM MetFiles WHERE DATE(filedate) = ? AND product_key LIKE 'geosit%'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "char_set": 63,
+          "max_size": 21
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6796f397e38051d5ffb236dc839800d0512d74d737f9f5b9188d77e474479a8d"
+}

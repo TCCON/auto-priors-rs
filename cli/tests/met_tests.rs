@@ -448,7 +448,9 @@ async fn test_geosit_download_by_dates() {
 }
 
 /// Tests that a transition between required met files for automatic processing
-/// correctly handles the transition for a specific set of dates.
+/// correctly handles the transition for a specific set of dates. This mimics
+/// how one might use the `met download-missing` CLI with --start-date and
+/// --end-date flags.
 #[tokio::test]
 async fn test_transition_in_automatic_required_mets() {
     common::init_logging();
@@ -489,7 +491,8 @@ async fn test_transition_in_automatic_required_mets() {
 }
 
 /// Tests that downloading a specific processing configuration's missing met files
-/// successfully adds them to disk and the database.
+/// successfully adds them to disk and the database. This mimics how one might use
+/// the `met download-missing` CLI with a --proc-key flag.
 #[tokio::test]
 async fn test_download_one_proc_cfg_missing() {
     common::init_logging();
@@ -531,10 +534,39 @@ async fn test_download_one_proc_cfg_missing() {
         res, 0,
         "Files before 2018-01-01 should not have been added to the database, but were."
     );
+
+    // Also check that the other processing configuration was not downloaded for this day,
+    // but was present in the database for the previous day (as a check we have the right
+    // product key).
+    let res_jan01 = sqlx::query!(
+        "SELECT COUNT(*) as count FROM MetFiles WHERE DATE(filedate) = ? AND product_key LIKE 'geosit%'",
+        NaiveDate::from_ymd_opt(2018, 1, 1).unwrap()
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .expect("Query to check for too-early files failed")
+    .count;
+
+    let res_jan02 = sqlx::query!(
+        "SELECT COUNT(*) as count FROM MetFiles WHERE DATE(filedate) = ? AND product_key LIKE 'geosit%'",
+        NaiveDate::from_ymd_opt(2018, 1, 2).unwrap()
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .expect("Query to check for too-early files failed")
+    .count;
+
+    assert_eq!(res_jan01, 8, "There should be 8 Jan 01 GEOS IT files in the database from the test initial SQL. (This may mean the key needs updated in the check within this test.)");
+    assert_eq!(
+        res_jan02, 0,
+        "No GEOS IT files should have been downloaded for Jan 02"
+    );
 }
 
 /// Tests that downloading the missing files before the test transition gets the expected
 /// sets of files, accounting for both the standard and alternate processing configuration.
+/// This mimics both the service acting before the GEOS IT transition and calling the
+/// `met download-missing` CLI with an --end-date flag.
 #[tokio::test]
 async fn test_download_pre_transition_missing() {
     common::init_logging();
@@ -586,7 +618,8 @@ async fn test_download_pre_transition_missing() {
 }
 
 /// Tests that downloading the missing files after the test transition gets the expected
-/// sets of files.
+/// sets of files. This mimics both the service acting after the GEOS IT transition and calling the
+/// `met download-missing` CLI with --start-date and --end-date flags.
 #[tokio::test]
 async fn test_download_post_transition_missing() {
     common::init_logging();
@@ -637,6 +670,11 @@ async fn test_download_post_transition_missing() {
 /// Tests that the download correctly handles a transition between two different sets
 /// of auto-required met files, basing the start date off of existing files, rather
 /// than it being specified (as in `test_transition_in_automatic_required_mets`).
+///
+/// This test should mimic the most complicated use of the service's met download or
+/// calling the `met download-missing` CLI with no arguments, where it needs to correctly
+/// figure out which met files to download across a transition from one processing
+/// configuration to another with files from the first set already present.
 #[tokio::test]
 async fn test_transition_in_automatic_required_mets_missing() {
     common::init_logging();
