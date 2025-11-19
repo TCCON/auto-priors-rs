@@ -7,7 +7,7 @@ use std::{
     str::FromStr,
 };
 
-use anyhow::{self, Context};
+use anyhow::Context;
 use chrono::{Duration, NaiveDate};
 use itertools::Itertools;
 use log::{error, warn};
@@ -1381,19 +1381,8 @@ impl SiteInfo {
         }
 
         // Finally, add rows that didn't already exist. This is usually needed when adding a new site.
-        let last_met_date = if let Some(d) = crate::met::MetFile::get_last_complete_date_for_default_processing(&mut trans, config).await
-            .context("Error occurred while trying to identify the last complete day for default meteorologies")? {
-                d
-            } else {
-                warn!("No available met data, nothing to be done to update the standard sites table");
-                return Ok(());
-            };
-        StdSiteJob::fill_missing_dates_for_site(
-            &mut trans,
-            config,
-            site_id,
-            start_date,
-            last_met_date,
+        StdSiteJob::fill_missing_dates_for_site_all_proc_configs(
+            &mut trans, config, site_id, start_date, end_date,
         )
         .await?;
 

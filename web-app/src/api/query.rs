@@ -202,7 +202,7 @@ impl ApiDisplayJob {
             start_date: ApiNaiveDate(value.start_date),
             end_date: ApiNaiveDate(value.end_date),
             email: value.email,
-            processing_key: value.processing_key.map(|k| k.0),
+            processing_key: value.processing_key.into_opt().map(|k| k.0),
             mod_fmt: value.mod_fmt,
             vmr_fmt: value.vmr_fmt,
             map_fmt: value.map_fmt,

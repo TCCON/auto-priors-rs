@@ -768,6 +768,20 @@ impl Config {
         end.ok_or_else(|| anyhow!("No automatic processing configurations defined"))
     }
 
+    /// Get a vector of all processing configurations that are set to generate automatically.
+    pub fn get_auto_proc_cfgs(&self) -> Vec<&ProcCfgKey> {
+        self.processing_configuration
+            .iter()
+            .filter_map(|(key, pc)| {
+                if pc.generate_automatically {
+                    Some(key)
+                } else {
+                    None
+                }
+            })
+            .collect_vec()
+    }
+
     /// Return the list of processing configurations that must be generated
     /// automatically for a given date.
     pub fn get_auto_proc_cfgs_for_date(&self, date: NaiveDate) -> Vec<&ProcCfgKey> {

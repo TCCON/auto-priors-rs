@@ -19,6 +19,7 @@ use tabled::Tabled;
 use crate::config::Config;
 use crate::config::ProcCfgKey;
 use crate::jobs;
+use crate::jobs::JobProcKey;
 use crate::met;
 use crate::siteinfo::SiteInfo;
 use crate::siteinfo::{self, SiteType, StdOutputStructure};
@@ -89,7 +90,7 @@ pub struct StdSiteJob {
     /// Which processing configuration to use for this standard site job.
     /// If `None`, then use the default that a user request would for this
     /// date.
-    pub processing_key: Option<ProcCfgKey>,
+    pub processing_key: ProcCfgKey,
     /// The state of this job, distinct from the regular Job state
     pub state: StdSiteJobState,
     /// Whether this job is for a TCCON or EM27 site
@@ -124,7 +125,7 @@ impl From<QStdSiteJob> for StdSiteJob {
             site_id: site_id,
             site_type: site_type,
             date: query_job.date,
-            processing_key: query_job.processing_key.map(|s| ProcCfgKey(s)),
+            processing_key: ProcCfgKey(query_job.processing_key),
             state: query_job.state.into(),
             job: query_job.job,
             tarfile: query_job.tarfile.map(|s| PathBuf::from(s)),
@@ -141,32 +142,35 @@ impl From<QStdSiteJob> for StdSiteJob {
 
 /// Fill in any missing rows in the site job table. Missing rows are those representing a
 /// combination of site, date, and processing configuration expected but not found.
+/// If `not_before` is given, then only rows for that date and on will be checked if
+/// missing.
 ///
+/// # See also:
+/// - [`fill_missing_dates_for_site`] if you need to fill in rows for only one site.
 impl StdSiteJob {
     pub async fn update_std_site_job_table(
         conn: &mut MySqlConn,
         config: &Config,
         not_before: Option<NaiveDate>,
     ) -> anyhow::Result<()> {
-        let first_date = if let Some(d) = not_before {
-            d
-        } else if let Some(d) = met::MetFile::get_first_complete_day_for_default_processing(conn, config).await
-        .context("Error occurred while trying to identify the first complete day for default meteorologies")? {
-            d
-        } else {
-            warn!("No available met data, nothing to be done to update the standard sites table");
-            return Ok(());
-        };
-
-        let last_met_date = if let Some(d) = met::MetFile::get_last_complete_date_for_default_processing(conn, config).await
-            .context("Error occurred while trying to identify the last complete day for default meteorologies")? {
-                d
+        for proc_key in config.get_auto_proc_cfgs() {
+            let (first_date, last_met_date) = if let Some(dates) =
+                Self::get_date_range_for_proc_cfg(conn, config, proc_key).await?
+            {
+                let start = not_before.unwrap_or(dates.0).max(dates.0);
+                (start, dates.1)
             } else {
-                warn!("No available met data, nothing to be done to update the standard sites table");
-                return Ok(());
+                warn!("No days have all the met required for processing configuration '{proc_key}', will not update standard sites jobs table");
+                continue;
             };
 
-        Self::fill_missing_dates_for_all_sites(conn, config, first_date, last_met_date)
+            Self::fill_missing_dates_for_all_sites(
+                conn,
+                config,
+                first_date,
+                last_met_date,
+                proc_key,
+            )
             .await
             .map_err(|e| {
                 let n = e.len();
@@ -179,19 +183,51 @@ impl StdSiteJob {
             .context(
                 "Error occurred while filling in missing days in the standard site jobs table",
             )?;
-        Self::reset_rows_for_regen(conn).await
+            Self::reset_rows_for_regen(conn).await
             .context("Error occurred while resetting rows flagged for regeneration in the standard site jobs table")?;
-        Self::try_reset_days_missing_met(conn, config).await
+            Self::try_reset_days_missing_met(conn, config).await
             .context("Error occurred while checking for days previous missing meteorology in the standard site job table")?;
-
+        }
         Ok(())
     }
 
+    /// Helper functino that returns the range of dates that a given processing
+    /// configuration can have priors generated for.
+    async fn get_date_range_for_proc_cfg(
+        conn: &mut MySqlConn,
+        config: &Config,
+        proc_key: &ProcCfgKey,
+    ) -> anyhow::Result<Option<(NaiveDate, NaiveDate)>> {
+        let proc_cfg = config
+            .processing_configuration
+            .get(proc_key)
+            .ok_or_else(|| anyhow!("Processing configuration '{proc_key}' not found"))?;
+
+        let met_cfgs = proc_cfg.get_met_configs(config)?;
+        let first_avail_date =
+            met::MetFile::get_first_or_last_complete_date_for_config_set(conn, &met_cfgs, true)
+                .await
+                .context("Error occurred while trying to identify the first complete day for default meteorologies")?;
+        let last_avail_date =
+            met::MetFile::get_first_or_last_complete_date_for_config_set(conn, &met_cfgs, false)
+                .await
+                .context("Error occurred while trying to identify the last complete day for default meteorologies")?;
+
+        if let (Some(start), Some(end)) = (first_avail_date, last_avail_date) {
+            Ok(Some((start, end)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Add a new row to the standard site jobs table.
+    /// Note that this does not submit the ginput job; if you
+    /// have that job ID, it must be passed as the `job` argument.
     pub async fn add_std_site_job_row_from_args(
         conn: &mut MySqlConn,
         site_id: &str,
         date: NaiveDate,
-        processing_key: Option<&ProcCfgKey>,
+        processing_key: &ProcCfgKey,
         state: StdSiteJobState,
         job: Option<i32>,
     ) -> anyhow::Result<i32> {
@@ -212,15 +248,61 @@ impl StdSiteJob {
         return Ok(rid);
     }
 
+    pub async fn fill_missing_dates_for_site_all_proc_configs(
+        conn: &mut MySqlConn,
+        config: &Config,
+        site_id: &str,
+        first_date: NaiveDate,
+        last_date: Option<NaiveDate>,
+    ) -> anyhow::Result<()> {
+        for proc_key in config.get_auto_proc_cfgs() {
+            let proc_cfg = config.processing_configuration.get(proc_key)
+                .ok_or_else(|| anyhow!("get_auto_proc_cfgs returned a key to a processing configuration not in the config"))?;
+            let met_cfgs = &proc_cfg
+                .get_met_configs(config)
+                .context("Error occurred while adding new site job rows")?;
+            let last_met_date = if let Some(d) = crate::met::MetFile::get_first_or_last_complete_date_for_config_set(
+                conn, &met_cfgs, false).await
+            .context("Error occurred while trying to identify the last complete day for default meteorologies")? {
+                d
+            } else {
+                warn!("No available met data, nothing to be done to update the standard sites table");
+                return Ok(());
+            };
+
+            let last_met_date = if let Some(end) = last_date {
+                last_met_date.min(end)
+            } else {
+                last_met_date
+            };
+
+            StdSiteJob::fill_missing_dates_for_site(
+                conn,
+                config,
+                site_id,
+                first_date,
+                last_met_date,
+                proc_key,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Fill in missing rows for a given site for a given processing configuration.
+    /// Note that if you wish to
     pub async fn fill_missing_dates_for_site(
         conn: &mut MySqlConn,
         config: &Config,
         site_id: &str,
         first_date: NaiveDate,
         last_met_date: NaiveDate,
+        processing_key: &ProcCfgKey,
     ) -> anyhow::Result<()> {
         // First we get dates for which there is already an entry (in any state) for this site in the table
-        let extant_site_dates_and_procs = Self::get_extant_dates_by_proc(conn, site_id).await?;
+        let extant_site_dates_and_procs =
+            Self::get_extant_dates_and_proc(conn, site_id, processing_key).await?;
 
         // Now we get all the expected date for this site
         let locations = siteinfo::SiteInfo::get_site_locations(conn, site_id).await
@@ -267,40 +349,30 @@ impl StdSiteJob {
 
         let mut ndates = 0;
         for date in date_iter {
-            for proc_key in config.get_auto_proc_cfgs_for_date(date) {
-                // For the standard sites table, we represent the default processing as null.
-                // That's a hold over from the beginning of v2, where we assumed that we would
-                // only ever have one standard processing configuration for a given date.
-                let proc_key =
-                    make_default_proc_key_none(config, proc_key, date)?.map(|k| k.to_owned());
+            if !extant_site_dates_and_procs.contains(&date) {
+                let rid = Self::add_std_site_job_row_from_args(
+                    conn,
+                    site_id,
+                    date,
+                    processing_key,
+                    StdSiteJobState::JobNeeded,
+                    None,
+                )
+                .await?;
+                ndates += 1;
+                if ndates % 100 == 0 {
+                    // TODO: add a length hint method to DateIterator and use that to update this message with how many
+                    // there are to go.
+                    log::info!("Adding 'JobNeeded' entries ({ndates} complete so far)")
+                }
 
-                if !extant_site_dates_and_procs.contains(&(proc_key.clone(), date)) {
-                    let rid = Self::add_std_site_job_row_from_args(
-                        conn,
-                        site_id,
-                        date,
-                        proc_key.as_ref(),
-                        StdSiteJobState::JobNeeded,
-                        None,
-                    )
-                    .await?;
-                    ndates += 1;
-                    if ndates % 100 == 0 {
-                        // TODO: add a length hint method to DateIterator and use that to update this message with how many
-                        // there are to go.
-                        log::info!("Adding 'JobNeeded' entries ({ndates} complete so far)")
-                    }
-
-                    if !crate::met::MetFile::is_date_complete_for_default_processing(
-                        conn, config, date,
-                    )
+                if !crate::met::MetFile::is_date_complete_for_default_processing(conn, config, date)
                     .await?
                     .is_complete()
-                    {
-                        warn!("Missing met data for date {}, setting standard site job table row for site {site_id} to 'MissingMet'", date);
-                        Self::set_state_by_id(conn, StdSiteJobState::MissingMet, rid).await
+                {
+                    warn!("Missing met data for date {}, setting standard site job table row for site {site_id} to 'MissingMet'", date);
+                    Self::set_state_by_id(conn, StdSiteJobState::MissingMet, rid).await
                             .with_context(|| format!("Error occurred while setting row {rid} in the standard site jobs table to state 'MissingMet'"))?;
-                    }
                 }
             }
         }
@@ -309,18 +381,20 @@ impl StdSiteJob {
         Ok(())
     }
 
-    async fn get_extant_dates_by_proc(
+    async fn get_extant_dates_and_proc(
         conn: &mut MySqlConn,
         site_id: &str,
-    ) -> anyhow::Result<HashSet<(Option<ProcCfgKey>, NaiveDate)>> {
+        proc_key: &ProcCfgKey,
+    ) -> anyhow::Result<HashSet<NaiveDate>> {
         let row_iter = sqlx::query!(
-            "SELECT date,processing_key FROM v_StdSiteJobs WHERE site_id = ?",
+            "SELECT date FROM v_StdSiteJobs WHERE site_id = ? AND processing_key = ?",
             site_id,
+            proc_key
         )
         .fetch_all(&mut *conn)
         .await?
         .into_iter()
-        .map(|row| (row.processing_key.map(ProcCfgKey), row.date));
+        .map(|row| row.date);
 
         Ok(HashSet::from_iter(row_iter))
     }
@@ -338,15 +412,22 @@ impl StdSiteJob {
         config: &Config,
         first_date: NaiveDate,
         last_met_date: NaiveDate,
+        processing_key: &ProcCfgKey,
     ) -> Result<(), Vec<(String, anyhow::Error)>> {
         let site_ids = siteinfo::StdSite::get_site_ids(conn, None)
             .await
             .map_err(|e| vec![("all".to_string(), e)])?;
         let mut errors = Vec::new();
         for site_id in site_ids {
-            if let Err(e) =
-                Self::fill_missing_dates_for_site(conn, config, &site_id, first_date, last_met_date)
-                    .await
+            if let Err(e) = Self::fill_missing_dates_for_site(
+                conn,
+                config,
+                &site_id,
+                first_date,
+                last_met_date,
+                processing_key,
+            )
+            .await
             {
                 errors.push((site_id, e))
             }
@@ -1009,7 +1090,6 @@ impl StdSiteJob {
             // For each tarball, check if we have an entry in the database for this site/date yet
             let tarball = tarball.as_ref();
             let (site_id, proc_key, date) = info_from_std_tarball_name(config, tarball)?;
-            let proc_key = make_default_proc_key_none(config, proc_key, date)?;
 
             let existing_ssjob = Self::get_std_job_for_site_on_date(conn, &site_id, date).await?;
             if let Some(mut existing_ssjob) = existing_ssjob {
@@ -1020,7 +1100,7 @@ impl StdSiteJob {
                         &config.execution.std_site_job_queue,
                         site_id,
                         date,
-                        proc_key,
+                        &proc_key,
                         &all_jobs,
                     ) {
                         existing_ssjob
@@ -1048,7 +1128,7 @@ impl StdSiteJob {
                     conn,
                     &site_id,
                     date,
-                    proc_key,
+                    &proc_key,
                     StdSiteJobState::InProgress,
                     None,
                 )
@@ -1073,17 +1153,27 @@ impl StdSiteJob {
         std_site_queue: &str,
         site_id: String,
         date: NaiveDate,
-        processing_key: Option<&ProcCfgKey>,
+        processing_key: &ProcCfgKey,
         all_jobs: &'a [jobs::Job],
     ) -> Option<&'a jobs::Job> {
         let mut matching_jobs = all_jobs
             .iter()
             .filter(|&j| {
+                let job_proc_key = if let JobProcKey::Specified(k) = &j.processing_key {
+                    k
+                } else {
+                    // In principle, from v3 on, only ad hoc jobs should use the default processing key, and those
+                    // won't be the jobs we want. There may be some issues in the v2 -> v3 transition where standard
+                    // site jobs were submitted before and so do have a null/default processing config, but since this
+                    // function is currently only called when trying to add existing tarball to the database, that
+                    // shouldn't cause a problem.
+                    return false;
+                };
                 j.site_id.contains(&site_id)
                     && date >= j.start_date
                     && date < j.end_date
                     && j.complete_time.is_some()
-                    && j.processing_key.as_ref() == processing_key
+                    && job_proc_key == processing_key
                     && j.queue.as_str() == std_site_queue
             })
             .collect_vec();
@@ -1240,20 +1330,6 @@ fn proc_cfg_from_tarball_path<'cfg>(
     Err(anyhow!("No processing configuration found with a tarball directory matching {} (original path = {})", canon_path.display(), p.display()))
 }
 
-fn make_default_proc_key_none<'key>(
-    config: &crate::config::Config,
-    proc_key: &'key ProcCfgKey,
-    date: NaiveDate,
-) -> anyhow::Result<Option<&'key ProcCfgKey>> {
-    let default_proc_key = &config.get_defaults_for_date(date)?.processing_configuration;
-    let proc_key = if proc_key == default_proc_key {
-        None
-    } else {
-        Some(proc_key)
-    };
-    Ok(proc_key)
-}
-
 pub struct AddStdJobSummary {
     pub job_id: i32,
     pub sites_included: Vec<String>,
@@ -1267,7 +1343,7 @@ struct QStdSiteJob {
     site_id: Option<String>,
     site_type: Option<String>,
     date: NaiveDate,
-    processing_key: Option<String>,
+    processing_key: String,
     state: i8,
     job: Option<i32>,
     tarfile: Option<String>,

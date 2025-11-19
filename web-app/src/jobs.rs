@@ -93,6 +93,7 @@ impl From<Job> for DisplayJob {
             .unwrap_or_else(|| "None".to_string());
         let proc_cfg_key = job
             .processing_key
+            .into_opt()
             .map(|k| k.0)
             .unwrap_or_else(|| "Default".to_string());
         let save_tarball = job.save_tarball.to_string();

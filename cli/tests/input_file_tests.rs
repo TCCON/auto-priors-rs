@@ -876,7 +876,7 @@ impl ExpectedJob {
         }
 
         if let Some(alt_re_key) = self.alt_reanalysis {
-            if Some(alt_re_key) != db_job.processing_key.as_deref() {
+            if Some(alt_re_key) != db_job.processing_key.as_opt_deref() {
                 log::error!("processing key (from alternate reanalysis request) did not match");
                 return false;
             }

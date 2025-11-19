@@ -347,6 +347,51 @@ impl FromStr for MapFmt {
     }
 }
 
+/// Represents the processing key associated with a priors job.
+/// This is used instead of an `Option<ProcCfgKey>` to clearly
+/// differentiate between a lack of specified processing key
+/// indicating that the default for that date should be used,
+/// and the lack indicating that what processing key to be
+/// used is unknown. If the key may be unknown, it should
+/// be represented by an `Option<JobProcKey>`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum JobProcKey {
+    Default,
+    Specified(ProcCfgKey),
+}
+
+impl JobProcKey {
+    pub fn into_opt(self) -> Option<ProcCfgKey> {
+        match self {
+            JobProcKey::Default => None,
+            JobProcKey::Specified(proc_cfg_key) => Some(proc_cfg_key),
+        }
+    }
+
+    pub fn as_opt_ref(&self) -> Option<&ProcCfgKey> {
+        match self {
+            JobProcKey::Default => None,
+            JobProcKey::Specified(proc_cfg_key) => Some(proc_cfg_key),
+        }
+    }
+
+    pub fn as_opt_deref(&self) -> Option<&str> {
+        match self {
+            JobProcKey::Default => None,
+            JobProcKey::Specified(proc_cfg_key) => Some(&proc_cfg_key),
+        }
+    }
+}
+
+impl From<Option<String>> for JobProcKey {
+    fn from(value: Option<String>) -> Self {
+        match value {
+            None => Self::Default,
+            Some(key) => Self::Specified(ProcCfgKey(key)),
+        }
+    }
+}
+
 /// An intermediate job representation that maps directly to the MySQL table.
 ///
 /// External crates should interact with the [`Job`] struct, and that should
@@ -419,7 +464,7 @@ impl TryFrom<Job> for QJob {
             delete_time: j.delete_time,
             priority: j.priority,
             queue: j.queue,
-            processing_key: j.processing_key.map(|k| k.0),
+            processing_key: j.processing_key.into_opt().map(|k| k.0),
             save_dir: save_dir,
             save_tarball: j.save_tarball as i8,
             mod_fmt: j.mod_fmt.to_string(),
@@ -514,7 +559,7 @@ impl<'j> Display for VerboseDisplayJob<'j> {
         writeln!(
             f,
             "  Processing = {}",
-            self.job.processing_key.as_deref().unwrap_or("DEFAULT"),
+            self.job.processing_key.as_opt_deref().unwrap_or("DEFAULT"),
         )?;
         Ok(())
     }
@@ -562,7 +607,7 @@ pub struct Job {
 
     /// The key from the configuration file corresponding to which processing configuration to use for this
     /// job. If `None`, that indicates that the default met for the given dates should be used.
-    pub processing_key: Option<ProcCfgKey>,
+    pub processing_key: JobProcKey,
 
     /// Where to save the output. This will be the output directory for ALL jobs, a particular job
     /// will have a subdirectory or tarfile under here.
@@ -658,7 +703,7 @@ impl TryFrom<QJob> for Job {
             delete_time: q.delete_time,
             priority: q.priority,
             queue: q.queue,
-            processing_key: q.processing_key.map(|k| k.into()),
+            processing_key: JobProcKey::from(q.processing_key),
             root_save_dir: PathBuf::from(q.save_dir),
             save_tarball: TarChoice::try_from(q.save_tarball)?,
             mod_fmt: ModFmt::from_str(&q.mod_fmt)?,
@@ -807,7 +852,7 @@ impl Job {
         &self,
         config: &'cfg Config,
     ) -> anyhow::Result<Vec<&'cfg str>> {
-        if let Some(proc_cfg_key) = &self.processing_key {
+        if let JobProcKey::Specified(proc_cfg_key) = &self.processing_key {
             let subdir = config.get_proc_cfg_ginput_output_subdirs(proc_cfg_key)
                 .with_context(|| anyhow!("Error occurred while getting subdirectory for processing config '{proc_cfg_key}' requested for job {}", self.job_id))?;
             Ok(vec![subdir])
@@ -2480,7 +2525,7 @@ fn get_runner_for_date(
     job: &Job,
     config: &Config,
 ) -> anyhow::Result<Box<dyn InnerGinputRunner>> {
-    let proc_cfg_key = if let Some(key) = &job.processing_key {
+    let proc_cfg_key = if let JobProcKey::Specified(key) = &job.processing_key {
         key
     } else {
         let defaults = config.get_defaults_for_date(date)
@@ -2516,7 +2561,7 @@ async fn setup_ginput_args_for_date(
     config: &Config,
 ) -> anyhow::Result<GinputAutomationArgs> {
     debug!("Job {}: Getting met key for job", job.job_id);
-    let proc_cfg_key = if let Some(k) = &job.processing_key {
+    let proc_cfg_key = if let JobProcKey::Specified(k) = &job.processing_key {
         k
     } else {
         let defaults = config
