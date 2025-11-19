@@ -724,6 +724,65 @@ impl Config {
         }
     }
 
+    /// Return the first date for which any processing configurations are set to generate
+    /// automatically. If no automatic processing configurations exist, returns an error.
+    pub fn get_first_date_for_automatic_processing(&self) -> anyhow::Result<NaiveDate> {
+        let start = self
+            .processing_configuration
+            .iter()
+            .filter_map(|(_, pc)| {
+                if pc.generate_automatically {
+                    Some(pc.auto_start_date())
+                } else {
+                    None
+                }
+            })
+            .min();
+        start.ok_or_else(|| anyhow!("No automatic processing configurations defined"))
+    }
+
+    /// Return the last date for which any processing configurations are set to generate
+    /// automatically. This will be `None` if at least one processing configuration is
+    /// open-ended. If no automatic processing configurations exist, returns an error.
+    pub fn get_last_date_for_automatic_processing(&self) -> anyhow::Result<Option<NaiveDate>> {
+        let end = self
+            .processing_configuration
+            .iter()
+            .filter_map(|(_, pc)| {
+                if pc.generate_automatically {
+                    Some(pc.auto_end_date())
+                } else {
+                    None
+                }
+            })
+            .fold(None, |opt_max, date| {
+                if let Some(max) = opt_max {
+                    Some(crate::utils::later_opt_date(max, date))
+                } else {
+                    None
+                }
+            });
+
+        // The outer option indicates if we found at least one automatic config. Turn that
+        // into an error if we've found none.
+        end.ok_or_else(|| anyhow!("No automatic processing configurations defined"))
+    }
+
+    /// Return the list of processing configurations that must be generated
+    /// automatically for a given date.
+    pub fn get_auto_proc_cfgs_for_date(&self, date: NaiveDate) -> Vec<&ProcCfgKey> {
+        self.processing_configuration
+            .iter()
+            .filter_map(|(key, proc_cfg)| {
+                if proc_cfg.auto_for_date(date) {
+                    Some(key)
+                } else {
+                    None
+                }
+            })
+            .collect_vec()
+    }
+
     /// Get the information about a job queue by name
     ///
     /// If the queue does not have a section defined in the configuration, then the

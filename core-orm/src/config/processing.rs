@@ -92,11 +92,28 @@ impl ProcessingConfig {
         }
     }
 
+    /// Returns `true` if this configuration CAN be run for the given date.
+    /// To check if it should be run automatically, use [`ProcessingConfig::auto_for_date`]
     pub(super) fn contains_date(&self, date: NaiveDate) -> bool {
         if let Some(end) = self.end_date {
             date >= self.start_date && date < end
         } else {
             date >= self.start_date
+        }
+    }
+
+    /// Returns `true` if this configuration should be run automatically for
+    /// the given date. If the configuration has automatic generation disabled,
+    /// this will always return `false`.
+    pub(super) fn auto_for_date(&self, date: NaiveDate) -> bool {
+        if !self.generate_automatically {
+            return false;
+        }
+
+        if let Some(end) = self.auto_end_date() {
+            date >= self.auto_start_date() && date < end
+        } else {
+            date >= self.auto_start_date()
         }
     }
 

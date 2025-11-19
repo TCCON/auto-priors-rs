@@ -4,6 +4,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use anyhow::anyhow;
 use anyhow::Context;
 use chrono::{Duration, NaiveDate};
 use futures::TryStreamExt;
@@ -16,6 +17,7 @@ use sqlx::{self, Connection, FromRow, Type};
 use tabled::Tabled;
 
 use crate::config::Config;
+use crate::config::ProcCfgKey;
 use crate::jobs;
 use crate::met;
 use crate::siteinfo::SiteInfo;
@@ -84,6 +86,10 @@ pub struct StdSiteJob {
     pub site_id: String,
     /// The date for which this job produces priors
     pub date: NaiveDate,
+    /// Which processing configuration to use for this standard site job.
+    /// If `None`, then use the default that a user request would for this
+    /// date.
+    pub processing_key: Option<ProcCfgKey>,
     /// The state of this job, distinct from the regular Job state
     pub state: StdSiteJobState,
     /// Whether this job is for a TCCON or EM27 site
@@ -118,6 +124,7 @@ impl From<QStdSiteJob> for StdSiteJob {
             site_id: site_id,
             site_type: site_type,
             date: query_job.date,
+            processing_key: query_job.processing_key.map(|s| ProcCfgKey(s)),
             state: query_job.state.into(),
             job: query_job.job,
             tarfile: query_job.tarfile.map(|s| PathBuf::from(s)),
@@ -132,6 +139,9 @@ impl From<QStdSiteJob> for StdSiteJob {
 //   Entries with state == JobNeeded are grouped by date and jobs submitted for them
 //   Jobs from lines with state == InProgress are checked for when they are done, files are moved into std site tarballs, and the state changed to Complete
 
+/// Fill in any missing rows in the site job table. Missing rows are those representing a
+/// combination of site, date, and processing configuration expected but not found.
+///
 impl StdSiteJob {
     pub async fn update_std_site_job_table(
         conn: &mut MySqlConn,
@@ -181,14 +191,16 @@ impl StdSiteJob {
         conn: &mut MySqlConn,
         site_id: &str,
         date: NaiveDate,
+        processing_key: Option<&ProcCfgKey>,
         state: StdSiteJobState,
         job: Option<i32>,
     ) -> anyhow::Result<i32> {
         let site_prim_key = siteinfo::StdSite::site_id_to_primary_key(conn, site_id).await?;
         let res = sqlx::query!(
-            "INSERT INTO StdSiteJobs (site, date, state, job) VALUES (?, ?, ?, ?)",
+            "INSERT INTO StdSiteJobs (site, date, processing_key, state, job) VALUES (?, ?, ?, ?, ?)",
             site_prim_key,
             date,
+            processing_key,
             state,
             job
         )
@@ -208,13 +220,7 @@ impl StdSiteJob {
         last_met_date: NaiveDate,
     ) -> anyhow::Result<()> {
         // First we get dates for which there is already an entry (in any state) for this site in the table
-        let extant_site_dates: HashSet<_> =
-            sqlx::query!("SELECT date FROM v_StdSiteJobs WHERE site_id = ?", site_id,)
-                .fetch_all(&mut *conn)
-                .await?
-                .into_iter()
-                .map(|r| r.date)
-                .collect();
+        let extant_site_dates_and_procs = Self::get_extant_dates_by_proc(conn, site_id).await?;
 
         // Now we get all the expected date for this site
         let locations = siteinfo::SiteInfo::get_site_locations(conn, site_id).await
@@ -261,35 +267,62 @@ impl StdSiteJob {
 
         let mut ndates = 0;
         for date in date_iter {
-            if !extant_site_dates.contains(&date) {
-                let rid = Self::add_std_site_job_row_from_args(
-                    conn,
-                    site_id,
-                    date,
-                    StdSiteJobState::JobNeeded,
-                    None,
-                )
-                .await?;
-                ndates += 1;
-                if ndates % 100 == 0 {
-                    // TODO: add a length hint method to DateIterator and use that to update this message with how many
-                    // there are to go.
-                    log::info!("Adding 'JobNeeded' entries ({ndates} complete so far)")
-                }
+            for proc_key in config.get_auto_proc_cfgs_for_date(date) {
+                // For the standard sites table, we represent the default processing as null.
+                // That's a hold over from the beginning of v2, where we assumed that we would
+                // only ever have one standard processing configuration for a given date.
+                let proc_key =
+                    make_default_proc_key_none(config, proc_key, date)?.map(|k| k.to_owned());
 
-                if !crate::met::MetFile::is_date_complete_for_default_processing(conn, config, date)
+                if !extant_site_dates_and_procs.contains(&(proc_key.clone(), date)) {
+                    let rid = Self::add_std_site_job_row_from_args(
+                        conn,
+                        site_id,
+                        date,
+                        proc_key.as_ref(),
+                        StdSiteJobState::JobNeeded,
+                        None,
+                    )
+                    .await?;
+                    ndates += 1;
+                    if ndates % 100 == 0 {
+                        // TODO: add a length hint method to DateIterator and use that to update this message with how many
+                        // there are to go.
+                        log::info!("Adding 'JobNeeded' entries ({ndates} complete so far)")
+                    }
+
+                    if !crate::met::MetFile::is_date_complete_for_default_processing(
+                        conn, config, date,
+                    )
                     .await?
                     .is_complete()
-                {
-                    warn!("Missing met data for date {}, setting standard site job table row for site {site_id} to 'MissingMet'", date);
-                    Self::set_state_by_id(conn, StdSiteJobState::MissingMet, rid).await
+                    {
+                        warn!("Missing met data for date {}, setting standard site job table row for site {site_id} to 'MissingMet'", date);
+                        Self::set_state_by_id(conn, StdSiteJobState::MissingMet, rid).await
                             .with_context(|| format!("Error occurred while setting row {rid} in the standard site jobs table to state 'MissingMet'"))?;
+                    }
                 }
-            };
+            }
         }
 
         info!("{ndates} row in StdSiteJobs added for site {site_id}");
         Ok(())
+    }
+
+    async fn get_extant_dates_by_proc(
+        conn: &mut MySqlConn,
+        site_id: &str,
+    ) -> anyhow::Result<HashSet<(Option<ProcCfgKey>, NaiveDate)>> {
+        let row_iter = sqlx::query!(
+            "SELECT date,processing_key FROM v_StdSiteJobs WHERE site_id = ?",
+            site_id,
+        )
+        .fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|row| (row.processing_key.map(ProcCfgKey), row.date));
+
+        Ok(HashSet::from_iter(row_iter))
     }
 
     /// Fill in date & site combinations missing from the standard site jobs table.
@@ -975,7 +1008,8 @@ impl StdSiteJob {
         for tarball in std_site_tarballs {
             // For each tarball, check if we have an entry in the database for this site/date yet
             let tarball = tarball.as_ref();
-            let (site_id, date) = info_from_std_tarball_name(tarball)?;
+            let (site_id, proc_key, date) = info_from_std_tarball_name(config, tarball)?;
+            let proc_key = make_default_proc_key_none(config, proc_key, date)?;
 
             let existing_ssjob = Self::get_std_job_for_site_on_date(conn, &site_id, date).await?;
             if let Some(mut existing_ssjob) = existing_ssjob {
@@ -986,6 +1020,7 @@ impl StdSiteJob {
                         &config.execution.std_site_job_queue,
                         site_id,
                         date,
+                        proc_key,
                         &all_jobs,
                     ) {
                         existing_ssjob
@@ -1013,6 +1048,7 @@ impl StdSiteJob {
                     conn,
                     &site_id,
                     date,
+                    proc_key,
                     StdSiteJobState::InProgress,
                     None,
                 )
@@ -1037,6 +1073,7 @@ impl StdSiteJob {
         std_site_queue: &str,
         site_id: String,
         date: NaiveDate,
+        processing_key: Option<&ProcCfgKey>,
         all_jobs: &'a [jobs::Job],
     ) -> Option<&'a jobs::Job> {
         let mut matching_jobs = all_jobs
@@ -1046,6 +1083,7 @@ impl StdSiteJob {
                     && date >= j.start_date
                     && date < j.end_date
                     && j.complete_time.is_some()
+                    && j.processing_key.as_ref() == processing_key
                     && j.queue.as_str() == std_site_queue
             })
             .collect_vec();
@@ -1130,7 +1168,15 @@ impl StdSiteJob {
 /// Will error if:
 /// - The filename does not follow the pattern "XX_ggg_inputs_YYYYMMDD.tgz"
 /// - Could not get a filename from the given path.
-pub fn info_from_std_tarball_name(tarball: &Path) -> anyhow::Result<(String, NaiveDate)> {
+pub fn info_from_std_tarball_name<'cfg>(
+    config: &'cfg crate::config::Config,
+    tarball: &Path,
+) -> anyhow::Result<(String, &'cfg ProcCfgKey, NaiveDate)> {
+    // First we need to find which processing configuration this is for.
+    // We have to assume it's under the correct path for now; in the future,
+    // we might add an override.
+    let proc_key = proc_cfg_from_tarball_path(config, tarball)?;
+
     let filename = tarball
         .file_stem()
         .ok_or_else(|| {
@@ -1166,7 +1212,46 @@ pub fn info_from_std_tarball_name(tarball: &Path) -> anyhow::Result<(String, Nai
     let date = NaiveDate::parse_from_str(datestr, "%Y%m%d")
         .with_context(|| format!("Date string ({datestr}) in {filename} could not be parsed."))?;
 
-    Ok((site_id, date))
+    Ok((site_id, proc_key, date))
+}
+
+fn proc_cfg_from_tarball_path<'cfg>(
+    config: &'cfg crate::config::Config,
+    p: &Path,
+) -> anyhow::Result<&'cfg ProcCfgKey> {
+    let canon_path = p.canonicalize().with_context(|| {
+        anyhow!(
+            "Error occurred getting canonical path for existing tarball, {}",
+            p.display()
+        )
+    })?;
+
+    for (key, cfg) in config.processing_configuration.iter() {
+        if let Some(pc_path) = &cfg.auto_tarball_dir {
+            let canon_pc_path = pc_path.canonicalize().with_context(|| {
+                anyhow!("Error occurred getting canonical tarball path for processing config {key}")
+            })?;
+            if canon_path.starts_with(canon_pc_path) {
+                return Ok(key);
+            }
+        }
+    }
+
+    Err(anyhow!("No processing configuration found with a tarball directory matching {} (original path = {})", canon_path.display(), p.display()))
+}
+
+fn make_default_proc_key_none<'key>(
+    config: &crate::config::Config,
+    proc_key: &'key ProcCfgKey,
+    date: NaiveDate,
+) -> anyhow::Result<Option<&'key ProcCfgKey>> {
+    let default_proc_key = &config.get_defaults_for_date(date)?.processing_configuration;
+    let proc_key = if proc_key == default_proc_key {
+        None
+    } else {
+        Some(proc_key)
+    };
+    Ok(proc_key)
 }
 
 pub struct AddStdJobSummary {
@@ -1182,6 +1267,7 @@ struct QStdSiteJob {
     site_id: Option<String>,
     site_type: Option<String>,
     date: NaiveDate,
+    processing_key: Option<String>,
     state: i8,
     job: Option<i32>,
     tarfile: Option<String>,
@@ -1195,6 +1281,7 @@ pub(crate) struct ExportStdSiteJob {
     pub(crate) id: i32,
     pub(crate) site: i32,
     pub(crate) date: NaiveDate,
+    pub(crate) processing_key: Option<String>,
     pub(crate) state: i8,
     pub(crate) job: Option<i32>,
     pub(crate) tarfile: Option<String>,
