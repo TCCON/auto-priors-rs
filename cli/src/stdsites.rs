@@ -45,6 +45,9 @@ pub enum StdSiteJobActions {
 
     /// Make tarballs of special run jobs submitted using submit-special-run
     TarSpecialRun(SpecialRunTarCli),
+
+    /// Update the processing keys in the standard sites tables
+    UpdateProcKey(UpdateProcessingKeyCli),
 }
 
 /// Update the standard site jobs table: add rows for new site-days possible
@@ -225,6 +228,103 @@ pub async fn print_std_jobs_summary(
         println!("{}", orm::utils::to_std_table(summaries));
     }
 
+    Ok(())
+}
+
+// ---------- //
+// PROCESSING //
+// ---------- //
+
+/// Update the standard site jobs table to replace the processing key
+/// assigned to certain rows. This is usually intended to handle the
+/// migration where processing keys were added to the table.
+#[derive(Debug, Args)]
+pub struct UpdateProcessingKeyCli {
+    /// The new processing key to assign to the rows. If not given,
+    /// then the appropriate default from the config will be used
+    /// for each date.
+    #[clap(long)]
+    new_key: Option<ProcCfgKey>,
+
+    /// If set, only rows that currently have this as their processing key
+    /// will be updated. The default is set to the default assigned during
+    /// the v3 database migration. To ignore the previous key value, pass
+    /// the --any-key flag.
+    #[clap(long, group = "filter_key", default_value_t = ProcCfgKey("PLACEHOLDER".to_string()))]
+    old_key: ProcCfgKey,
+
+    /// Set this flag to ignore the currently assigned key when filtering
+    /// for which rows to update.
+    #[clap(long, group = "filter_key")]
+    any_key: bool,
+
+    /// If given, only change rows for dates on or after this one. Provide the
+    /// date in YYYY-MM-DD format.
+    #[clap(long)]
+    first_date: Option<NaiveDate>,
+
+    /// If given, only change rows for dates before this one. Provide the
+    /// date in YYYY-MM-DD format.
+    #[clap(long)]
+    last_date: Option<NaiveDate>,
+
+    /// If given, only change rows for this site.
+    #[clap(long)]
+    site_id: Option<String>,
+}
+
+impl UpdateProcessingKeyCli {
+    fn old_key(&self) -> Option<&ProcCfgKey> {
+        if self.any_key {
+            None
+        } else {
+            Some(&self.old_key)
+        }
+    }
+}
+
+pub async fn update_processing_key_cli(
+    conn: &mut MySqlConn,
+    config: &orm::config::Config,
+    args: UpdateProcessingKeyCli,
+) -> anyhow::Result<()> {
+    update_processing_key(
+        conn,
+        config,
+        args.new_key.as_ref(),
+        args.old_key(),
+        args.first_date,
+        args.last_date,
+        args.site_id.as_deref(),
+    )
+    .await
+}
+
+pub async fn update_processing_key(
+    conn: &mut MySqlConn,
+    config: &orm::config::Config,
+    new_key: Option<&ProcCfgKey>,
+    old_key: Option<&ProcCfgKey>,
+    first_date: Option<NaiveDate>,
+    last_date: Option<NaiveDate>,
+    site_id: Option<&str>,
+) -> anyhow::Result<()> {
+    if let Some(new_key) = new_key {
+        orm::stdsitejobs::StdSiteJob::update_processing_key(
+            conn, new_key, old_key, site_id, first_date, last_date,
+        )
+        .await?;
+    } else {
+        for def in config.default_options.iter() {
+            let proc_key = &def.processing_configuration;
+            let start = orm::utils::later_opt_date(def.start_date, first_date);
+            let end = orm::utils::earlier_opt_date(def.end_date, last_date);
+            orm::stdsitejobs::StdSiteJob::update_processing_key(
+                conn, proc_key, old_key, site_id, start, end,
+            )
+            .await?;
+        }
+    }
     Ok(())
 }
 

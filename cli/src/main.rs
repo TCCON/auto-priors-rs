@@ -363,6 +363,14 @@ async fn main() -> anyhow::Result<()> {
             stdsites::use_existing_tars_cli(&mut conn, &loaded_config, subargs).await?;
         }
 
+        Commands::SiteJobs(StdSiteJobCli {
+            command: StdSiteJobActions::UpdateProcKey(subargs),
+        }) => {
+            let mut conn = db.get_connection().await?;
+            let loaded_config = load_config()?;
+            stdsites::update_processing_key_cli(&mut conn, &loaded_config, subargs).await?;
+        }
+
         Commands::SiteInfo(StdSiteCli {
             command: StdSiteActions::Json(subargs),
         }) => {

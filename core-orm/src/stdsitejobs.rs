@@ -1069,6 +1069,60 @@ impl StdSiteJob {
         Ok(())
     }
 
+    /// Update the processing key assigned to one or more rows in the standard sites table to be `new_key`.
+    /// The other parameters allow filtering: `old_key` will limit to rows that have `old_key` as their
+    /// processing key; `site_id` will limit to rows for the given site; `first_date` and `last_date`
+    /// will limit to rows within that date range.
+    pub async fn update_processing_key(
+        conn: &mut MySqlConn,
+        new_key: &ProcCfgKey,
+        old_key: Option<&ProcCfgKey>,
+        site_id: Option<&str>,
+        first_date: Option<NaiveDate>,
+        last_date: Option<NaiveDate>,
+    ) -> anyhow::Result<()> {
+        // Assume that setting the first and last dates sufficiently far into the past and future is the
+        // same as leaving them unbound
+        let first_date = first_date.unwrap_or(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+        let last_date =
+            last_date.unwrap_or_else(|| Utc::now().date_naive() + chrono::Days::new(30));
+
+        // Yes, I could have used a query builder, but I like the compile-time checked queries too much ;)
+        let query = match (old_key, site_id) {
+            (None, None) => sqlx::query!(
+                "UPDATE v_StdSiteJobs SET processing_key = ? WHERE date >= ? AND date < ?",
+                new_key,
+                first_date,
+                last_date
+            ),
+            (None, Some(sid)) => sqlx::query!(
+                "UPDATE v_StdSiteJobs SET processing_key = ? WHERE date >= ? AND date < ? AND site_id = ?",
+                new_key,
+                first_date,
+                last_date,
+                sid
+            ),
+            (Some(key), None) => sqlx::query!(
+                "UPDATE v_StdSiteJobs SET processing_key = ? WHERE date >= ? AND date < ? AND processing_key = ?",
+                new_key,
+                first_date,
+                last_date,
+                key
+            ),
+            (Some(key), Some(sid)) => sqlx::query!(
+                "UPDATE v_StdSiteJobs SET processing_key = ? WHERE date >= ? AND date < ? AND site_id = ? AND processing_key = ?",
+                new_key,
+                first_date,
+                last_date,
+                sid,
+                key
+            ),
+        };
+
+        query.execute(conn).await?;
+        Ok(())
+    }
+
     /// Add/update entries in the standard site jobs table for the given tarballs.
     ///
     /// This will only add entries for tarballs that do not have a corresponding entry or update entries
