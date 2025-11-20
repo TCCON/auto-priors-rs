@@ -70,7 +70,7 @@ pub(crate) mod get {
         Extension,
     };
     use chrono::NaiveDate;
-    use orm::{auth::User, jobs::Job, stdsitejobs::StdSiteJob};
+    use orm::{auth::User, config::ProcCfgKey, jobs::Job, stdsitejobs::StdSiteJob};
 
     use crate::{
         api::download::{user_can_access_job, TgzFileStream},
@@ -166,7 +166,7 @@ pub(crate) mod get {
     ///   that the job has not been finished yet.
     #[utoipa::path(
         get,
-        path = "/api/v1/download/stdsite/{site_id}/{date}",
+        path = "/api/v1/download/stdsite/{site_id}/{date}/{proc_key}",
         responses(
             (status = StatusCode::OK, description = "Download request succeeded", body = TgzFileStream),
             (status = StatusCode::BAD_REQUEST, description = "The site and/or date was not in the database"),
@@ -174,20 +174,21 @@ pub(crate) mod get {
         ),
         params(
             ("site_id" = String, Path, description = "The two-character site ID of the site for which to download data"),
-            ("date" = ApiNaiveDate, Path, description = "The date for which to download data, in YYYY-MM-DD format")
+            ("date" = ApiNaiveDate, Path, description = "The date for which to download data, in YYYY-MM-DD format"),
+            ("proc_key" = String, Path, description = "The processing configuration for which to download data")
         ),
         tag = "download"
     )]
     pub(crate) async fn download_std_site_output(
         State(state): State<Arc<AppState>>,
-        Path((site_id, date)): Path<(String, NaiveDate)>,
+        Path((site_id, date, proc_key)): Path<(String, NaiveDate, ProcCfgKey)>,
     ) -> Result<([(HeaderName, String); 2], Body), StatusCode> {
         let mut conn = server_error(state.pool.get_connection().await)?;
 
         // Unlike the user-submitted jobs, we allow anyone to download the standard site files
         // since the site locations are well-known.
         let site_job = server_error(
-            StdSiteJob::get_std_job_for_site_on_date(&mut conn, &site_id, date).await,
+            StdSiteJob::get_std_job_for_site_on_date(&mut conn, &site_id, date, &proc_key).await,
         )?
         .ok_or(StatusCode::BAD_REQUEST)?;
 

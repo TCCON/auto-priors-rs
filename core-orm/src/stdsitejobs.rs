@@ -6,8 +6,8 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use anyhow::Context;
+use chrono::Utc;
 use chrono::{Duration, NaiveDate};
-use futures::TryStreamExt;
 use itertools::Itertools;
 use log::debug;
 use log::{info, warn};
@@ -146,7 +146,9 @@ impl From<QStdSiteJob> for StdSiteJob {
 /// missing.
 ///
 /// # See also:
-/// - [`fill_missing_dates_for_site`] if you need to fill in rows for only one site.
+/// - [`Self::fill_missing_dates_for_site_all_proc_configs`] if you need to fill in rows for only one site.
+/// - [`Self::fill_missing_dates_for_site`] if you need to fill in rows for only one site for a single
+///   processing configuration.
 impl StdSiteJob {
     pub async fn update_std_site_job_table(
         conn: &mut MySqlConn,
@@ -192,7 +194,9 @@ impl StdSiteJob {
     }
 
     /// Helper functino that returns the range of dates that a given processing
-    /// configuration can have priors generated for.
+    /// configuration can have priors generated for. The returned value will be
+    /// `Some(_)` as long as there is at least one day of complete met data
+    /// required, otherwise it will be `None`.
     async fn get_date_range_for_proc_cfg(
         conn: &mut MySqlConn,
         config: &Config,
@@ -248,40 +252,40 @@ impl StdSiteJob {
         return Ok(rid);
     }
 
+    /// Update the table of standard site jobs by adding any missing
+    /// rows for a single site for all the automatic processing configurations.
+    /// `first_date` and `last_date` can be used to limit the date range
+    /// that rows are added. If either is `None`, it will be taken from
+    /// the dates for which met data is available.
     pub async fn fill_missing_dates_for_site_all_proc_configs(
         conn: &mut MySqlConn,
         config: &Config,
         site_id: &str,
-        first_date: NaiveDate,
+        first_date: Option<NaiveDate>,
         last_date: Option<NaiveDate>,
     ) -> anyhow::Result<()> {
         for proc_key in config.get_auto_proc_cfgs() {
-            let proc_cfg = config.processing_configuration.get(proc_key)
-                .ok_or_else(|| anyhow!("get_auto_proc_cfgs returned a key to a processing configuration not in the config"))?;
-            let met_cfgs = &proc_cfg
-                .get_met_configs(config)
-                .context("Error occurred while adding new site job rows")?;
-            let last_met_date = if let Some(d) = crate::met::MetFile::get_first_or_last_complete_date_for_config_set(
-                conn, &met_cfgs, false).await
-            .context("Error occurred while trying to identify the last complete day for default meteorologies")? {
-                d
+            let opt_dates = Self::get_date_range_for_proc_cfg(conn, config, proc_key).await?;
+            let (first_met_date, last_met_date) = if let Some(dates) = opt_dates {
+                dates
             } else {
-                warn!("No available met data, nothing to be done to update the standard sites table");
-                return Ok(());
+                warn!(
+                    "No available met data for processing key '{proc_key}', nothing to be done to update the standard sites table"
+                );
+                continue;
             };
 
-            let last_met_date = if let Some(end) = last_date {
-                last_met_date.min(end)
-            } else {
-                last_met_date
-            };
+            // Ensure that, if the input requested a specific date range, we limit to the range of actually available
+            // met data.
+            let first_add_date = first_date.unwrap_or(first_met_date).max(first_met_date);
+            let last_add_date = last_date.unwrap_or(last_met_date).min(last_met_date);
 
             StdSiteJob::fill_missing_dates_for_site(
                 conn,
                 config,
                 site_id,
-                first_date,
-                last_met_date,
+                first_add_date,
+                last_add_date,
                 proc_key,
             )
             .await?;
@@ -291,8 +295,9 @@ impl StdSiteJob {
     }
 
     /// Fill in missing rows for a given site for a given processing configuration.
-    /// Note that if you wish to
-    pub async fn fill_missing_dates_for_site(
+    /// Note that if you are looking for the equivalent of [`Self::update_std_site_job_table`]
+    /// for a single site, use [`Self::fill_missing_dates_for_site_all_proc_configs`].
+    async fn fill_missing_dates_for_site(
         conn: &mut MySqlConn,
         config: &Config,
         site_id: &str,
@@ -381,6 +386,9 @@ impl StdSiteJob {
         Ok(())
     }
 
+    /// Helper function that returns a set of dates that are already
+    /// in the standard site jobs table for a specific site and processing
+    /// configuration.
     async fn get_extant_dates_and_proc(
         conn: &mut MySqlConn,
         site_id: &str,
@@ -407,7 +415,9 @@ impl StdSiteJob {
     ///
     /// Note that this will try all sites, even if an error occurs while processing one. If any site errors, the returned `Err`
     /// will contain the individual error messages from each site.
-    pub async fn fill_missing_dates_for_all_sites(
+    ///
+    /// Currently, this is an inner function for the main table update driver only.
+    async fn fill_missing_dates_for_all_sites(
         conn: &mut MySqlConn,
         config: &Config,
         first_date: NaiveDate,
@@ -442,7 +452,7 @@ impl StdSiteJob {
 
     /// Reset any rows flagged for regeneration
     ///
-    /// This will run [`clear_output_for_regen`] on each row in the standard site jobs table
+    /// This will run [`Self::clear_output_for_regen`] on each row in the standard site jobs table
     /// with state equal to "RegenNeeded". That will delete the output tarfile associated with
     /// that job (if it exists), set the state to "JobNeeded", and clear the job ID associated
     /// with this row.
@@ -502,26 +512,27 @@ impl StdSiteJob {
         conn: &mut MySqlConn,
         config: &Config,
     ) -> anyhow::Result<()> {
-        // First identify all the unique days flagged as missing meteorology
+        // First identify all the unique date/processing combinations flagged as missing meteorology
         let dates_missing_met = sqlx::query!(
-            "SELECT DISTINCT(date) as udate FROM StdSiteJobs WHERE state = ?",
+            "SELECT DISTINCT date as udate, processing_key as upk FROM StdSiteJobs WHERE state = ?",
             StdSiteJobState::MissingMet
         )
         .fetch_all(&mut *conn)
         .await?
-        .iter()
-        .map(|r| r.udate)
+        .into_iter()
+        .map(|r| (r.udate, ProcCfgKey(r.upk)))
         .collect_vec();
 
-        for date in dates_missing_met {
-            if met::MetFile::is_date_complete_for_default_processing(conn, config, date)
-                .await?
-                .is_complete()
-            {
+        for (date, proc_key) in dates_missing_met {
+            let day_state =
+                met::MetFile::is_date_complete_for_processing_config(conn, config, date, &proc_key)
+                    .await?;
+            if day_state.is_complete() {
                 // Assumes that if a date was missing met, it can't have an output file, so we only need to set the state
                 let res = sqlx::query!(
-                    "UPDATE StdSiteJobs SET state = ? WHERE date = ? AND state = ?",
+                    "UPDATE StdSiteJobs SET state = ? WHERE date = ? AND processing_key = ? AND state = ?",
                     StdSiteJobState::JobNeeded,
+                    proc_key,
                     date,
                     StdSiteJobState::MissingMet
                 )
@@ -553,7 +564,7 @@ impl StdSiteJob {
         // can then calculate the EqL interpolators once for all the sites, rather than repeating that
         // work for every site.
         let query = sqlx::query!(
-            r#"SELECT date,GROUP_CONCAT(DISTINCT site_id SEPARATOR ",") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR ",") AS ids FROM v_StdSiteJobs WHERE state = ? GROUP BY date;"#,
+            r#"SELECT date,processing_key,GROUP_CONCAT(DISTINCT site_id SEPARATOR ",") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR ",") AS ids FROM v_StdSiteJobs WHERE state = ? GROUP BY date, processing_key;"#,
             StdSiteJobState::JobNeeded
         ).fetch_all(&mut *conn)
         .await?;
@@ -586,10 +597,15 @@ impl StdSiteJob {
                 .try_collect()
                 .with_context(|| format!("Could not convert standard site job table row IDs back from string for date {} (this shouldn't happen)", rec.date))?;
 
-            if !crate::met::MetFile::is_date_complete_for_default_processing(conn, config, rec.date)
-                .await?
-                .is_complete()
-            {
+            let date = rec.date;
+            let proc_key = ProcCfgKey(rec.processing_key);
+
+            let day_state = crate::met::MetFile::is_date_complete_for_processing_config(
+                conn, config, date, &proc_key,
+            )
+            .await?;
+
+            if !day_state.is_complete() {
                 warn!("Default meteorology not available for {}, setting these rows' states to MissingMet", rec.date);
                 for rid in rids {
                     Self::set_state_by_id(conn, StdSiteJobState::MissingMet, rid).await
@@ -607,7 +623,7 @@ impl StdSiteJob {
                 };
                 let mut trans = conn.begin().await?;
 
-                let job_id = jobs::Job::add_job_from_args(
+                let job_id = jobs::Job::add_job_from_args_with_options(
                     &mut trans,
                     sids.iter().map(|s| s.to_string()).collect_vec(),
                     rec.date,
@@ -623,6 +639,7 @@ impl StdSiteJob {
                     priority,
                     None,
                     Some(jobs::TarChoice::No),
+                    Some(&proc_key),
                 )
                 .await
                 .with_context(|| {
@@ -681,7 +698,9 @@ impl StdSiteJob {
                     anyhow::bail!("Job {jid} required for standard sites had an error");
                 }
                 jobs::JobState::Cleaned => {
-                    anyhow::bail!("Job {jid} required for standard sites was previous cleaned up");
+                    anyhow::bail!(
+                        "Job {jid} required for standard sites was previously cleaned up"
+                    );
                 }
             }
 
@@ -698,8 +717,23 @@ impl StdSiteJob {
                 "Making standard site tarball ({} format) for {} on {}",
                 row.output_structure, row.site_id, row.date
             );
+
+            // Consistent with how we treat unexpected job states above, we'll error if the configuration
+            // no longer defines the processing configuration used by this row. Perhaps this should be
+            // more forgiving in the future, or perhaps this is more evidence that the configuration should
+            // be partly moved into SQL tables.
+            let proc_cfg = config.processing_configuration.get(&row.processing_key)
+                .ok_or_else(|| anyhow!("Standard site job row {} uses a processing configuration missing from the config ('{}')", row.id, row.processing_key))?;
+            // This should be handled by the config validation, but we check to be sure.
+            let tar_root_dir = proc_cfg.auto_tarball_dir.as_deref().ok_or_else(|| {
+                anyhow!(
+                    "Processing configuration '{}' does not define a tarball output directory",
+                    row.processing_key
+                )
+            })?;
+
             let output_tarballs = row.output_structure.make_std_site_tarball(
-                &config.execution.std_sites_tar_output,
+                &tar_root_dir,
                 &row.site_id,
                 &job,
                 config,
@@ -746,71 +780,7 @@ impl StdSiteJob {
         Ok(())
     }
 
-    /// Return information about whether jobs for standard sites have been queued, completed, etc.
-    ///
-    /// # Parameters
-    /// * `conn` - a connection to the MySQL database containing the standard site jobs
-    /// * `start_date` - the earliest date to get information about
-    /// * `end_date` - the last date to get information about (inclusive). If `None`, then
-    ///   all information for days on or after `start_date` are included.
-    /// * `site_id` - if not `None`, then the two-letter site ID of a specific site to get information
-    ///   about.
-    ///
-    /// # Returns
-    /// * A `Vec` of `StdSiteJob` structures. These will include all rows from the `StdSiteJobs` table
-    ///   with a date after `start_date` and before `end_date` if the latter is given. If `site_id`
-    ///   is not `None`, then only rows for that site are included. Missing dates are not filled in,
-    ///   you have to assume that any site/date combinations missing from the vector have not been
-    ///   added to the `StdSiteJobs` table yet.
-    ///
-    /// # Errors
-    /// Returns an `Err` if the database query operation fails at any point.
-    pub async fn get_std_site_availability(
-        conn: &mut MySqlConn,
-        start_date: NaiveDate,
-        end_date: Option<NaiveDate>,
-        site_id: Option<&str>,
-    ) -> anyhow::Result<Vec<StdSiteJob>> {
-        let end_date = if let Some(e) = end_date {
-            e
-        } else {
-            // Because the standard site jobs *cannot* be prepared for future dates, setting the end
-            // date to a few days in the future is the same as not restricting the query on it.
-            chrono::Utc::now().naive_local().date() + chrono::Duration::days(10)
-        };
-
-        let mut jobs = if let Some(sid) = site_id {
-            sqlx::query_as!(
-                QStdSiteJob,
-                "SELECT * FROM v_StdSiteJobs WHERE date >= ? AND date <= ? AND site_id = ?",
-                start_date,
-                end_date,
-                sid
-            )
-            .fetch(conn)
-        } else {
-            sqlx::query_as!(
-                QStdSiteJob,
-                "SELECT * FROM v_StdSiteJobs WHERE date >= ? AND date <= ?",
-                start_date,
-                end_date
-            )
-            .fetch(conn)
-        };
-
-        let mut avail_std_site_days = vec![];
-        loop {
-            let job = jobs.try_next().await?;
-            if let Some(j) = job {
-                avail_std_site_days.push(StdSiteJob::from(j))
-            } else {
-                break;
-            }
-        }
-
-        return Ok(avail_std_site_days);
-    }
-
+    /// Get a single row from the standard with job table by its row ID.
     pub async fn get_std_job_by_id(
         conn: &mut MySqlConn,
         ss_id: i32,
@@ -827,7 +797,8 @@ impl StdSiteJob {
         Ok(ssjob)
     }
 
-    /// Get the standard site job entry for the given site on the given date.
+    /// Get the standard site job entry for the given site on the given date and
+    /// for a given processing key.
     ///
     /// If no entry exists, will return `Ok(None)`. Will return an error if (a) the
     /// database query fails or (b) there is >1 entry that matches the site ID and date.
@@ -835,12 +806,14 @@ impl StdSiteJob {
         conn: &mut MySqlConn,
         site_id: &str,
         date: NaiveDate,
+        proc_key: &ProcCfgKey,
     ) -> anyhow::Result<Option<Self>> {
         let mut ssjob = sqlx::query_as!(
             QStdSiteJob,
-            "SELECT * FROM v_StdSiteJobs WHERE site_id = ? and date = ?",
+            "SELECT * FROM v_StdSiteJobs WHERE site_id = ? AND date = ? AND processing_key = ?",
             site_id,
-            date
+            date,
+            proc_key
         )
         .fetch_all(conn)
         .await?
@@ -854,7 +827,7 @@ impl StdSiteJob {
             Ok(ssjob.pop())
         } else {
             anyhow::bail!(
-                "Multiple standard site jobs matched {site_id} on {date}; databased inconsistent"
+                "Multiple standard site jobs matched '{site_id}' on {date} with processing key '{proc_key}'; databased inconsistent"
             )
         }
     }
@@ -872,6 +845,7 @@ impl StdSiteJob {
         site_id: &str,
         start_date: NaiveDate,
         end_date: Option<NaiveDate>,
+        proc_key: Option<&ProcCfgKey>,
         set_inop: bool,
     ) -> anyhow::Result<u64> {
         let new_state = if set_inop {
@@ -880,22 +854,28 @@ impl StdSiteJob {
             StdSiteJobState::RegenNeeded
         };
 
-        let q = if let Some(end) = end_date {
+        // Since standard site jobs cannot be in the future, setting the end date to
+        // some time in the future is the same as having no end date.
+        let end_date = end_date.unwrap_or_else(|| Utc::now().date_naive() + chrono::Days::new(30));
+
+        let q = if let Some(pkey) = proc_key {
             sqlx::query!(
-                "UPDATE v_StdSiteJobs SET state = ? WHERE site_id = ? AND date >= ? AND date < ?",
+                "UPDATE v_StdSiteJobs SET state = ? WHERE site_id = ? AND date >= ? AND date < ? AND processing_key = ?",
                 new_state,
                 site_id,
                 start_date,
-                end
+                end_date,
+                pkey
             )
             .execute(conn)
             .await?
         } else {
             sqlx::query!(
-                "UPDATE v_StdSiteJobs SET state = ? WHERE site_id = ? AND date >= ?",
+                "UPDATE v_StdSiteJobs SET state = ? WHERE site_id = ? AND date >= ? AND date < ?",
                 new_state,
                 site_id,
-                start_date
+                start_date,
+                end_date
             )
             .execute(conn)
             .await?
@@ -907,7 +887,10 @@ impl StdSiteJob {
     /// Flag rows in the standard site for regeneration, intelligently deciding whether it requires regeneration or to be converted to non-operational status.
     ///
     /// If `end_date` is `None`, then all rows from `start_date` on are flagged. Otherwise, rows up to but not
-    /// including `end_date` are flagged. Returns an `Err` if the database query fails.
+    /// including `end_date` are flagged. Likewise, if `proc_key` is `None`, all rows for the enclosed dates
+    /// are flagged, but if it is specified, only rows for that key are flagged.
+    ///
+    /// Returns an `Err` if the database query fails.
     ///
     /// If you want all the rows for this site and date range to be flagged as non-operational or not regardless
     /// of the site specifications, see [`Self::set_regen_flag`].
@@ -916,17 +899,30 @@ impl StdSiteJob {
         site_id: &str,
         start_date: NaiveDate,
         end_date: Option<NaiveDate>,
+        proc_key: Option<&ProcCfgKey>,
     ) -> anyhow::Result<()> {
         let mut trans = conn.begin().await?;
         let locations = SiteInfo::get_site_locations(&mut trans, site_id).await?;
-        Self::set_regen_flag(&mut trans, site_id, start_date, end_date, true).await?;
+
+        Self::set_regen_flag(&mut trans, site_id, start_date, end_date, proc_key, true).await?;
         for loc in locations {
-            Self::set_regen_flag(&mut trans, site_id, loc.start_date, loc.end_date, false).await?;
+            Self::set_regen_flag(
+                &mut trans,
+                site_id,
+                loc.start_date,
+                loc.end_date,
+                proc_key,
+                false,
+            )
+            .await?;
         }
         trans.commit().await?;
         Ok(())
     }
 
+    /// Set the ginput job ID for a given standard site row.
+    /// Used when the job ID is determined after the row is
+    /// added.
     pub async fn set_job_by_id(
         conn: &mut MySqlConn,
         row_id: i32,
@@ -944,6 +940,8 @@ impl StdSiteJob {
         Ok(())
     }
 
+    /// Set the row state to a given value. If you have a [`StdSiteJob`]
+    /// instance, use [`Self::set_state`] instead.
     pub async fn set_state_by_id(
         conn: &mut MySqlConn,
         state: StdSiteJobState,
@@ -1091,7 +1089,8 @@ impl StdSiteJob {
             let tarball = tarball.as_ref();
             let (site_id, proc_key, date) = info_from_std_tarball_name(config, tarball)?;
 
-            let existing_ssjob = Self::get_std_job_for_site_on_date(conn, &site_id, date).await?;
+            let existing_ssjob =
+                Self::get_std_job_for_site_on_date(conn, &site_id, date, proc_key).await?;
             if let Some(mut existing_ssjob) = existing_ssjob {
                 // If the standard site job already exists in the system and is waiting for a job to be created,
                 // we can set it to complete right now.
@@ -1147,8 +1146,8 @@ impl StdSiteJob {
     }
 
     /// Given a list of all jobs in the database, find the most recently completed job in the standard site queue that
-    /// generated the given site ID and date. Will return `None` if no jobs match those criteria, otherwise returns
-    /// the job with the most recent completion date.
+    /// generated the given site ID and date for the given processing configuration. Will return `None` if no jobs match
+    /// those criteria, otherwise returns the job with the most recent completion date.
     fn find_existing_job_for_standard_site<'a>(
         std_site_queue: &str,
         site_id: String,
@@ -1201,9 +1200,10 @@ impl StdSiteJob {
     }
 
     /// Provide a summary the sites generated/pending/etc. for a given date
-    pub async fn summarize_date(
+    pub async fn summarize_date_and_proc_cfg(
         conn: &mut MySqlConn,
         date: NaiveDate,
+        proc_key: &ProcCfgKey,
     ) -> anyhow::Result<StdJobDateSummary> {
         let stdsites = siteinfo::SiteInfo::get_site_info_for_date(conn, date, false).await?;
         let all_site_ids = stdsites
@@ -1213,8 +1213,9 @@ impl StdSiteJob {
 
         let rows = sqlx::query_as!(
             QStdSiteJob,
-            "SELECT * FROM v_StdSiteJobs WHERE date = ?",
-            date
+            "SELECT * FROM v_StdSiteJobs WHERE date = ? AND processing_key = ?",
+            date,
+            proc_key
         )
         .fetch_all(conn)
         .await

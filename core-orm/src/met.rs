@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{self, FromRow, Type};
 
 use crate::{
-    config::{self, MetCfgKey},
+    config::{self, MetCfgKey, ProcCfgKey},
     error::DefaultOptsQueryError,
     utils::DateIterator,
     MySqlConn,
@@ -641,6 +641,19 @@ impl MetFile {
             .iter()
             .fold(MetDayState::default(), |out, s| out.merge(s));
         Ok(overall_state)
+    }
+
+    /// Helper function to check if a date is complete for a given processing configuration.
+    /// This is identical to calling [`Self::is_date_complete_for_config_set`] with the
+    /// met configuration set for the processing configuration.
+    pub async fn is_date_complete_for_processing_config(
+        conn: &mut MySqlConn,
+        config: &config::Config,
+        date: NaiveDate,
+        proc_key: &ProcCfgKey,
+    ) -> anyhow::Result<MetDayState> {
+        let met_cfgs = config.get_mets_for_processing_config(proc_key)?;
+        Self::is_date_complete_for_config_set(conn, date, &met_cfgs).await
     }
 
     /// Returns whether all dates in a range are complete, incomplete, or wholly missing for a given set of

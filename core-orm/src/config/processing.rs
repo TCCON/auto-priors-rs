@@ -117,6 +117,27 @@ impl ProcessingConfig {
         }
     }
 
+    /// Returns `true` if this configuration will run automatically for
+    /// any date in the given range. Note that `end_date` is treated
+    /// as exclusive as usual.
+    pub(super) fn auto_for_date_range(
+        &self,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> bool {
+        if !self.generate_automatically {
+            return false;
+        }
+
+        let overlaps = crate::utils::date_ranges_overlap(
+            Some(self.auto_start_date()),
+            self.auto_end_date(),
+            start_date,
+            end_date,
+        );
+        overlaps
+    }
+
     pub fn get_met_configs<'a>(
         &'a self,
         cfg: &'a super::Config,
@@ -186,6 +207,19 @@ impl ProcessingConfig {
                 "automatically-generating {} auto_tarball_dir",
                 Self::location(my_key)
             )));
+        }
+
+        // Check that the output directory exists if generating automatically
+        if self.generate_automatically
+            && self
+                .auto_tarball_dir
+                .as_deref()
+                .is_some_and(|p| !p.exists())
+        {
+            errors.push(ConfigValErrorCause::MissingPath(format!(
+                "automatically-generating {} auto_tarball_dir",
+                Self::location(my_key)
+            )))
         }
     }
 

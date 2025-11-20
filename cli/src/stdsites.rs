@@ -65,6 +65,11 @@ pub struct FlagForRegenCli {
     #[clap(long)]
     all_sites: bool,
 
+    /// If given, only flag this processing configuration to be regenerated. Other
+    /// processing configurations for the same date range will be left alone.
+    #[clap(long)]
+    proc_cfg: Option<ProcCfgKey>,
+
     /// First date to flag
     start_date: NaiveDate,
 
@@ -117,7 +122,14 @@ pub async fn flag_for_regen_cli(conn: &mut MySqlConn, args: FlagForRegenCli) -> 
         SitesToFlag::Some(args.site_id)
     };
 
-    flag_for_regen(conn, args.start_date, args.end_date, sites).await
+    flag_for_regen(
+        conn,
+        args.start_date,
+        args.end_date,
+        sites,
+        args.proc_cfg.as_ref(),
+    )
+    .await
 }
 
 pub async fn flag_for_regen(
@@ -125,6 +137,7 @@ pub async fn flag_for_regen(
     start_date: NaiveDate,
     end_date: Option<NaiveDate>,
     sites: SitesToFlag,
+    proc_cfg_key: Option<&ProcCfgKey>,
 ) -> anyhow::Result<()> {
     let end_date = end_date.unwrap_or_else(|| start_date + Duration::days(1));
     let site_ids = if let SitesToFlag::Some(sids) = sites {
@@ -139,6 +152,7 @@ pub async fn flag_for_regen(
             &sid,
             start_date,
             Some(end_date),
+            proc_cfg_key,
         )
         .await?;
     }
@@ -156,10 +170,17 @@ pub struct PrintStdJobsSummaryCli {
     /// Date after the last one to print. If not given, defaults to today.
     #[clap(short = 'e', long)]
     end_date: Option<NaiveDate>,
+
+    /// Which processing configuration to print the table for. If not given,
+    /// all processing configurations relevant for the given date range
+    /// will have a table printed.
+    #[clap(long)]
+    proc_cfg: Option<ProcCfgKey>,
 }
 
 pub async fn print_std_jobs_summary_cli(
     conn: &mut MySqlConn,
+    config: &orm::config::Config,
     args: PrintStdJobsSummaryCli,
 ) -> anyhow::Result<()> {
     let start_date = if let Some(sd) = args.start_date {
@@ -168,22 +189,41 @@ pub async fn print_std_jobs_summary_cli(
         chrono::Utc::now().date_naive() - chrono::Duration::days(7)
     };
 
-    print_std_jobs_summary(conn, start_date, args.end_date).await
+    print_std_jobs_summary(
+        conn,
+        config,
+        start_date,
+        args.end_date,
+        args.proc_cfg.as_ref(),
+    )
+    .await
 }
 
 pub async fn print_std_jobs_summary(
     conn: &mut MySqlConn,
+    config: &orm::config::Config,
     start_date: NaiveDate,
     end_date: Option<NaiveDate>,
+    proc_cfg_key: Option<&ProcCfgKey>,
 ) -> anyhow::Result<()> {
     let end_date = end_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
-    let mut summaries = vec![];
-    for date in DateIterator::new_one_range(start_date, end_date) {
-        let this_summary = stdsitejobs::StdSiteJob::summarize_date(conn, date).await?;
-        summaries.push(this_summary);
-    }
+    let proc_cfg_keys = if let Some(pkey) = proc_cfg_key {
+        vec![pkey]
+    } else {
+        config.get_auto_proc_cfgs_for_date_range(Some(start_date), Some(end_date))
+    };
 
-    println!("{}", orm::utils::to_std_table(summaries));
+    for pkey in proc_cfg_keys {
+        let mut summaries = vec![];
+        for date in DateIterator::new_one_range(start_date, end_date) {
+            let this_summary =
+                stdsitejobs::StdSiteJob::summarize_date_and_proc_cfg(conn, date, pkey).await?;
+            summaries.push(this_summary);
+        }
+
+        println!("\n==== {pkey} ====\n");
+        println!("{}", orm::utils::to_std_table(summaries));
+    }
 
     Ok(())
 }

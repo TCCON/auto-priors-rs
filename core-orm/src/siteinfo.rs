@@ -1370,11 +1370,13 @@ impl SiteInfo {
             }
         }
 
-        // Next, mark any past or pending job as needed regenerated
+        // Next, mark any past or pending job as needed regenerated. Since we changed the site location,
+        // we pass `None` as proc_key because we will need to regenerate all of the processing configurations.
         if regen_needed || set_inop {
-            let nrows =
-                StdSiteJob::set_regen_flag(&mut trans, site_id, start_date, end_date, set_inop)
-                    .await?;
+            let nrows = StdSiteJob::set_regen_flag(
+                &mut trans, site_id, start_date, end_date, None, set_inop,
+            )
+            .await?;
             log::info!("Marked {nrows} rows in the site jobs table for regeneration");
         } else {
             log::info!("Did not mark any rows in the site jobs table for regeneration");
@@ -1382,7 +1384,11 @@ impl SiteInfo {
 
         // Finally, add rows that didn't already exist. This is usually needed when adding a new site.
         StdSiteJob::fill_missing_dates_for_site_all_proc_configs(
-            &mut trans, config, site_id, start_date, end_date,
+            &mut trans,
+            config,
+            site_id,
+            Some(start_date),
+            end_date,
         )
         .await?;
 

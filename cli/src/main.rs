@@ -335,7 +335,8 @@ async fn main() -> anyhow::Result<()> {
             command: StdSiteJobActions::Print(subargs),
         }) => {
             let mut conn = db.get_connection().await?;
-            stdsites::print_std_jobs_summary_cli(&mut conn, subargs).await?;
+            let loaded_config = load_config()?;
+            stdsites::print_std_jobs_summary_cli(&mut conn, &loaded_config, subargs).await?;
         }
 
         Commands::SiteJobs(StdSiteJobCli {

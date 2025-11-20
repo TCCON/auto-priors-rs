@@ -797,6 +797,23 @@ impl Config {
             .collect_vec()
     }
 
+    pub fn get_auto_proc_cfgs_for_date_range(
+        &self,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> Vec<&ProcCfgKey> {
+        self.processing_configuration
+            .iter()
+            .filter_map(|(key, proc_cfg)| {
+                if proc_cfg.auto_for_date_range(start_date, end_date) {
+                    Some(key)
+                } else {
+                    None
+                }
+            })
+            .collect_vec()
+    }
+
     /// Get the information about a job queue by name
     ///
     /// If the queue does not have a section defined in the configuration, then the
@@ -919,11 +936,6 @@ impl Config {
         if !self.execution.std_sites_output_base.exists() {
             errors.push(ConfigValErrorCause::MissingPath(
                 "execution.std_sites_output_base".to_string(),
-            ));
-        }
-        if !self.execution.std_sites_tar_output.exists() {
-            errors.push(ConfigValErrorCause::MissingPath(
-                "execution.std_sites_tar_output".to_string(),
             ));
         }
 
@@ -1102,10 +1114,6 @@ pub struct ExecutionConfig {
     /// can download them from.
     pub output_path: PathBuf,
 
-    /// Path where standard sites' output tarballs shall be stored. This will have subdirectories
-    /// named by site ID
-    pub std_sites_tar_output: PathBuf,
-
     /// Run directory for standard site jobs.
     pub std_sites_output_base: PathBuf,
 
@@ -1174,7 +1182,6 @@ impl Default for ExecutionConfig {
                 .unwrap_or_else(|_| Url::parse("ftp://localhost/").unwrap()),
             ftp_download_root: Default::default(),
             output_path: Default::default(),
-            std_sites_tar_output: Default::default(),
             std_sites_output_base: Default::default(),
             flat_stdsite_json_file: Default::default(),
             grouped_stdsite_json_file: Default::default(),
