@@ -3876,7 +3876,7 @@ dependencies = [
 
 [[package]]
 name = "tccon-priors-cli"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3908,7 +3908,7 @@ dependencies = [
 
 [[package]]
 name = "tccon-priors-service"
-version = "2.0.23"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3927,7 +3927,7 @@ dependencies = [
 
 [[package]]
 name = "tccon_priors_orm"
-version = "1.2.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4818,7 +4818,7 @@ dependencies = [
 
 [[package]]
 name = "web-app"
-version = "0.1.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "askama",

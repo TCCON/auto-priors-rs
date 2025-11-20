@@ -1,6 +1,6 @@
 [package]
 name = "tccon-priors-cli"
-version = "2.0.0"  # The Python version is considered v1
+version = "3.0.0"         # The Python version is considered v1
 edition = "2021"
 
 [dependencies]
@@ -20,7 +20,7 @@ sqlx.workspace = true
 tabled.workspace = true
 tokio.workspace = true
 
-orm = {path = "../core-orm", package = "tccon_priors_orm"}
+orm = { path = "../core-orm", package = "tccon_priors_orm" }
 walkdir = "2.4.0"
 
 [dev-dependencies]
