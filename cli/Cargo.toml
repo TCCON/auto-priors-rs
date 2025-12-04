@@ -2,6 +2,7 @@
 name = "tccon-priors-cli"
 version = "2.0.0"  # The Python version is considered v1
 edition = "2021"
+license = "Apache-2.0"
 
 [dependencies]
 anyhow.workspace = true
