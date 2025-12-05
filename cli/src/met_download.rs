@@ -142,7 +142,7 @@ pub async fn get_date_iter_for_specified_met(
             config.get_dates_met_needed_for_processing(met_key)
         {
             start_date = start_date.max(first_needed);
-            end_date = orm::utils::earlier_opt_date(Some(end_date), last_needed).expect(
+            end_date = orm::utils::earlier_opt_end_date(Some(end_date), last_needed).expect(
                 "earlier_opt_date must return a Some(_) when either of the inputs is Some(_)",
             );
         } else {

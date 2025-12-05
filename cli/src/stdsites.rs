@@ -317,8 +317,8 @@ pub async fn update_processing_key(
     } else {
         for def in config.default_options.iter() {
             let proc_key = &def.processing_configuration;
-            let start = orm::utils::later_opt_date(def.start_date, first_date);
-            let end = orm::utils::earlier_opt_date(def.end_date, last_date);
+            let start = orm::utils::later_opt_start_date(def.start_date, first_date);
+            let end = orm::utils::earlier_opt_end_date(def.end_date, last_date);
             orm::stdsitejobs::StdSiteJob::update_processing_key(
                 conn, proc_key, old_key, site_id, start, end,
             )

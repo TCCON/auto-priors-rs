@@ -447,7 +447,7 @@ impl Config {
         let (mut start, mut end) = cfg_dates.next()?;
         for (this_start, this_end) in cfg_dates {
             start = start.min(this_start);
-            end = crate::utils::later_opt_date(end, this_end);
+            end = crate::utils::later_opt_end_date(end, this_end);
         }
         debug!("Met {met_key} is needed between {start:?} and {end:?}");
         Some((start, end))
@@ -757,7 +757,7 @@ impl Config {
             })
             .fold(None, |opt_max, date| {
                 if let Some(max) = opt_max {
-                    Some(crate::utils::later_opt_date(max, date))
+                    Some(crate::utils::later_opt_end_date(max, date))
                 } else {
                     None
                 }
