@@ -249,14 +249,13 @@ fn get_env_var(varname: &str) -> Option<String> {
 #[macro_export]
 macro_rules! multiline_sql {
     ($path:literal, $conn:ident) => {
-        use anyhow::Context;
         let read_sql = include_str!($path);
         for (i, statement) in read_sql.split(';').enumerate() {
             if !statement.trim().is_empty() {
                 sqlx::query(statement.trim())
                     .execute(&mut *$conn)
                     .await
-                    .with_context(|| format!("Error in or around statement {}", i + 1))
+                    .map_err(|e| format!("Error in or around statement {}: {e}", i + 1))
                     .unwrap();
             }
         }

@@ -14,7 +14,8 @@ mod common;
 #[tokio::test]
 async fn test_update_row_proc_key() {
     common::init_logging();
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/update_proc_key.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
+    multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let new_key = ProcCfgKey("NEW".to_string());
@@ -49,7 +50,8 @@ async fn test_update_row_proc_key() {
 #[tokio::test]
 async fn test_update_row_proc_key_filter_old_key() {
     common::init_logging();
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/update_proc_key.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
+    multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let new_key = ProcCfgKey("NEW".to_string());
@@ -117,7 +119,8 @@ async fn test_update_row_proc_key_filter_old_key() {
 async fn test_update_row_proc_key_filter_site_id() {
     common::init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/update_proc_key.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
+    multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let new_key = ProcCfgKey("NEW".to_string());
@@ -165,7 +168,8 @@ async fn test_update_row_proc_key_filter_site_id() {
 async fn test_update_row_proc_key_filter_dates_after() {
     common::init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/update_proc_key.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
+    multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let new_key = ProcCfgKey("NEW".to_string());
@@ -216,7 +220,8 @@ async fn test_update_row_proc_key_filter_dates_after() {
 async fn test_update_row_proc_key_filter_dates_before() {
     common::init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/update_proc_key.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
+    multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let new_key = ProcCfgKey("NEW".to_string());
@@ -267,7 +272,8 @@ async fn test_update_row_proc_key_filter_dates_before() {
 async fn test_update_row_proc_key_filter_dates_between() {
     common::init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/update_proc_key.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
+    multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let new_key = ProcCfgKey("NEW".to_string());
@@ -322,7 +328,8 @@ async fn test_update_row_proc_key_filter_dates_between() {
 /// configuration.
 #[tokio::test]
 async fn test_update_row_proc_key_to_defaults() {
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/update_proc_key.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
+    multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let defaults = &config.default_options;
@@ -440,7 +447,8 @@ fn get_correct_keys_for_defaults_test(
 async fn test_update_row_proc_key_filter_multiple() {
     common::init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/update_proc_key.sql");
+    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
+    multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     let new_key = ProcCfgKey("NEW".to_string());
