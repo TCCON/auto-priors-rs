@@ -454,7 +454,7 @@ async fn test_update_row_proc_key_filter_multiple() {
     let new_key = ProcCfgKey("NEW".to_string());
     let old_key = ProcCfgKey("BETA".to_string());
     let last_date = chrono::NaiveDate::from_ymd_opt(2023, 6, 2).unwrap();
-    let site_id = "pa";
+    let site_id = "ci";
     update_processing_key(
         &mut conn,
         &config,
