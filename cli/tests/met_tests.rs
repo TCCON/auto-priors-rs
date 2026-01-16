@@ -6,8 +6,8 @@ use orm::{
     config::{MetCfgKey, ProcCfgKey},
     met::MetFile,
     test_utils::{
-        make_dummy_config, make_dummy_config_with_temp_dirs, multiline_sql, multiline_sql_init,
-        open_test_database,
+        init_logging, make_dummy_config, make_dummy_config_with_temp_dirs, multiline_sql,
+        multiline_sql_init, open_test_database,
     },
 };
 use tccon_priors_cli::{
@@ -203,7 +203,7 @@ static EXPECTED_GEOS_TRANSITION_FILES: [&'static str; 56] = [
 /// type missing, all files of one type missing).
 #[tokio::test]
 async fn test_check_met() {
-    common::init_logging();
+    init_logging();
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
@@ -370,7 +370,7 @@ async fn test_check_met() {
 /// configured date ranges.)
 #[tokio::test]
 async fn test_geosfpit_download_by_dates() {
-    common::init_logging();
+    init_logging();
 
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
@@ -412,7 +412,7 @@ async fn test_geosfpit_download_by_dates() {
 /// configured date ranges.)
 #[tokio::test]
 async fn test_geosit_download_by_dates() {
-    common::init_logging();
+    init_logging();
 
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
@@ -453,7 +453,7 @@ async fn test_geosit_download_by_dates() {
 /// --end-date flags.
 #[tokio::test]
 async fn test_transition_in_automatic_required_mets() {
-    common::init_logging();
+    init_logging();
 
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
@@ -495,7 +495,7 @@ async fn test_transition_in_automatic_required_mets() {
 /// the `met download-missing` CLI with a --proc-key flag.
 #[tokio::test]
 async fn test_download_one_proc_cfg_missing() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
     let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_fpit")
@@ -569,7 +569,7 @@ async fn test_download_one_proc_cfg_missing() {
 /// `met download-missing` CLI with an --end-date flag.
 #[tokio::test]
 async fn test_download_pre_transition_missing() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_date.sql");
     let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_pre_transition")
@@ -622,7 +622,7 @@ async fn test_download_pre_transition_missing() {
 /// `met download-missing` CLI with --start-date and --end-date flags.
 #[tokio::test]
 async fn test_download_post_transition_missing() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_it_next_date.sql");
     let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_post_transition")
@@ -677,7 +677,7 @@ async fn test_download_post_transition_missing() {
 /// configuration to another with files from the first set already present.
 #[tokio::test]
 async fn test_transition_in_automatic_required_mets_missing() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) =
         multiline_sql_init!("sql/check_geos_fpit_to_it_transition_next_date.sql");
@@ -723,7 +723,7 @@ async fn test_transition_in_automatic_required_mets_missing() {
 /// for that automatic set of met files was partially complete.
 #[tokio::test]
 async fn test_download_partial_day_from_start() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_next_partial.sql");
     let (config, tmp_dir) = make_dummy_config_with_temp_dirs("missing_fpit_partial")
@@ -778,7 +778,7 @@ async fn test_download_partial_day_from_start() {
 /// gives it a day that just cut off partway through.
 #[tokio::test]
 async fn test_download_partial_day_scattered() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) =
         multiline_sql_init!("sql/check_geos_fpit_next_partial_scattered.sql");
@@ -831,7 +831,7 @@ async fn test_download_partial_day_scattered() {
 /// Tests the ability to add already-downloaded met files to the database.
 #[tokio::test]
 async fn test_met_rescanning() {
-    common::init_logging();
+    init_logging();
 
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
@@ -881,7 +881,7 @@ async fn test_met_rescanning() {
 /// input start and end dates over anything in the database.
 #[tokio::test]
 async fn test_single_met_dates_user_override() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
@@ -918,7 +918,7 @@ async fn test_single_met_dates_user_override() {
 /// when it is no longer required by any of the processing.
 #[tokio::test]
 async fn test_single_met_dates_start_from_db() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
@@ -953,7 +953,7 @@ async fn test_single_met_dates_start_from_db() {
 /// when it is no longer required by any of the processing.
 #[tokio::test]
 async fn test_single_met_start_from_dl_config() {
-    common::init_logging();
+    init_logging();
 
     // Don't need any initial values in the database, just a connection to a blank database
     let (pool, _test_db) = open_test_database(true)
@@ -996,7 +996,7 @@ async fn test_single_met_start_from_dl_config() {
 /// when it is no longer required by any of the processing.
 #[tokio::test]
 async fn test_single_met_cross_boundary_with_defaults() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
@@ -1032,7 +1032,7 @@ async fn test_single_met_cross_boundary_with_defaults() {
 /// processing configuration dates.
 #[tokio::test]
 async fn test_single_met_cross_boundary_ignoring_defaults() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_geos_fpit_plus_it_single_met.sql");
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
@@ -1067,7 +1067,7 @@ async fn test_single_met_cross_boundary_ignoring_defaults() {
 /// file from the database given its basename.
 #[tokio::test]
 async fn test_find_met_file_by_name() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_finding_met_file.sql");
     let check_some = MetFile::get_file_by_name(&mut conn, "geos_surf_test_20200101_0000.nc")
@@ -1097,7 +1097,7 @@ async fn test_find_met_file_by_name() {
 /// file from the database given its full path.
 #[tokio::test]
 async fn test_find_met_file_by_path() {
-    common::init_logging();
+    init_logging();
 
     let test_path = PathBuf::from("/data/met/Nx/geos_surf_test_20200101_0000.nc");
     let (mut conn, _test_db) = multiline_sql_init!("sql/check_finding_met_path.sql");
@@ -1127,7 +1127,7 @@ async fn test_find_met_file_by_path() {
 #[test]
 #[ignore = "requires downloading a file"]
 fn test_geosfp_download() {
-    common::init_logging();
+    init_logging();
 
     let tmp_dir =
         tempdir::TempDir::new("test_geosfp_download").expect("Failed to make temporary directory");

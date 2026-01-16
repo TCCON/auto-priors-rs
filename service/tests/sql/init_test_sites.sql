@@ -1,0 +1,1 @@
+../../../cli/tests/sql/stdsites/init_test_sites.sql

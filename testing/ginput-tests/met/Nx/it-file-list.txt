@@ -1,0 +1,8 @@
+GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T0000.V01.nc4
+GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T0300.V01.nc4
+GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T0600.V01.nc4
+GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T0900.V01.nc4
+GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T1200.V01.nc4
+GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T1500.V01.nc4
+GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T1800.V01.nc4
+GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.2023-06-01T2100.V01.nc4

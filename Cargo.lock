@@ -3916,6 +3916,7 @@ dependencies = [
  "clap",
  "clokwerk",
  "glob",
+ "itertools",
  "log",
  "log4rs",
  "signal-hook",

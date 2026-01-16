@@ -17,6 +17,9 @@ submitted_job_queue = "submitted"
 std_site_job_queue = "standard"
 error_handler = { type = "Logging" }
 
+[execution.queues.standard]
+max_num_procs = 4
+
 [processing_configuration.std-geosfpit]
 required_mets = ["geosfpit-surf-met", "geosfpit-eta-met", "geosfpit-eta-chm"]
 ginput = "v1.0.6"
@@ -174,14 +177,14 @@ backend = { type = "Testing" }
 extra_submitters = []
 
 [timing]
-disable_met_download = true
+disable_met_download = false
 met_download_hours = 6
-disable_job = true
+disable_job = false
 job_start_seconds = 60
 status_report_seconds = 15
 lut_regen_days = 1
 delete_expired_jobs_hours = 24
-disable_std_site_gen = true
+disable_std_site_gen = false
 std_site_gen_hours = 12
 std_site_tar_minutes = 30
 disable_reports = true

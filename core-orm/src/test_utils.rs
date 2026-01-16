@@ -229,6 +229,14 @@ fn get_env_var(varname: &str) -> Option<String> {
     None
 }
 
+pub fn init_logging() {
+    let _ = env_logger::builder()
+        .filter_module("sqlx", log::LevelFilter::Warn)
+        .format_source_path(true)
+        .is_test(true)
+        .try_init();
+}
+
 /// Execute a multi-statement SQL file on the database behind a connections.
 ///
 /// This macro takes two inputs: a literal string path to the SQL file to read
@@ -296,9 +304,28 @@ macro_rules! multiline_sql_init {
     }};
 }
 
+/// Like [`multiline_sql_init`], except this returns the [`PoolWrapper`]
+/// instead of an individual connection.
+#[macro_export]
+macro_rules! multiline_sql_init_pool {
+    ($path:literal) => {{
+        let (pool, test_db) = orm::test_utils::open_test_database(true)
+            .await
+            .expect("Failed to open test database");
+        let mut conn = pool
+            .get_connection()
+            .await
+            .expect("Failed to acquire connection to database");
+        orm::multiline_sql!($path, conn);
+        (pool, test_db)
+    }};
+}
+
 // Per https://stackoverflow.com/a/31749071 this is necessary to
 // use macros across modules
 #[allow(unused_imports)]
 pub use multiline_sql;
 #[allow(unused_imports)]
 pub use multiline_sql_init;
+#[allow(unused_imports)]
+pub use multiline_sql_init_pool;

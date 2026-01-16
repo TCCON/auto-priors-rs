@@ -4,7 +4,7 @@ use itertools::Itertools;
 use orm::{
     config::{DefaultOptions, ProcCfgKey},
     multiline_sql, multiline_sql_init,
-    test_utils::make_dummy_config,
+    test_utils::{init_logging, make_dummy_config},
 };
 use tccon_priors_cli::stdsites::update_processing_key;
 
@@ -13,7 +13,7 @@ mod common;
 /// Test that running without filters updates the processing key for all rows
 #[tokio::test]
 async fn test_update_row_proc_key() {
-    common::init_logging();
+    init_logging();
     let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
     multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
@@ -49,7 +49,7 @@ async fn test_update_row_proc_key() {
 /// as the current processing key
 #[tokio::test]
 async fn test_update_row_proc_key_filter_old_key() {
-    common::init_logging();
+    init_logging();
     let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
     multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
@@ -117,7 +117,7 @@ async fn test_update_row_proc_key_filter_old_key() {
 /// site ID
 #[tokio::test]
 async fn test_update_row_proc_key_filter_site_id() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
     multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
@@ -166,7 +166,7 @@ async fn test_update_row_proc_key_filter_site_id() {
 /// rows for jobs on or after that date.
 #[tokio::test]
 async fn test_update_row_proc_key_filter_dates_after() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
     multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
@@ -218,7 +218,7 @@ async fn test_update_row_proc_key_filter_dates_after() {
 /// rows for jobs before that date.
 #[tokio::test]
 async fn test_update_row_proc_key_filter_dates_before() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
     multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
@@ -270,7 +270,7 @@ async fn test_update_row_proc_key_filter_dates_before() {
 /// rows for jobs between those dates.
 #[tokio::test]
 async fn test_update_row_proc_key_filter_dates_between() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
     multiline_sql!("sql/stdsites/update_proc_key.sql", conn);
@@ -445,7 +445,7 @@ fn get_correct_keys_for_defaults_test(
 /// the rows that match all of the criteria.
 #[tokio::test]
 async fn test_update_row_proc_key_filter_multiple() {
-    common::init_logging();
+    init_logging();
 
     let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
     multiline_sql!("sql/stdsites/update_proc_key.sql", conn);

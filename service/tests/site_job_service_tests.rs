@@ -1,27 +1,16 @@
-// What needs tested:
-//  1. Jobs are added with all processing configurations for dates with multiple processing configs
-//      1a: [x] starting from an empty jobs table
-//      1b: [x] starting with existing jobs for the first date(s)
-//      1c: [x] starting with existing jobs for a later date (need to check what the expected behavior is)
-//  2. How it is handled if a new processing configuration is added (it should
-//     fill in the missing rows?)
-//      2a: [x] add the alternate GEOS IT config
-//      2b: [x] add the proper GEOS IT config
-//  3. What should happen if a processing configuration is removed?
-//      3a: [x] no existing rows removed
-//  4. Actual (long test) that runs ginput and generates output tarballs
-//     that I can verify.
-
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use chrono::NaiveDate;
 use itertools::Itertools;
 use orm::{
-    config::ProcCfgKey, multiline_sql, multiline_sql_init, stdsitejobs::StdSiteJob,
-    test_utils::make_dummy_config, MySqlConn,
+    config::ProcCfgKey,
+    multiline_sql, multiline_sql_init, multiline_sql_init_pool,
+    stdsitejobs::StdSiteJob,
+    test_utils::{init_logging, make_dummy_config},
+    MySqlConn, PoolWrapper,
 };
-
-mod common;
+use tccon_priors_service::{jobs, stdsitejobs};
+use tokio::sync::mpsc;
 
 #[derive(Debug)]
 struct JobTestRow {
@@ -34,10 +23,10 @@ struct JobTestRow {
 /// when no jobs are present in the database.
 #[tokio::test]
 async fn test_add_jobs_across_config_change() {
-    common::init_logging();
+    init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
-    multiline_sql!("sql/stdsites/stdsite_met.sql", conn);
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    multiline_sql!("sql/stdsite_met.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
@@ -62,11 +51,11 @@ async fn test_add_jobs_across_config_change() {
 /// This should fill in all remaining jobs.
 #[tokio::test]
 async fn test_add_jobs_across_config_change_one_existing_date() {
-    common::init_logging();
+    init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
-    multiline_sql!("sql/stdsites/stdsite_met.sql", conn);
-    multiline_sql!("sql/stdsites/add_20230530_jobs.sql", conn);
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    multiline_sql!("sql/stdsite_met.sql", conn);
+    multiline_sql!("sql/add_20230530_jobs.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
@@ -91,13 +80,13 @@ async fn test_add_jobs_across_config_change_one_existing_date() {
 /// This should fill in all remaining jobs.
 #[tokio::test]
 async fn test_add_jobs_across_config_change_many_existing_dates() {
-    common::init_logging();
+    init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
-    multiline_sql!("sql/stdsites/stdsite_met.sql", conn);
-    multiline_sql!("sql/stdsites/add_20230530_jobs.sql", conn);
-    multiline_sql!("sql/stdsites/add_20230531_jobs.sql", conn);
-    multiline_sql!("sql/stdsites/add_20230601_jobs.sql", conn);
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    multiline_sql!("sql/stdsite_met.sql", conn);
+    multiline_sql!("sql/add_20230530_jobs.sql", conn);
+    multiline_sql!("sql/add_20230531_jobs.sql", conn);
+    multiline_sql!("sql/add_20230601_jobs.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
@@ -122,11 +111,11 @@ async fn test_add_jobs_across_config_change_many_existing_dates() {
 /// This should fill in all remaining jobs.
 #[tokio::test]
 async fn test_add_jobs_across_config_change_existing_date_midway() {
-    common::init_logging();
+    init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
-    multiline_sql!("sql/stdsites/stdsite_met.sql", conn);
-    multiline_sql!("sql/stdsites/add_20230601_jobs.sql", conn);
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    multiline_sql!("sql/stdsite_met.sql", conn);
+    multiline_sql!("sql/add_20230601_jobs.sql", conn);
     let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
 
     StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
@@ -150,10 +139,10 @@ async fn test_add_jobs_across_config_change_existing_date_midway() {
 /// those jobs for the alternate met are added.
 #[tokio::test]
 async fn test_add_alternate_config() {
-    common::init_logging();
+    init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
-    multiline_sql!("sql/stdsites/stdsite_met.sql", conn);
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    multiline_sql!("sql/stdsite_met.sql", conn);
 
     let final_config =
         make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
@@ -193,10 +182,10 @@ async fn test_add_alternate_config() {
 /// those days are correctly added.
 #[tokio::test]
 async fn test_add_later_config() {
-    common::init_logging();
+    init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
-    multiline_sql!("sql/stdsites/stdsite_met.sql", conn);
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    multiline_sql!("sql/stdsite_met.sql", conn);
 
     let final_config =
         make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
@@ -242,10 +231,10 @@ async fn test_add_later_config() {
 
 #[tokio::test]
 async fn test_removed_alternate_config() {
-    common::init_logging();
+    init_logging();
 
-    let (mut conn, _test_db) = multiline_sql_init!("sql/stdsites/init_test_sites.sql");
-    multiline_sql!("sql/stdsites/stdsite_met.sql", conn);
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    multiline_sql!("sql/stdsite_met.sql", conn);
 
     let initial_config =
         make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
@@ -278,6 +267,165 @@ async fn test_removed_alternate_config() {
 
     let rows = get_site_job_rows(&mut conn).await;
     verify_site_job_rows(&expected_sites, &expected_keys, &rows);
+}
+
+#[tokio::test]
+#[ignore = "long test, actually runs ginput"]
+async fn test_site_job_run_ginput() {
+    init_logging();
+    let config = make_ginput_test_config();
+    let (pool, _test_db) = multiline_sql_init_pool!("sql/init_test_sites.sql");
+
+    let mut conn = pool
+        .get_connection()
+        .await
+        .expect("Should be able to get connection from the database pool");
+    // Rather than hand-write SQL to insert the met files into the database, we can
+    // scan for the files, since we need to have the actual files on hand to run this test.
+    orm::met::rescan_met_files(
+        &mut conn,
+        Some(NaiveDate::from_ymd_opt(2023, 5, 30).unwrap()),
+        Some(NaiveDate::from_ymd_opt(2023, 6, 3).unwrap()),
+        &config,
+        None,
+        false,
+    )
+    .await
+    .expect("Scanning for met files should work");
+
+    StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
+        .await
+        .unwrap();
+    StdSiteJob::add_jobs_for_pending_rows(&mut *conn, &config)
+        .await
+        .unwrap();
+
+    let shared_config = Arc::new(tokio::sync::RwLock::new(config));
+
+    // Because the logic to run the jobs is a bit complex, we use the manager.
+    let mut job_manager = make_job_manager(pool.clone(), Arc::clone(&shared_config)).await;
+
+    // First run the LUT regen jobs
+    job_manager
+        .start_jobs_entry_point()
+        .await
+        .expect("Starting jobs should succeed");
+    job_manager.wait_for_jobs_to_finish().await;
+
+    // Then actually run the jobs - this is what will take a while to finish.
+    job_manager
+        .start_jobs_entry_point()
+        .await
+        .expect("Starting jobs should succeed");
+    job_manager.wait_for_jobs_to_finish().await;
+
+    // The logic to make the tarballs is simple (for now), but using the manager is
+    // a better end-to-end test.
+    let mut site_manager = make_stdsite_manager(pool, shared_config).await;
+    site_manager
+        .tar_std_sites_output()
+        .await
+        .expect("Making standard site tarballs should succeed");
+}
+
+fn make_ginput_test_config() -> orm::config::Config {
+    let mut config =
+        make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
+
+    // Get the workspace root. The manifest dir points to the actual package (`cli`, because
+    // that's where I've been writing the tests), so we want the parent.
+    let crate_root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("expected CARGO_MANIFEST_DIR to have a parent")
+        .to_path_buf();
+    let testing_dir = crate_root_dir.join("testing").join("ginput-tests");
+
+    // Override the paths for the GEOS files, the ginput script locations, and the
+    // output locations. Unlike many other tests, we want the results from this test
+    // to persist so we can review them.
+    for (key, met) in config.data.met_download.iter_mut() {
+        match met.ginput_met_type {
+            orm::met::GinputMetType::ChemEta => {
+                let subdir = if key.0.starts_with("geosit") {
+                    "chm-it"
+                } else {
+                    "chm-fpit"
+                };
+                met.download_dir = testing_dir.join(subdir).join("Nv");
+            }
+            orm::met::GinputMetType::MetEta => {
+                met.download_dir = testing_dir.join("met").join("Nv");
+            }
+            orm::met::GinputMetType::Met2D => {
+                met.download_dir = testing_dir.join("met").join("Nx");
+            }
+            orm::met::GinputMetType::Other => {
+                unimplemented!("'Other' met type for ginput testing configuration")
+            }
+        }
+    }
+
+    for ginput in config.execution.ginput.values_mut() {
+        match ginput {
+            orm::config::GinputConfig::Script { entry_point_path } => {
+                *entry_point_path = testing_dir.join("py-ginput").join("run_ginput.py")
+            }
+        }
+    }
+
+    config
+        .processing_configuration
+        .get_mut(&ProcCfgKey("std-geosfpit".to_string()))
+        .unwrap()
+        .auto_tarball_dir = Some(testing_dir.join("std-tarballs"));
+    config
+        .processing_configuration
+        .get_mut(&ProcCfgKey("std-geosit".to_string()))
+        .unwrap()
+        .auto_tarball_dir = Some(testing_dir.join("std-tarballs"));
+    config
+        .processing_configuration
+        .get_mut(&ProcCfgKey("altco-geosfpit".to_string()))
+        .unwrap()
+        .auto_tarball_dir = Some(testing_dir.join("alt-tarballs"));
+    config.execution.std_sites_output_base = testing_dir.join("work");
+
+    // Also need to point to the real base .vmr file and levels file
+    config.data.base_vmr_file = Some(testing_dir.join("summer_35N.vmr"));
+    config.data.zgrid_file = Some(testing_dir.join("ap_51_level_0_to_70km.gnd"));
+
+    config
+}
+
+async fn make_job_manager(
+    pool: PoolWrapper,
+    shared_config: Arc<tokio::sync::RwLock<orm::config::Config>>,
+) -> jobs::JobManager<jobs::ServiceJobRunner> {
+    let (_, rx) = mpsc::channel::<jobs::JobMessage>(256);
+    let error_handler = tccon_priors_service::error::ErrorHandler::Logging(
+        tccon_priors_service::error::LoggingErrorHandler {},
+    );
+    let jobs_manager = jobs::JobManager::<jobs::ServiceJobRunner>::new_from_pool(
+        pool,
+        shared_config,
+        error_handler,
+        rx,
+    )
+    .await
+    .expect("Creating the jobs manager should succeed");
+
+    jobs_manager
+}
+
+async fn make_stdsite_manager(
+    pool: PoolWrapper,
+    shared_config: Arc<tokio::sync::RwLock<orm::config::Config>>,
+) -> stdsitejobs::StdSiteManager {
+    let (_, rx) = mpsc::channel::<stdsitejobs::StdSiteMessage>(256);
+    let error_handler = tccon_priors_service::error::ErrorHandler::Logging(
+        tccon_priors_service::error::LoggingErrorHandler {},
+    );
+    stdsitejobs::StdSiteManager::new_with_pool(pool, shared_config, error_handler, rx).await
 }
 
 /// Helper function: get the list of unique site IDs used in the test.

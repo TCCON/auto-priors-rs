@@ -1,0 +1,8 @@
+GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_0000.V01.nc4
+GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_0300.V01.nc4
+GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_0600.V01.nc4
+GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_0900.V01.nc4
+GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_1200.V01.nc4
+GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_1500.V01.nc4
+GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_1800.V01.nc4
+GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.20230531_2100.V01.nc4
