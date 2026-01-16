@@ -17,7 +17,7 @@ const LUT_REGEN_BLOCKING_PRIORITY: i32 = 10;
 static LUT_QUEUE_NAME: &'static str = "LUT_REGEN";
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum JobMessage {
+pub enum JobMessage {
     StartJobs,
     RegenLut,
     CleanUpJobs,
@@ -110,13 +110,13 @@ pub(crate) enum JobMessage {
 ///
 /// This approach can be extended to other tasks that are mutually exclusive with each other.
 #[derive(Debug)]
-pub(crate) struct JobManager<T: Queueable> {
-    pub(crate) pool: PoolWrapper,
-    pub(crate) shared_config: Arc<RwLock<Config>>,
-    pub(crate) job_queues: HashMap<String, Queue<T>>,
-    pub(crate) input_file_mover: orm::input_files::InputFileCleanupHandler,
-    pub(crate) error_handler: ErrorHandler,
-    pub(crate) msg_recv: tokio::sync::mpsc::Receiver<JobMessage>,
+pub struct JobManager<T: Queueable> {
+    pub pool: PoolWrapper,
+    pub shared_config: Arc<RwLock<Config>>,
+    pub job_queues: HashMap<String, Queue<T>>,
+    pub input_file_mover: orm::input_files::InputFileCleanupHandler,
+    pub error_handler: ErrorHandler,
+    pub msg_recv: tokio::sync::mpsc::Receiver<JobMessage>,
 }
 
 impl<T: Queueable> JobManager<T> {
@@ -130,7 +130,7 @@ impl<T: Queueable> JobManager<T> {
     /// The `JobManager` instance, only returns an `Err` if connecting to the database
     /// failed.
     #[allow(dead_code)] // used in tests
-    pub(crate) async fn new(
+    pub async fn new(
         shared_config: Arc<RwLock<Config>>,
         error_handler: ErrorHandler,
         msg_recv: tokio::sync::mpsc::Receiver<JobMessage>,
@@ -147,7 +147,7 @@ impl<T: Queueable> JobManager<T> {
     ///
     /// # Returns
     /// The `JobManager` instance, only returns an `Err` if getting the database connection failed.
-    pub(crate) async fn new_from_pool(
+    pub async fn new_from_pool(
         pool: PoolWrapper,
         shared_config: Arc<RwLock<Config>>,
         error_handler: ErrorHandler,
@@ -165,7 +165,7 @@ impl<T: Queueable> JobManager<T> {
         Ok(me)
     }
 
-    pub(crate) async fn message_loop(&mut self) {
+    pub async fn message_loop(&mut self) {
         loop {
             debug!("Job manager waiting for next message");
             let msg = self.msg_recv.recv().await;
@@ -225,7 +225,7 @@ impl<T: Queueable> JobManager<T> {
     ///
     /// Note that while errors may occur in this function, they are passed to the instance's
     /// error handler to report (usually to a log file and/or email).
-    async fn start_jobs_entry_point(&mut self) -> anyhow::Result<()> {
+    pub async fn start_jobs_entry_point(&mut self) -> anyhow::Result<()> {
         if self.am_i_disabled().await {
             warn!("Job management disabled in configuration");
             return Ok(());
@@ -301,7 +301,7 @@ impl<T: Queueable> JobManager<T> {
         Ok(())
     }
 
-    pub(crate) async fn reset_running_jobs(&self) -> anyhow::Result<()> {
+    pub async fn reset_running_jobs(&self) -> anyhow::Result<()> {
         let mut conn =
             self.pool.get_connection().await.context(
                 "Unable to get connection from DB pool while trying to reset running jobs",
@@ -579,7 +579,7 @@ impl<T: Queueable> JobManager<T> {
     /// Repeatedly check if all jobs currently running are done and return when that is true.
     ///
     /// This is used for the [`ExitCommand::Graceful`] case.
-    async fn wait_for_jobs_to_finish(&mut self) {
+    pub async fn wait_for_jobs_to_finish(&mut self) {
         let mut conn = match self.pool.get_connection().await {
             Ok(c) => c,
             Err(e) => {
@@ -641,7 +641,7 @@ impl<T: Queueable> JobManager<T> {
 /// priors and to update the LUTs are both variants of [`ServiceJobRunner`], not
 /// separate implementors of this trait (though that could change in the future).
 #[async_trait]
-pub(crate) trait Queueable {
+pub trait Queueable {
     fn describe(&self) -> String;
 
     /// Create a new instance of this type from a job in the database.
@@ -669,7 +669,7 @@ pub(crate) trait Queueable {
 }
 
 #[derive(Debug)]
-pub(crate) struct Queue<T: Queueable> {
+pub struct Queue<T: Queueable> {
     max_num_items: usize,
     items: Vec<T>,
     blocking_priority: i32,

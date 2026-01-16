@@ -9,23 +9,23 @@ use tokio::task::JoinHandle;
 
 use crate::error::ErrorHandler;
 
-pub(crate) enum MetMessage {
+pub enum MetMessage {
     DownloadMet,
     StopGracefully,
     StopRapidly,
 }
 
 #[derive(Debug)]
-pub(crate) struct MetManager {
-    pub(crate) pool: orm::PoolWrapper,
-    pub(crate) shared_config: Arc<RwLock<Config>>,
-    pub(crate) error_handler: ErrorHandler,
-    pub(crate) msg_recv: tokio::sync::mpsc::Receiver<MetMessage>,
+pub struct MetManager {
+    pub pool: orm::PoolWrapper,
+    pub shared_config: Arc<RwLock<Config>>,
+    pub error_handler: ErrorHandler,
+    pub msg_recv: tokio::sync::mpsc::Receiver<MetMessage>,
     inner_runner: Option<JoinHandle<()>>,
 }
 
 impl MetManager {
-    pub(crate) async fn new_with_pool(
+    pub async fn new_with_pool(
         pool: orm::PoolWrapper,
         shared_config: Arc<RwLock<Config>>,
         error_handler: ErrorHandler,
@@ -40,7 +40,7 @@ impl MetManager {
         }
     }
 
-    pub(crate) async fn message_loop(&mut self) {
+    pub async fn message_loop(&mut self) {
         loop {
             debug!("MetManager waiting for next message");
             let msg = self.msg_recv.recv().await;

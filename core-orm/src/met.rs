@@ -1,18 +1,18 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Display,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
-use anyhow::Context;
-use chrono::{NaiveDate, NaiveDateTime};
+use anyhow::{anyhow, Context};
+use chrono::{Duration, NaiveDate, NaiveDateTime};
 use log::{debug, info, trace, warn};
 use serde::{Deserialize, Serialize};
-use sqlx::{self, FromRow, Type};
+use sqlx::{self, Connection, FromRow, Type};
 
 use crate::{
-    config::{self, MetCfgKey, ProcCfgKey},
+    config::{self, KeyedMetDownloadConfig, MetCfgKey, ProcCfgKey},
     error::DefaultOptsQueryError,
     utils::DateIterator,
     MySqlConn,
@@ -1009,4 +1009,111 @@ impl MetFile {
 
         Ok(())
     }
+}
+
+pub async fn rescan_met_files(
+    conn: &mut MySqlConn,
+    start_date: Option<NaiveDate>,
+    end_date: Option<NaiveDate>,
+    config: &config::Config,
+    met_keys: Option<&[MetCfgKey]>,
+    dry_run: bool,
+) -> anyhow::Result<u64> {
+    // Tried to avoid allocated the vec by just returning the iter, but the lifetimes
+    // don't work out. We want to collect the met keys first...
+    let met_key_vec = if let Some(keys) = met_keys {
+        // This makes it into a vector of references
+        Vec::from_iter(keys.iter())
+    } else {
+        let mut v = HashSet::new();
+        for proc_k in config.get_proc_cfgs_with_auto_met_download(start_date, end_date) {
+            let proc = config
+                .processing_configuration
+                .get(proc_k)
+                .ok_or_else(|| anyhow!("Unknown processing configuration '{proc_k}'"))?;
+            v.extend(proc.required_mets.iter());
+        }
+        Vec::from_iter(v.into_iter())
+    };
+
+    // ...because this block is the same however we get the list of keys.
+    let mut met_keys_and_cfgs = vec![];
+    for met_k in met_key_vec {
+        let met_cfg = config
+            .data
+            .met_download
+            .get(met_k)
+            .ok_or_else(|| anyhow!("Unknown met key '{met_k}'"))?;
+        met_keys_and_cfgs.push(KeyedMetDownloadConfig {
+            product_key: met_k,
+            cfg: met_cfg,
+        });
+    }
+
+    let mut n_added = 0;
+    let mut transaction = conn.begin().await?;
+
+    for met_key_cfg in met_keys_and_cfgs {
+        let fallback_start_date =
+            MetFile::get_last_complete_date_for_config(&mut transaction, met_key_cfg)
+                .await?
+                .map(|d| d + Duration::days(1))
+                .unwrap_or(met_key_cfg.cfg.earliest_date);
+        let met_start_date = start_date.unwrap_or(fallback_start_date);
+        let met_end_date = end_date.or(met_key_cfg.cfg.latest_date);
+        let met_end_date = crate::utils::check_start_end_date(met_start_date, met_end_date)
+            .with_context(|| {
+                anyhow!(
+                    "Start/end dates for met '{}' were invalid",
+                    met_key_cfg.product_key
+                )
+            })?;
+
+        for curr_date in DateIterator::new_one_range(met_start_date, met_end_date) {
+            info!("Scanning for new met files on {curr_date}");
+
+            for file in met_key_cfg.cfg.expected_files_on_day(curr_date)? {
+                if !file.exists() {
+                    continue;
+                }
+
+                match MetFile::file_exists_by_type(&mut transaction, &file, met_key_cfg).await {
+                    Ok(true) => {
+                        debug!(
+                            "{} [{}] already in database",
+                            file.display(),
+                            met_key_cfg.product_key
+                        );
+                    }
+                    Ok(false) => {
+                        if !dry_run {
+                            n_added += MetFile::add_met_file_infer_date(
+                                &mut transaction,
+                                &file,
+                                met_key_cfg,
+                            )
+                            .await
+                            .and(Ok(1))
+                            .unwrap_or_else(|e| {
+                                warn!("Error adding {} to the database: {}", file.display(), e);
+                                0
+                            });
+                        } else {
+                            println!("Would add {} [{}]", file.display(), met_key_cfg.product_key);
+                            n_added += 1;
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Error checking if {} is in the database: {e:?}",
+                            file.display()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    transaction.commit().await?;
+    Ok(n_added)
 }

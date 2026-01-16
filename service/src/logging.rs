@@ -18,7 +18,7 @@ use log4rs::{
 /// The TCCON automatic priors service that handles all automation
 #[derive(Debug, Args)]
 #[clap(setting = clap::AppSettings::DeriveDisplayOrder, version)]
-pub(crate) struct ServiceLoggingCli {
+pub struct ServiceLoggingCli {
     /// Disable logging to stderr
     #[clap(long)]
     no_log_stderr: bool,
@@ -30,7 +30,7 @@ pub(crate) struct ServiceLoggingCli {
 
     /// If given, a file which messages from the service will be written to.
     #[clap(long)]
-    pub(crate) log_file: Option<String>,
+    pub log_file: Option<String>,
 
     /// The lowest severity message to write to the file. Same options as --stderr-level
     #[clap(long, default_value_t = LevelFilter::Info)]
@@ -48,7 +48,7 @@ pub(crate) struct ServiceLoggingCli {
 }
 
 impl ServiceLoggingCli {
-    pub(crate) fn configure_logging(args: ServiceLoggingCli) {
+    pub fn configure_logging(args: ServiceLoggingCli) {
         setup_logging(
             !args.no_log_stderr,
             args.stderr_level,
@@ -60,7 +60,7 @@ impl ServiceLoggingCli {
     }
 }
 
-pub(crate) fn setup_logging(
+pub fn setup_logging(
     log_to_console: bool,
     console_log_level: LevelFilter,
     log_file: Option<&str>,

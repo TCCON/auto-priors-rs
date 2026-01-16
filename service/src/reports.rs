@@ -7,22 +7,22 @@ use tokio::sync::RwLock;
 
 use crate::error::ErrorHandler;
 
-pub(crate) enum ReportMessage {
+pub enum ReportMessage {
     DailyReport,
     WeeklyReport,
     StopGracefully,
     StopRapidly,
 }
 
-pub(crate) struct ReportManager {
-    pub(crate) pool: orm::PoolWrapper,
-    pub(crate) shared_config: Arc<RwLock<Config>>,
-    pub(crate) error_handler: ErrorHandler,
-    pub(crate) msg_recv: tokio::sync::mpsc::Receiver<ReportMessage>,
+pub struct ReportManager {
+    pub pool: orm::PoolWrapper,
+    pub shared_config: Arc<RwLock<Config>>,
+    pub error_handler: ErrorHandler,
+    pub msg_recv: tokio::sync::mpsc::Receiver<ReportMessage>,
 }
 
 impl ReportManager {
-    pub(crate) async fn new_with_pool(
+    pub async fn new_with_pool(
         pool: orm::PoolWrapper,
         shared_config: Arc<RwLock<Config>>,
         error_handler: ErrorHandler,
@@ -36,7 +36,7 @@ impl ReportManager {
         }
     }
 
-    pub(crate) async fn message_loop(&mut self) {
+    pub async fn message_loop(&mut self) {
         loop {
             debug!("MetManager waiting for next message");
             let msg = self.msg_recv.recv().await;

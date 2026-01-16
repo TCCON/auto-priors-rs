@@ -379,6 +379,24 @@ pub fn later_opt_start_date(d1: Option<NaiveDate>, d2: Option<NaiveDate>) -> Opt
     }
 }
 
+/// Check that a user-provided end date is after the start date OR set the default end date
+pub fn check_start_end_date(
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>,
+) -> anyhow::Result<NaiveDate> {
+    if let Some(ed) = end_date {
+        if ed <= start_date {
+            return Err(anyhow::Error::msg(
+                "end_date must be at least one day after the start_date",
+            ));
+        } else {
+            return Ok(ed);
+        }
+    } else {
+        return Ok(start_date + Duration::days(1));
+    };
+}
+
 pub fn format_lat_str(lat: f32, prec: u8) -> String {
     let ns = if lat >= 0.0 { "N" } else { "S" };
     let lat = lat.abs();

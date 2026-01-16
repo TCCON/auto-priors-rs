@@ -862,7 +862,7 @@ async fn test_met_rescanning() {
     }
 
     // Now we should have all the files from 2018-01-02
-    met_download::rescan_met_files(
+    orm::met::rescan_met_files(
         &mut conn,
         Some(test_date),
         Some(test_date + Duration::days(1)),

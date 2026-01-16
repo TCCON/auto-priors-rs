@@ -5,20 +5,20 @@ use orm::config::{Config, EmailConfig};
 use tokio::sync::{watch, RwLock};
 
 #[derive(Debug, Clone)]
-pub(crate) enum ErrorHandler {
+pub enum ErrorHandler {
     Logging(LoggingErrorHandler),
     EmailAdmins(EmailAdminsErrorHandler),
 }
 
 impl ErrorHandler {
-    pub(crate) fn report_error(&self, err: &(dyn std::error::Error + Send + Sync + 'static)) {
+    pub fn report_error(&self, err: &(dyn std::error::Error + Send + Sync + 'static)) {
         match self {
             ErrorHandler::Logging(h) => h.report_error(err),
             ErrorHandler::EmailAdmins(h) => h.report_error(err),
         }
     }
 
-    pub(crate) fn report_error_with_context<S: AsRef<str>>(
+    pub fn report_error_with_context<S: AsRef<str>>(
         &self,
         err: &(dyn std::error::Error + Send + Sync + 'static),
         context: S,
@@ -31,14 +31,14 @@ impl ErrorHandler {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LoggingErrorHandler {}
+pub struct LoggingErrorHandler {}
 
 impl LoggingErrorHandler {
-    pub(crate) fn report_error(&self, err: &(dyn std::error::Error + Send + Sync + 'static)) {
+    pub fn report_error(&self, err: &(dyn std::error::Error + Send + Sync + 'static)) {
         error!("{err:?}")
     }
 
-    pub(crate) fn report_error_with_context<S: AsRef<str>>(
+    pub fn report_error_with_context<S: AsRef<str>>(
         &self,
         err: &(dyn std::error::Error + Send + Sync + 'static),
         context: S,
@@ -49,13 +49,13 @@ impl LoggingErrorHandler {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct EmailAdminsErrorHandler {
+pub struct EmailAdminsErrorHandler {
     cached_email_config: EmailConfig,
     config_watcher: watch::Receiver<orm::config::Config>,
 }
 
 impl EmailAdminsErrorHandler {
-    pub(crate) async fn new(
+    pub async fn new(
         shared_config: Arc<RwLock<Config>>,
         rx_config: watch::Receiver<orm::config::Config>,
     ) -> Self {

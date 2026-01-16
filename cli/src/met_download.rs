@@ -49,24 +49,6 @@ pub enum MetActions {
     Rescan(RescanMetCli),
 }
 
-/// Check that a user-provided end date is after the start date OR set the default end date
-fn check_start_end_date(
-    start_date: NaiveDate,
-    end_date: Option<NaiveDate>,
-) -> anyhow::Result<NaiveDate> {
-    if let Some(ed) = end_date {
-        if ed <= start_date {
-            return Err(anyhow::Error::msg(
-                "end_date must be at least one day after the start_date",
-            ));
-        } else {
-            return Ok(ed);
-        }
-    } else {
-        return Ok(start_date + Duration::days(1));
-    };
-}
-
 /// Return an iterator of dates to download/recheck/etc. for a single type of met file.
 ///
 /// The start and end of the date iterator will depend on:
@@ -514,7 +496,7 @@ pub async fn check_one_config_set_files_for_dates(
     end_date: Option<NaiveDate>,
 ) -> anyhow::Result<HashMap<NaiveDate, orm::met::MetDayState>> {
     // Verify input dates are valid
-    let end_date = check_start_end_date(start_date, end_date)?;
+    let end_date = orm::utils::check_start_end_date(start_date, end_date)?;
 
     // Go ahead and get the set of files expected to be downloaded according to the config
     let dl_configs = cfg.get_mets_for_processing_config(proc_key)?;
@@ -872,7 +854,7 @@ pub async fn rescan_met_files_cli(
         None
     };
 
-    let n = rescan_met_files(
+    let n = orm::met::rescan_met_files(
         conn,
         clargs.start_date,
         clargs.end_date,
@@ -887,115 +869,6 @@ pub async fn rescan_met_files_cli(
         info!("")
     }
     Ok(())
-}
-
-pub async fn rescan_met_files(
-    conn: &mut orm::MySqlConn,
-    start_date: Option<NaiveDate>,
-    end_date: Option<NaiveDate>,
-    config: &orm::config::Config,
-    met_keys: Option<&[MetCfgKey]>,
-    dry_run: bool,
-) -> anyhow::Result<u64> {
-    // Tried to avoid allocated the vec by just returning the iter, but the lifetimes
-    // don't work out. We want to collect the met keys first...
-    let met_key_vec = if let Some(keys) = met_keys {
-        // This makes it into a vector of references
-        Vec::from_iter(keys.iter())
-    } else {
-        let mut v = HashSet::new();
-        for proc_k in config.get_proc_cfgs_with_auto_met_download(start_date, end_date) {
-            let proc = config
-                .processing_configuration
-                .get(proc_k)
-                .ok_or_else(|| anyhow!("Unknown processing configuration '{proc_k}'"))?;
-            v.extend(proc.required_mets.iter());
-        }
-        Vec::from_iter(v.into_iter())
-    };
-
-    // ...because this block is the same however we get the list of keys.
-    let mut met_keys_and_cfgs = vec![];
-    for met_k in met_key_vec {
-        let met_cfg = config
-            .data
-            .met_download
-            .get(met_k)
-            .ok_or_else(|| anyhow!("Unknown met key '{met_k}'"))?;
-        met_keys_and_cfgs.push(KeyedMetDownloadConfig {
-            product_key: met_k,
-            cfg: met_cfg,
-        });
-    }
-
-    let mut n_added = 0;
-    let mut transaction = conn.begin().await?;
-
-    for met_key_cfg in met_keys_and_cfgs {
-        let fallback_start_date =
-            orm::met::MetFile::get_last_complete_date_for_config(&mut transaction, met_key_cfg)
-                .await?
-                .map(|d| d + Duration::days(1))
-                .unwrap_or(met_key_cfg.cfg.earliest_date);
-        let met_start_date = start_date.unwrap_or(fallback_start_date);
-        let met_end_date = end_date.or(met_key_cfg.cfg.latest_date);
-        let met_end_date =
-            check_start_end_date(met_start_date, met_end_date).with_context(|| {
-                anyhow!(
-                    "Start/end dates for met '{}' were invalid",
-                    met_key_cfg.product_key
-                )
-            })?;
-
-        for curr_date in DateIterator::new_one_range(met_start_date, met_end_date) {
-            info!("Scanning for new met files on {curr_date}");
-
-            for file in met_key_cfg.cfg.expected_files_on_day(curr_date)? {
-                if !file.exists() {
-                    continue;
-                }
-
-                match orm::met::MetFile::file_exists_by_type(&mut transaction, &file, met_key_cfg)
-                    .await
-                {
-                    Ok(true) => {
-                        debug!(
-                            "{} [{}] already in database",
-                            file.display(),
-                            met_key_cfg.product_key
-                        );
-                    }
-                    Ok(false) => {
-                        if !dry_run {
-                            n_added += orm::met::MetFile::add_met_file_infer_date(
-                                &mut transaction,
-                                &file,
-                                met_key_cfg,
-                            )
-                            .await
-                            .and(Ok(1))
-                            .unwrap_or_else(|e| {
-                                warn!("Error adding {} to the database: {}", file.display(), e);
-                                0
-                            });
-                        } else {
-                            println!("Would add {} [{}]", file.display(), met_key_cfg.product_key);
-                            n_added += 1;
-                        }
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Error checking if {} is in the database: {e:?}",
-                            file.display()
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    transaction.commit().await?;
-    Ok(n_added)
 }
 
 /// Delete already downloaded met files between two dates.
@@ -1086,7 +959,7 @@ pub async fn download_files_for_dates(
     dry_run: bool,
 ) -> anyhow::Result<()> {
     // First check that the dates are valid
-    let end_date = check_start_end_date(start_date, end_date)?;
+    let end_date = orm::utils::check_start_end_date(start_date, end_date)?;
 
     // Then check that the requested mets were defined in the configuration
     let met_cfgs: Vec<KeyedMetDownloadConfig<'_>> = met_keys

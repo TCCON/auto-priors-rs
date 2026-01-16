@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use crate::error::ErrorHandler;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum StdSiteMessage {
+pub enum StdSiteMessage {
     AddJobs,
     MakeTarballs,
     UpdateJson,
@@ -19,15 +19,15 @@ pub(crate) enum StdSiteMessage {
 }
 
 #[derive(Debug)]
-pub(crate) struct StdSiteManager {
-    pub(crate) pool: orm::PoolWrapper,
-    pub(crate) shared_config: Arc<RwLock<Config>>,
-    pub(crate) error_handler: ErrorHandler,
-    pub(crate) msg_recv: tokio::sync::mpsc::Receiver<StdSiteMessage>,
+pub struct StdSiteManager {
+    pub pool: orm::PoolWrapper,
+    pub shared_config: Arc<RwLock<Config>>,
+    pub error_handler: ErrorHandler,
+    pub msg_recv: tokio::sync::mpsc::Receiver<StdSiteMessage>,
 }
 
 impl StdSiteManager {
-    pub(crate) async fn new_with_pool(
+    pub async fn new_with_pool(
         pool: orm::PoolWrapper,
         shared_config: Arc<RwLock<Config>>,
         error_handler: ErrorHandler,
@@ -41,7 +41,7 @@ impl StdSiteManager {
         }
     }
 
-    pub(crate) async fn message_loop(&mut self) {
+    pub async fn message_loop(&mut self) {
         loop {
             debug!("StdSiteManager waiting for next message");
             let msg = self.msg_recv.recv().await;
@@ -98,7 +98,7 @@ impl StdSiteManager {
         Ok(())
     }
 
-    async fn tar_std_sites_output(&mut self) -> anyhow::Result<()> {
+    pub async fn tar_std_sites_output(&mut self) -> anyhow::Result<()> {
         if self.am_i_disabled().await {
             warn!("Standard site priors disabled in config");
             return Ok(());
