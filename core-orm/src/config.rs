@@ -405,7 +405,7 @@ impl Config {
         &self,
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
-    ) -> anyhow::Result<Vec<KeyedMetDownloadConfig>> {
+    ) -> anyhow::Result<Vec<KeyedMetDownloadConfig<'_>>> {
         let proc_cfgs = self
             .get_proc_cfgs_with_auto_met_download(start_date, end_date)
             .into_iter()

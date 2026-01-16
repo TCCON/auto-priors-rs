@@ -730,7 +730,7 @@ impl Display for Job {
 }
 
 impl Job {
-    pub fn verbose_display(&self) -> VerboseDisplayJob {
+    pub fn verbose_display(&self) -> VerboseDisplayJob<'_> {
         VerboseDisplayJob { job: self }
     }
 
