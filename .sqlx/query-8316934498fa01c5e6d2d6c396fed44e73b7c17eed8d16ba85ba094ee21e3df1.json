@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT id FROM v_StdSiteJobs WHERE processing_key = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8316934498fa01c5e6d2d6c396fed44e73b7c17eed8d16ba85ba094ee21e3df1"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE v_StdSiteJobs SET processing_key = ? WHERE date >= ? AND date < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "83f7df88cfb23b8345a5ce9c02c57f13878b9d34887fa95228fd81cb514697dc"
+}

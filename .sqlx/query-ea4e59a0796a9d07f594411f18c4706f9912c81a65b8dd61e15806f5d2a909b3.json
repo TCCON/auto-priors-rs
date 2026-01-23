@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT date FROM v_StdSiteJobs WHERE site_id = ?",
+  "query": "SELECT date FROM v_StdSiteJobs WHERE site_id = ? AND processing_key = ?",
   "describe": {
     "columns": [
       {
@@ -15,11 +15,11 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
       false
     ]
   },
-  "hash": "88b97e6ffdf8f4ef9d18cc7061eda6e58819b6e395ab554e2cd091e8abee3b72"
+  "hash": "ea4e59a0796a9d07f594411f18c4706f9912c81a65b8dd61e15806f5d2a909b3"
 }

@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT DISTINCT(site_id) FROM StdSiteList",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "site_id",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | UNIQUE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 8
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fd7eda5abdab01a3dde5356ce8804ca6927d693e6d66dbde08f0914b244c2d01"
+}

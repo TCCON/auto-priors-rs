@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT id FROM v_StdSiteJobs WHERE date >= ? AND date < ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6bc2b54932647ac1e5955c667de0b635f83333a98d52de7f7d7c853c50e64e94"
+}

@@ -1,0 +1,36 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT DISTINCT date as udate, processing_key as upk FROM StdSiteJobs WHERE state = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "udate",
+        "type_info": {
+          "type": "Date",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "upk",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "22ee2bfd04fc6f14c38f647fd659cedd22d9c11c11d55729fa4bdfc646e6a3b5"
+}

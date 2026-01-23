@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT id FROM v_StdSiteJobs WHERE site_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 11
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bad86ccb690ea3cbfe071826efb6bd9b0ce74d062598974ad5c12bfc3d167e20"
+}

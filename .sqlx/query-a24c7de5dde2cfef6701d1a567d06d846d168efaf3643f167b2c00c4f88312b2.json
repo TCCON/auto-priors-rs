@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT * FROM v_StdSiteJobs WHERE site_id = ? and date = ?",
+  "query": "SELECT * FROM v_StdSiteJobs WHERE site_id = ? AND date = ? AND processing_key = ?",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,16 @@
       },
       {
         "ordinal": 3,
+        "name": "processing_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "state",
         "type_info": {
           "type": "Tiny",
@@ -44,7 +54,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "job",
         "type_info": {
           "type": "Long",
@@ -54,7 +64,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "tarfile",
         "type_info": {
           "type": "Blob",
@@ -64,7 +74,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "site_id",
         "type_info": {
           "type": "String",
@@ -74,7 +84,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "site_type",
         "type_info": {
           "type": "String",
@@ -84,7 +94,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "output_structure",
         "type_info": {
           "type": "String",
@@ -95,9 +105,10 @@
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 3
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -109,5 +120,5 @@
       true
     ]
   },
-  "hash": "e6a9846505e16de9f7a3dc3677a7bab3e1d1f436fba5373c8665377872c7d383"
+  "hash": "a24c7de5dde2cfef6701d1a567d06d846d168efaf3643f167b2c00c4f88312b2"
 }

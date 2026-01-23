@@ -1,0 +1,47 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT site_id,date,processing_key FROM v_StdSiteJobs",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "site_id",
+        "type_info": {
+          "type": "String",
+          "flags": "UNIQUE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 8
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "date",
+        "type_info": {
+          "type": "Date",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "processing_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "1410d6bfaf612718887939ed82fdc134e910358e5686c9b3a1e59d52facf7691"
+}

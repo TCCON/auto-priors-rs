@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT date,GROUP_CONCAT(DISTINCT site_id SEPARATOR \",\") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR \",\") AS ids FROM v_StdSiteJobs WHERE state = ? GROUP BY date;",
+  "query": "SELECT date,processing_key,GROUP_CONCAT(DISTINCT site_id SEPARATOR \",\") AS site_ids,GROUP_CONCAT(DISTINCT id SEPARATOR \",\") AS ids FROM v_StdSiteJobs WHERE state = ? GROUP BY date, processing_key;",
   "describe": {
     "columns": [
       {
@@ -15,6 +15,16 @@
       },
       {
         "ordinal": 1,
+        "name": "processing_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 2,
         "name": "site_ids",
         "type_info": {
           "type": "Blob",
@@ -24,7 +34,7 @@
         }
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "ids",
         "type_info": {
           "type": "Blob",
@@ -39,9 +49,10 @@
     },
     "nullable": [
       false,
+      false,
       true,
       true
     ]
   },
-  "hash": "44ee89f849d2b5cbeb2b67428f6c98c303fd373fb764ebfd8b3afc20754ff4d5"
+  "hash": "d7fa83d60c11fd8f5f8c63e379261f3e47851da91b58495e3712f00c2f1ca48d"
 }

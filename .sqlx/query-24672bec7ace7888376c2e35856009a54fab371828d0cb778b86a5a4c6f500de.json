@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO StdSiteJobs (site, date, processing_key, state, job) VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "24672bec7ace7888376c2e35856009a54fab371828d0cb778b86a5a4c6f500de"
+}

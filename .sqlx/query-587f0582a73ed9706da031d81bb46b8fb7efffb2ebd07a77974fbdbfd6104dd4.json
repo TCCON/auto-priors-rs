@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT processing_key FROM v_StdSiteJobs",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "processing_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "587f0582a73ed9706da031d81bb46b8fb7efffb2ebd07a77974fbdbfd6104dd4"
+}

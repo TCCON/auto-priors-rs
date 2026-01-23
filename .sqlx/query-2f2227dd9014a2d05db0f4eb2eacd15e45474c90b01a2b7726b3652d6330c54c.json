@@ -35,6 +35,16 @@
       },
       {
         "ordinal": 3,
+        "name": "processing_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "state",
         "type_info": {
           "type": "Tiny",
@@ -44,7 +54,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "job",
         "type_info": {
           "type": "Long",
@@ -54,7 +64,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "tarfile",
         "type_info": {
           "type": "Blob",
@@ -64,7 +74,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "site_id",
         "type_info": {
           "type": "String",
@@ -74,7 +84,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "site_type",
         "type_info": {
           "type": "String",
@@ -84,7 +94,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "output_structure",
         "type_info": {
           "type": "String",
@@ -98,6 +108,7 @@
       "Right": 1
     },
     "nullable": [
+      false,
       false,
       false,
       false,

@@ -62,6 +62,16 @@
           "char_set": 224,
           "max_size": 262140
         }
+      },
+      {
+        "ordinal": 6,
+        "name": "processing_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 256
+        }
       }
     ],
     "parameters": {
@@ -73,7 +83,8 @@
       false,
       false,
       true,
-      true
+      true,
+      false
     ]
   },
   "hash": "a12b0bb12e4363cd0c46bf2974e5bf5953953917e1d9f89790e7c96ff43d906d"
