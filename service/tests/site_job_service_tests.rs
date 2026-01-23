@@ -1,6 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use chrono::NaiveDate;
+use glob::glob;
 use itertools::Itertools;
 use orm::{
     config::ProcCfgKey,
@@ -229,6 +230,8 @@ async fn test_add_later_config() {
     verify_site_job_rows(&expected_sites, &expected_final_keys, &rows);
 }
 
+/// Test that when we remove an alternate processing approach from the configuration,
+/// it does not alter the jobs listed in the database.
 #[tokio::test]
 async fn test_removed_alternate_config() {
     init_logging();
@@ -269,8 +272,12 @@ async fn test_removed_alternate_config() {
     verify_site_job_rows(&expected_sites, &expected_keys, &rows);
 }
 
+/// Test that running standard sites with the configuration set to have the GEOS IT
+/// chemistry as an alternate to the GEOS FP-IT chemistry for the first day works
+/// correctly. Note that this does not actually compare the output .mod and .vmr files
+/// to any expected values - that check is currently done offline.
 #[tokio::test]
-#[ignore = "long test, actually runs ginput"]
+#[ignore = "long test to run ginput - NOTE: does not validate output correctness"]
 async fn test_site_job_run_ginput() {
     init_logging();
     let config = make_ginput_test_config();
@@ -328,18 +335,77 @@ async fn test_site_job_run_ginput() {
         .expect("Making standard site tarballs should succeed");
 }
 
-fn make_ginput_test_config() -> orm::config::Config {
-    let mut config =
-        make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
+/// Test that input files requesting the alternate GEOS IT chm + FP-IT met correctly get
+/// reduced CO and that jobs not requesting an alternate processing configuration
+/// correctly get the default met+chm for each date. This runs ginput, so it will
+/// take some time. Note that this does not automatically verify that the output
+/// matches (yet), use the plotting script in the top `testing` directory to
+/// check the output manually.
+#[tokio::test]
+#[ignore = "long test to run ginput - NOTE: does not validate output correctness"]
+async fn test_request_job_run_ginput() {
+    init_logging();
+    let mut config = make_ginput_test_config();
+    // We need to keep the temporary directory objects; once they're dropped, the directories are deleted.
+    let (_tmp_in_dir, _tmp_parsed_dir) = setup_test_input_files(&mut config);
 
+    // We don't actually need the test sites, but this is a convenient way to initialize the pool.
+    let (pool, _test_db) = multiline_sql_init_pool!("sql/init_test_sites.sql");
+
+    let mut conn = pool
+        .get_connection()
+        .await
+        .expect("Should be able to get connection from the database pool");
+    // Rather than hand-write SQL to insert the met files into the database, we can
+    // scan for the files, since we need to have the actual files on hand to run this test.
+    orm::met::rescan_met_files(
+        &mut conn,
+        Some(NaiveDate::from_ymd_opt(2023, 5, 30).unwrap()),
+        Some(NaiveDate::from_ymd_opt(2023, 6, 3).unwrap()),
+        &config,
+        None,
+        false,
+    )
+    .await
+    .expect("Scanning for met files should work");
+
+    let shared_config = Arc::new(tokio::sync::RwLock::new(config));
+
+    // We'll use the manager to mimic the real behavior
+    let mut job_manager = make_job_manager(pool.clone(), Arc::clone(&shared_config)).await;
+
+    // First run the LUT regen jobs
+    job_manager
+        .start_jobs_entry_point()
+        .await
+        .expect("Starting jobs should succeed");
+    job_manager.wait_for_jobs_to_finish().await;
+
+    // Then actually run the jobs - this is what will take a while to finish.
+    job_manager
+        .start_jobs_entry_point()
+        .await
+        .expect("Starting jobs should succeed");
+    job_manager.wait_for_jobs_to_finish().await;
+
+    // Unlike the standard site runs, this should be all we need to do. There should now be two jobs in the
+    // testing/output directory.
+}
+
+fn get_ginput_testing_dir() -> PathBuf {
     // Get the workspace root. The manifest dir points to the actual package (`cli`, because
     // that's where I've been writing the tests), so we want the parent.
     let crate_root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("expected CARGO_MANIFEST_DIR to have a parent")
         .to_path_buf();
-    let testing_dir = crate_root_dir.join("testing").join("ginput-tests");
+    crate_root_dir.join("testing").join("ginput-tests")
+}
 
+fn make_ginput_test_config() -> orm::config::Config {
+    let mut config =
+        make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
+    let testing_dir = get_ginput_testing_dir();
     // Override the paths for the GEOS files, the ginput script locations, and the
     // output locations. Unlike many other tests, we want the results from this test
     // to persist so we can review them.
@@ -390,11 +456,46 @@ fn make_ginput_test_config() -> orm::config::Config {
         .auto_tarball_dir = Some(testing_dir.join("alt-tarballs"));
     config.execution.std_sites_output_base = testing_dir.join("work");
 
+    // This will be useful for the tests using request files
+    config.execution.output_path = testing_dir.join("output");
+
     // Also need to point to the real base .vmr file and levels file
     config.data.base_vmr_file = Some(testing_dir.join("summer_35N.vmr"));
     config.data.zgrid_file = Some(testing_dir.join("ap_51_level_0_to_70km.gnd"));
 
     config
+}
+
+fn setup_test_input_files(
+    config: &mut orm::config::Config,
+) -> (tempdir::TempDir, tempdir::TempDir) {
+    let testing_dir = get_ginput_testing_dir();
+    let test_input_files = [
+        testing_dir.join("input-files").join("alt_met.txt"),
+        testing_dir.join("input-files").join("std_met.txt"),
+    ];
+
+    let tmp_input_dir = tempdir::TempDir::new_in(&testing_dir, "tmp-input-files")
+        .expect("Should be able to create temporary input file directory");
+    let tmp_parsed_dir = tempdir::TempDir::new_in(&testing_dir, "tmp-input-files-parsed")
+        .expect("Should be able to create temporary parsed input file directory");
+
+    for src in test_input_files {
+        let fname = src.file_name().expect("input file should have a file name");
+        let dest = tmp_input_dir.path().join(fname);
+        std::fs::copy(&src, &dest).expect("Should be able to copy input file");
+    }
+
+    let input_pattern = tmp_input_dir
+        .path()
+        .join("*.txt")
+        .to_string_lossy()
+        .to_string();
+    config.execution.input_file_pattern = input_pattern;
+    config.execution.success_input_file_dir = tmp_parsed_dir.path().to_path_buf();
+    config.execution.failure_input_file_dir = tmp_parsed_dir.path().to_path_buf();
+
+    (tmp_input_dir, tmp_parsed_dir)
 }
 
 async fn make_job_manager(

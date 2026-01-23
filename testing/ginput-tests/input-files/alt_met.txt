@@ -1,0 +1,7 @@
+site_id=cx
+start_date=20230531
+end_date=20230601
+lon=-118.49
+lat=34.136
+email=test@test.com
+reanalysis=altco-geosfpit

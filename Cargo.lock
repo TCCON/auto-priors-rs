@@ -3923,6 +3923,7 @@ dependencies = [
  "sqlx",
  "tccon-priors-cli",
  "tccon_priors_orm",
+ "tempdir",
  "tokio",
 ]
 

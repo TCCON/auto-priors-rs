@@ -20,6 +20,9 @@ error_handler = { type = "Logging" }
 [execution.queues.standard]
 max_num_procs = 4
 
+[execution.queues.submitted]
+max_num_procs = 4
+
 [processing_configuration.std-geosfpit]
 required_mets = ["geosfpit-surf-met", "geosfpit-eta-met", "geosfpit-eta-chm"]
 ginput = "v1.0.6"

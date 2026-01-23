@@ -17,6 +17,7 @@ glob.workspace = true
 itertools.workspace = true
 log.workspace = true
 sqlx.workspace = true
+tempdir.workspace = true
 tokio.workspace = true
 
 orm = { path = "../core-orm", package = "tccon_priors_orm" }

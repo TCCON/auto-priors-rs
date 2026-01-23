@@ -1,0 +1,77 @@
+/oco2-data/tccon/analysis/jlaugh/Notebooks/TCCON/ginput-devel/envs/ginput-lts-v1.2.0/lib/python3.10/site-packages/pydap/lib.py:5: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import get_distribution
+/oco2-data/tccon/analysis/jlaugh/Notebooks/TCCON/ginput-devel/envs/ginput-lts-v1.2.0/lib/python3.10/site-packages/scipy/__init__.py:155: UserWarning: A NumPy version >=1.18.5 and <1.25.0 is required for this version of SciPy (detected version 1.26.4
+  warnings.warn(f"A NumPy version >={np_minversion} and <{np_maxversion}"
+DEBUG (from _fit_gas_trend in tccon_priors.py): Using exponential fit to extrapolate co2
+WARNING (from _check_extrap_fit in tccon_priors.py): Trying to extrapolate to a date more than 5 years after the end of the MLO/SMO record (2018-12-01 00:00:00). Likely okay, but consider updating the MLO/SMO co2 record if possible. (This warning can be disregarded if the MLO/SMO record was truncated.)
+/home/jlaugh/Notebooks/TCCON-research-notebooks/ginput-development/src/ginput-1.2.0-lts/ginput/priors/tccon_priors.py:767: FutureWarning: Slicing a positional slice with .loc is not supported, and will raise TypeError in a future version.  Use .loc with labels or .iloc with positions instead.
+  df.loc[to_fill, 'dmf_mean'] = fit(extrap_julian_dates) + delta_dmf
+DEBUG (from _fit_gas_trend in tccon_priors.py): Using exponential fit to extrapolate co2
+/home/jlaugh/Notebooks/TCCON-research-notebooks/ginput-development/src/ginput-1.2.0-lts/ginput/priors/tccon_priors.py:767: FutureWarning: Slicing a positional slice with .loc is not supported, and will raise TypeError in a future version.  Use .loc with labels or .iloc with positions instead.
+  df.loc[to_fill, 'dmf_mean'] = fit(extrap_julian_dates) + delta_dmf
+IMPORTANT (from __init__ in tccon_priors.py): Strat LUT dependencies unchanged; loading previous table
+INFO (from __init__ in tccon_priors.py): Loading co2 strat LUT
+DEBUG (from _fit_gas_trend in tccon_priors.py): Using order 2 polynomial to extrapolate n2o
+WARNING (from _check_extrap_fit in tccon_priors.py): Trying to extrapolate to a date more than 5 years after the end of the MLO/SMO record (2018-12-01 00:00:00). Likely okay, but consider updating the MLO/SMO n2o record if possible. (This warning can be disregarded if the MLO/SMO record was truncated.)
+/home/jlaugh/Notebooks/TCCON-research-notebooks/ginput-development/src/ginput-1.2.0-lts/ginput/priors/tccon_priors.py:767: FutureWarning: Slicing a positional slice with .loc is not supported, and will raise TypeError in a future version.  Use .loc with labels or .iloc with positions instead.
+  df.loc[to_fill, 'dmf_mean'] = fit(extrap_julian_dates) + delta_dmf
+DEBUG (from _fit_gas_trend in tccon_priors.py): Using order 2 polynomial to extrapolate n2o
+/home/jlaugh/Notebooks/TCCON-research-notebooks/ginput-development/src/ginput-1.2.0-lts/ginput/priors/tccon_priors.py:767: FutureWarning: Slicing a positional slice with .loc is not supported, and will raise TypeError in a future version.  Use .loc with labels or .iloc with positions instead.
+  df.loc[to_fill, 'dmf_mean'] = fit(extrap_julian_dates) + delta_dmf
+IMPORTANT (from __init__ in tccon_priors.py): Strat LUT dependencies unchanged; loading previous table
+INFO (from __init__ in tccon_priors.py): Loading n2o strat LUT
+DEBUG (from _fit_gas_trend in tccon_priors.py): Using order 2 polynomial to extrapolate ch4
+WARNING (from _check_extrap_fit in tccon_priors.py): Trying to extrapolate to a date more than 5 years after the end of the MLO/SMO record (2018-12-01 00:00:00). Likely okay, but consider updating the MLO/SMO ch4 record if possible. (This warning can be disregarded if the MLO/SMO record was truncated.)
+/home/jlaugh/Notebooks/TCCON-research-notebooks/ginput-development/src/ginput-1.2.0-lts/ginput/priors/tccon_priors.py:767: FutureWarning: Slicing a positional slice with .loc is not supported, and will raise TypeError in a future version.  Use .loc with labels or .iloc with positions instead.
+  df.loc[to_fill, 'dmf_mean'] = fit(extrap_julian_dates) + delta_dmf
+DEBUG (from _fit_gas_trend in tccon_priors.py): Using order 2 polynomial to extrapolate ch4
+/home/jlaugh/Notebooks/TCCON-research-notebooks/ginput-development/src/ginput-1.2.0-lts/ginput/priors/tccon_priors.py:767: FutureWarning: Slicing a positional slice with .loc is not supported, and will raise TypeError in a future version.  Use .loc with labels or .iloc with positions instead.
+  df.loc[to_fill, 'dmf_mean'] = fit(extrap_julian_dates) + delta_dmf
+IMPORTANT (from __init__ in tccon_priors.py): Strat LUT dependencies unchanged; loading previous table
+INFO (from __init__ in tccon_priors.py): Loading ch4 strat LUT
+IMPORTANT (from __init__ in tccon_priors.py): Strat LUT dependencies unchanged; loading previous table
+INFO (from __init__ in tccon_priors.py): Loading hf strat LUT
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from compute_co_scale in tccon_priors.py): Using GEOS IT CO scaling
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from compute_co_scale in tccon_priors.py): Using GEOS IT CO scaling
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from compute_co_scale in tccon_priors.py): Using GEOS IT CO scaling
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from compute_co_scale in tccon_priors.py): Using GEOS IT CO scaling
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+INFO (from add_strat_prior in tccon_priors.py): Replacing negative CH4 value(s) at level(s) 71
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from compute_co_scale in tccon_priors.py): Using GEOS IT CO scaling
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+INFO (from add_strat_prior in tccon_priors.py): Replacing negative CH4 value(s) at level(s) 71
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from compute_co_scale in tccon_priors.py): Using GEOS IT CO scaling
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+INFO (from add_strat_prior in tccon_priors.py): Replacing negative CH4 value(s) at level(s) 71
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from compute_co_scale in tccon_priors.py): Using GEOS IT CO scaling
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+INFO (from add_strat_prior in tccon_priors.py): Replacing negative CH4 value(s) at level(s) 71
+DEBUG (from add_trop_prior_standard in tccon_priors.py): Adjusting z-grid
+DEBUG (from compute_co_scale in tccon_priors.py): Using GEOS IT CO scaling
