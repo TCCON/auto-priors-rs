@@ -497,6 +497,12 @@ fn get_expected_job(file_name: &OsStr) -> Vec<ExpectedJob> {
                     .with_egi(true),
             ]
         }
+        "carriage_returns_all_lines.txt" => {
+            vec![
+                ExpectedJob::new(vec!["zz"], (2018, 1, 1), (2018, 1, 2), "test@test.com")
+                    .with_lat_lon(vec![36.009], vec![112.937]),
+            ]
+        }
         "egi1.txt" => {
             vec![ExpectedJob::new(
                 vec!["jp"],
