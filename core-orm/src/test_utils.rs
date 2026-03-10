@@ -184,7 +184,22 @@ pub fn make_dummy_config_with_temp_dirs(
     Ok((cfg, test_dir))
 }
 
-pub fn general_test_output_dir() {}
+/// Return the path the workspace root directory
+pub fn get_workspace_root_dir() -> PathBuf {
+    // Get the workspace root. The manifest dir points to the actual package where the
+    // tests run, so we want the parent.
+    let crate_root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("expected CARGO_MANIFEST_DIR to have a parent")
+        .to_path_buf();
+    crate_root_dir
+}
+
+/// Return the path to the "testing" directory under the workspace root.
+pub fn get_workspace_testing_dir() -> PathBuf {
+    let root_dir = get_workspace_root_dir();
+    root_dir.join("testing")
+}
 
 #[derive(Debug)]
 pub enum TestRootDir {

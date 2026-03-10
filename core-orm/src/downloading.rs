@@ -4,6 +4,7 @@ use std::path::Path;
 use std::{io::Write, process::Command};
 
 use anyhow::Context;
+use futures::StreamExt;
 use url::Url;
 
 #[derive(Debug)]
@@ -173,23 +174,25 @@ impl ReqwestDownloader {
         })
     }
 
-    pub fn download_one_file_to(&self, url: &str, dest: &Path) -> Result<(), DownloadError> {
-        let client = reqwest::blocking::Client::new();
-        self.download_file_to_inner(&client, url, dest)
+    pub async fn download_one_file_to(&self, url: &str, dest: &Path) -> Result<(), DownloadError> {
+        let client = reqwest::Client::new();
+        self.download_file_to_inner(&client, url, dest).await
     }
 
-    fn download_file_to_inner(
+    async fn download_file_to_inner(
         &self,
-        client: &reqwest::blocking::Client,
+        client: &reqwest::Client,
         url: &str,
         dest: &Path,
     ) -> Result<(), DownloadError> {
         let result = if let Some(auth) = &self.auth {
             let user = auth.login.as_deref().unwrap_or("anonymous");
             let pass = auth.password.as_deref();
-            client.get(url).basic_auth(user, pass).send()
+            log::debug!("Downloading from {url} with basic authentication");
+            client.get(url).basic_auth(user, pass).send().await
         } else {
-            client.get(url).send()
+            log::debug!("Downloading from {url} without authentication");
+            client.get(url).send().await
         };
 
         let response = result
@@ -204,46 +207,51 @@ impl ReqwestDownloader {
             .map_err(|e| anyhow::anyhow!("Server error during request for {url}: {e}"))?;
 
         // The blocking API does not seem to have a streaming option, unfortunately
-        let data = response
-            .bytes()
-            .map_err(|e| anyhow::anyhow!("Error retrieving bytes from {url}: {e}"))?;
+        let mut data_stream = response.bytes_stream();
 
         let mut out = std::fs::File::create(dest)
             .map_err(|e| anyhow::anyhow!("Error creating output file {}: {e}", dest.display()))?;
-        out.write(&data)
-            .map_err(|e| anyhow::anyhow!("Error writing data to file {}: {e}", dest.display()))?;
-
-        Ok(())
-    }
-}
-
-impl Downloader for ReqwestDownloader {
-    fn add_file_to_download(&mut self, url: String) -> anyhow::Result<()> {
-        self.urls.push(url);
-        Ok(())
-    }
-
-    fn download_files(&mut self, save_dir: &Path) -> Result<(), DownloadError> {
-        let client = reqwest::blocking::Client::new();
-        for url in self.urls.iter() {
-            let parsed_url = Url::parse(url)
-                .map_err(|e| anyhow::anyhow!("Error parsing URL '{url}' to find file name: {e}"))?;
-            let filename = parsed_url
-                .path_segments()
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Could not get file name from URL '{url}' (cannot be a base)")
-                })?
-                .last()
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Could not get file name from URL '{url}' (no path segments)")
-                })?;
-            let dest = save_dir.join(filename);
-            self.download_file_to_inner(&client, url, &dest)?;
+        let mut nbytes = 0;
+        while let Some(chunk_result) = data_stream.next().await {
+            let chunk = chunk_result
+                .with_context(|| anyhow::anyhow!("Error getting chunk of data from GET request"))?;
+            nbytes += out.write(&chunk).with_context(|| {
+                anyhow::anyhow!("Error writing data to file {}", dest.display())
+            })?;
         }
+        log::debug!("{nbytes} bytes from {url} written to {}", dest.display());
+
         Ok(())
     }
-
-    fn iter_files(&self) -> std::slice::Iter<'_, String> {
-        self.urls.iter()
-    }
 }
+
+// impl Downloader for ReqwestDownloader {
+//     fn add_file_to_download(&mut self, url: String) -> anyhow::Result<()> {
+//         self.urls.push(url);
+//         Ok(())
+//     }
+
+//     fn download_files(&mut self, save_dir: &Path) -> Result<(), DownloadError> {
+//         let client = reqwest::blocking::Client::new();
+//         for url in self.urls.iter() {
+//             let parsed_url = Url::parse(url)
+//                 .map_err(|e| anyhow::anyhow!("Error parsing URL '{url}' to find file name: {e}"))?;
+//             let filename = parsed_url
+//                 .path_segments()
+//                 .ok_or_else(|| {
+//                     anyhow::anyhow!("Could not get file name from URL '{url}' (cannot be a base)")
+//                 })?
+//                 .last()
+//                 .ok_or_else(|| {
+//                     anyhow::anyhow!("Could not get file name from URL '{url}' (no path segments)")
+//                 })?;
+//             let dest = save_dir.join(filename);
+//             self.download_file_to_inner(&client, url, &dest)?;
+//         }
+//         Ok(())
+//     }
+
+//     fn iter_files(&self) -> std::slice::Iter<'_, String> {
+//         self.urls.iter()
+//     }
+// }

@@ -2544,6 +2544,7 @@ async fn run_o2_update_job(config: Config) -> anyhow::Result<()> {
             &config.execution.o2_file_source_url,
             &config.execution.o2_file_path,
         )
+        .await
         .with_context(|| {
             anyhow!(
                 "Error occurrec while downloading O2 file from {} to {}",

@@ -6,7 +6,7 @@ use orm::{
     config::ProcCfgKey,
     multiline_sql, multiline_sql_init, multiline_sql_init_pool,
     stdsitejobs::StdSiteJob,
-    test_utils::{init_logging, make_dummy_config, TestRootDir},
+    test_utils::{get_workspace_testing_dir, init_logging, make_dummy_config},
     MySqlConn, PoolWrapper,
 };
 use tccon_priors_service::{
@@ -401,14 +401,12 @@ async fn test_request_job_run_ginput() {
 async fn test_downloading_o2_mean_dmf() {
     init_logging();
     let start = std::time::SystemTime::now();
-    // Can either be persistent or temporary - see `TestRootDir::new` for how to get a persistent output directory.
-    let out_dir =
-        TestRootDir::new("o2_test").expect("Should be able to set up test output directory");
-    let config =
-        make_dummy_config(out_dir.path().to_path_buf()).expect("Failed to make test configuration");
+
+    let out_dir = get_workspace_testing_dir().join("o2_test");
+    let config = make_dummy_config(out_dir).expect("Failed to make test configuration");
     // We don't actually need the test sites, but this is a convenient way to initialize the pool.
     let (pool, _test_db) = multiline_sql_init_pool!("sql/init_test_sites.sql");
-    let o2_file = dbg!(config.execution.o2_file_path.clone());
+    let o2_file = config.execution.o2_file_path.clone();
     let shared_config = Arc::new(tokio::sync::RwLock::new(config));
 
     // We'll use the manager to mimic the real behavior, but unlike the ginput tests, we want the
@@ -428,20 +426,17 @@ async fn test_downloading_o2_mean_dmf() {
         .expect("Should be able to get file metadata")
         .modified()
         .expect("Should be able to get file modification time");
+    println!("file_mtime = {file_mtime:?}, start time = {start:?}");
     assert!(
         file_mtime >= start,
         "O2 DMF file was not modified after the test began"
     );
+    let o2_file = o2_file.canonicalize().unwrap_or(o2_file);
+    log::info!("O2 file downloaded to {}", o2_file.display());
 }
 
 fn get_ginput_testing_dir() -> PathBuf {
-    // Get the workspace root. The manifest dir points to the actual package (`cli`, because
-    // that's where I've been writing the tests), so we want the parent.
-    let crate_root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("expected CARGO_MANIFEST_DIR to have a parent")
-        .to_path_buf();
-    crate_root_dir.join("testing").join("ginput-tests")
+    get_workspace_testing_dir().join("ginput-tests")
 }
 
 fn make_ginput_test_config() -> orm::config::Config {
