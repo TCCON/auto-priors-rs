@@ -5,7 +5,6 @@ use std::{io::Write, process::Command};
 
 use anyhow::Context;
 use futures::StreamExt;
-use url::Url;
 
 #[derive(Debug)]
 pub enum DownloadError {
@@ -159,33 +158,36 @@ impl Downloader for WgetDownloader {
     }
 }
 
+/// Downloader using the [`reqwest`] crate rather than an external dependency.
 pub struct ReqwestDownloader {
-    urls: Vec<String>,
     auth: Option<netrc_rs::Machine>,
 }
 
 impl ReqwestDownloader {
+    pub fn new() -> Self {
+        Self { auth: None }
+    }
+
     pub fn new_netrc(host: &str) -> anyhow::Result<Self> {
         let machine = crate::utils::get_netrc_credentials(host, None)?
             .ok_or_else(|| anyhow::anyhow!("Could not find host '{host}' in netrc file"))?;
         Ok(Self {
-            urls: vec![],
             auth: Some(machine),
         })
     }
 
     pub async fn download_one_file_to(&self, url: &str, dest: &Path) -> Result<(), DownloadError> {
         let client = reqwest::Client::new();
-        self.download_file_to_inner(&client, url, dest).await
+        Self::download_file_to_inner(&client, url, dest, self.auth.as_ref()).await
     }
 
     async fn download_file_to_inner(
-        &self,
         client: &reqwest::Client,
         url: &str,
         dest: &Path,
+        auth: Option<&netrc_rs::Machine>,
     ) -> Result<(), DownloadError> {
-        let result = if let Some(auth) = &self.auth {
+        let result = if let Some(auth) = auth {
             let user = auth.login.as_deref().unwrap_or("anonymous");
             let pass = auth.password.as_deref();
             log::debug!("Downloading from {url} with basic authentication");
@@ -225,33 +227,14 @@ impl ReqwestDownloader {
     }
 }
 
-// impl Downloader for ReqwestDownloader {
-//     fn add_file_to_download(&mut self, url: String) -> anyhow::Result<()> {
-//         self.urls.push(url);
-//         Ok(())
-//     }
-
-//     fn download_files(&mut self, save_dir: &Path) -> Result<(), DownloadError> {
-//         let client = reqwest::blocking::Client::new();
-//         for url in self.urls.iter() {
-//             let parsed_url = Url::parse(url)
-//                 .map_err(|e| anyhow::anyhow!("Error parsing URL '{url}' to find file name: {e}"))?;
-//             let filename = parsed_url
-//                 .path_segments()
-//                 .ok_or_else(|| {
-//                     anyhow::anyhow!("Could not get file name from URL '{url}' (cannot be a base)")
-//                 })?
-//                 .last()
-//                 .ok_or_else(|| {
-//                     anyhow::anyhow!("Could not get file name from URL '{url}' (no path segments)")
-//                 })?;
-//             let dest = save_dir.join(filename);
-//             self.download_file_to_inner(&client, url, &dest)?;
-//         }
-//         Ok(())
-//     }
-
-//     fn iter_files(&self) -> std::slice::Iter<'_, String> {
-//         self.urls.iter()
-//     }
-// }
+// Implementation of the Downloader trait for `reqwest` is tricky. The `reqwest` blocking
+// module can't be run in any kind of async context, and using the async module is hard
+// to do inside a sync function, because at some point we need to block on the async request.
+// If we're running a single threaded runtime, which I think we are, it's easy to deadlock.
+// tokio's block_in_place function might help, but it requires a multi-threaded runtime.
+// I tried an approach Gemini suggested of checking if we have a current runtime with
+// tokio::runtime::Handle::try_current(), but that fell apart because there wasn't a clear
+// way to run an async function in a non-async function with a single thread. handle.spawn()
+// had lifetime issues, and Gemini later thought its way would cause a deadlock.
+// Its last suggestion was futures::executor::block_on (https://docs.rs/futures/latest/futures/executor/fn.block_on.html),
+// but by this point I didn't believe it and decided not to worry about this anymore.
