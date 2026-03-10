@@ -8,6 +8,7 @@ use sqlx::migrate::Migrator;
 
 pub mod auth;
 pub mod config;
+pub mod downloading;
 pub mod email;
 pub mod error;
 pub mod export;

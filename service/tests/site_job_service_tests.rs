@@ -1,16 +1,18 @@
 use std::{path::PathBuf, sync::Arc};
 
 use chrono::NaiveDate;
-use glob::glob;
 use itertools::Itertools;
 use orm::{
     config::ProcCfgKey,
     multiline_sql, multiline_sql_init, multiline_sql_init_pool,
     stdsitejobs::StdSiteJob,
-    test_utils::{init_logging, make_dummy_config},
+    test_utils::{init_logging, make_dummy_config, TestRootDir},
     MySqlConn, PoolWrapper,
 };
-use tccon_priors_service::{jobs, stdsitejobs};
+use tccon_priors_service::{
+    jobs::{self, JobManagerOptions},
+    stdsitejobs,
+};
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
@@ -310,7 +312,8 @@ async fn test_site_job_run_ginput() {
     let shared_config = Arc::new(tokio::sync::RwLock::new(config));
 
     // Because the logic to run the jobs is a bit complex, we use the manager.
-    let mut job_manager = make_job_manager(pool.clone(), Arc::clone(&shared_config)).await;
+    let mut job_manager =
+        make_job_manager(pool.clone(), Arc::clone(&shared_config), true, false).await;
 
     // First run the LUT regen jobs
     job_manager
@@ -372,7 +375,8 @@ async fn test_request_job_run_ginput() {
     let shared_config = Arc::new(tokio::sync::RwLock::new(config));
 
     // We'll use the manager to mimic the real behavior
-    let mut job_manager = make_job_manager(pool.clone(), Arc::clone(&shared_config)).await;
+    let mut job_manager =
+        make_job_manager(pool.clone(), Arc::clone(&shared_config), true, false).await;
 
     // First run the LUT regen jobs
     job_manager
@@ -390,6 +394,44 @@ async fn test_request_job_run_ginput() {
 
     // Unlike the standard site runs, this should be all we need to do. There should now be two jobs in the
     // testing/output directory.
+}
+
+#[tokio::test]
+#[ignore = "required downloading a file"]
+async fn test_downloading_o2_mean_dmf() {
+    init_logging();
+    let start = std::time::SystemTime::now();
+    // Can either be persistent or temporary - see `TestRootDir::new` for how to get a persistent output directory.
+    let out_dir =
+        TestRootDir::new("o2_test").expect("Should be able to set up test output directory");
+    let config =
+        make_dummy_config(out_dir.path().to_path_buf()).expect("Failed to make test configuration");
+    // We don't actually need the test sites, but this is a convenient way to initialize the pool.
+    let (pool, _test_db) = multiline_sql_init_pool!("sql/init_test_sites.sql");
+    let o2_file = dbg!(config.execution.o2_file_path.clone());
+    let shared_config = Arc::new(tokio::sync::RwLock::new(config));
+
+    // We'll use the manager to mimic the real behavior, but unlike the ginput tests, we want the
+    // job to download input file, and not the one to regenerate the ginput LUTs - that way this
+    // test can run even without a valid ginput instance.
+    let mut job_manager =
+        make_job_manager(pool.clone(), Arc::clone(&shared_config), false, true).await;
+    job_manager
+        .start_jobs_entry_point()
+        .await
+        .expect("Starting jobs should succeed");
+    job_manager.wait_for_jobs_to_finish().await;
+
+    // Now confirm that the O2 file was downloaded - it should exist and the modification time should be since the start of this test.
+    assert!(o2_file.exists(), "O2 DMF file does not exist");
+    let file_mtime = std::fs::metadata(&o2_file)
+        .expect("Should be able to get file metadata")
+        .modified()
+        .expect("Should be able to get file modification time");
+    assert!(
+        file_mtime >= start,
+        "O2 DMF file was not modified after the test began"
+    );
 }
 
 fn get_ginput_testing_dir() -> PathBuf {
@@ -501,16 +543,23 @@ fn setup_test_input_files(
 async fn make_job_manager(
     pool: PoolWrapper,
     shared_config: Arc<tokio::sync::RwLock<orm::config::Config>>,
+    initial_lut_job: bool,
+    initial_input_file_job: bool,
 ) -> jobs::JobManager<jobs::ServiceJobRunner> {
     let (_, rx) = mpsc::channel::<jobs::JobMessage>(256);
     let error_handler = tccon_priors_service::error::ErrorHandler::Logging(
         tccon_priors_service::error::LoggingErrorHandler {},
     );
-    let jobs_manager = jobs::JobManager::<jobs::ServiceJobRunner>::new_from_pool(
+    let opts = JobManagerOptions {
+        initial_lut_regen: initial_lut_job,
+        initial_input_file_update: initial_input_file_job,
+    };
+    let jobs_manager = jobs::JobManager::<jobs::ServiceJobRunner>::new_from_pool_with_options(
         pool,
         shared_config,
         error_handler,
         rx,
+        opts,
     )
     .await
     .expect("Creating the jobs manager should succeed");

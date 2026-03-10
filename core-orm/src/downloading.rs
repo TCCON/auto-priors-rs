@@ -4,6 +4,7 @@ use std::path::Path;
 use std::{io::Write, process::Command};
 
 use anyhow::Context;
+use url::Url;
 
 #[derive(Debug)]
 pub enum DownloadError {
@@ -150,6 +151,96 @@ impl Downloader for WgetDownloader {
             )
             .into())
         }
+    }
+
+    fn iter_files(&self) -> std::slice::Iter<'_, String> {
+        self.urls.iter()
+    }
+}
+
+pub struct ReqwestDownloader {
+    urls: Vec<String>,
+    auth: Option<netrc_rs::Machine>,
+}
+
+impl ReqwestDownloader {
+    pub fn new_netrc(host: &str) -> anyhow::Result<Self> {
+        let machine = crate::utils::get_netrc_credentials(host, None)?
+            .ok_or_else(|| anyhow::anyhow!("Could not find host '{host}' in netrc file"))?;
+        Ok(Self {
+            urls: vec![],
+            auth: Some(machine),
+        })
+    }
+
+    pub fn download_one_file_to(&self, url: &str, dest: &Path) -> Result<(), DownloadError> {
+        let client = reqwest::blocking::Client::new();
+        self.download_file_to_inner(&client, url, dest)
+    }
+
+    fn download_file_to_inner(
+        &self,
+        client: &reqwest::blocking::Client,
+        url: &str,
+        dest: &Path,
+    ) -> Result<(), DownloadError> {
+        let result = if let Some(auth) = &self.auth {
+            let user = auth.login.as_deref().unwrap_or("anonymous");
+            let pass = auth.password.as_deref();
+            client.get(url).basic_auth(user, pass).send()
+        } else {
+            client.get(url).send()
+        };
+
+        let response = result
+            .map_err(|e| DownloadError::Other(anyhow::anyhow!("Error sending get request: {e}")))?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(DownloadError::FilesNotAvailable);
+        }
+
+        let response = response
+            .error_for_status()
+            .map_err(|e| anyhow::anyhow!("Server error during request for {url}: {e}"))?;
+
+        // The blocking API does not seem to have a streaming option, unfortunately
+        let data = response
+            .bytes()
+            .map_err(|e| anyhow::anyhow!("Error retrieving bytes from {url}: {e}"))?;
+
+        let mut out = std::fs::File::create(dest)
+            .map_err(|e| anyhow::anyhow!("Error creating output file {}: {e}", dest.display()))?;
+        out.write(&data)
+            .map_err(|e| anyhow::anyhow!("Error writing data to file {}: {e}", dest.display()))?;
+
+        Ok(())
+    }
+}
+
+impl Downloader for ReqwestDownloader {
+    fn add_file_to_download(&mut self, url: String) -> anyhow::Result<()> {
+        self.urls.push(url);
+        Ok(())
+    }
+
+    fn download_files(&mut self, save_dir: &Path) -> Result<(), DownloadError> {
+        let client = reqwest::blocking::Client::new();
+        for url in self.urls.iter() {
+            let parsed_url = Url::parse(url)
+                .map_err(|e| anyhow::anyhow!("Error parsing URL '{url}' to find file name: {e}"))?;
+            let filename = parsed_url
+                .path_segments()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Could not get file name from URL '{url}' (cannot be a base)")
+                })?
+                .last()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Could not get file name from URL '{url}' (no path segments)")
+                })?;
+            let dest = save_dir.join(filename);
+            self.download_file_to_inner(&client, url, &dest)?;
+        }
+        Ok(())
     }
 
     fn iter_files(&self) -> std::slice::Iter<'_, String> {

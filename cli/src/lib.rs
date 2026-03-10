@@ -8,7 +8,6 @@ pub mod jobs;
 pub mod met_download;
 pub mod siteinfo;
 pub mod stdsites;
-pub mod utils;
 
 pub fn get_user_input(prompt: &str) -> std::io::Result<String> {
     use std::io::Write;

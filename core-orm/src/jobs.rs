@@ -34,6 +34,7 @@ const DEFAULT_MAX_SUB_DATE: NaiveDate = NaiveDate::from_ymd_opt(2100, 1, 1).unwr
 
 use crate::{
     config::{Config, EmailConfig, GinputCfgKey, ProcCfgKey},
+    downloading::ReqwestDownloader,
     error::{JobAddError, JobError, JobPriorityError, JobResult},
     siteinfo, utils, MySqlConn, PoolWrapper,
 };
@@ -2517,6 +2518,39 @@ async fn run_lut_regen_job(ginput_key: GinputCfgKey, config: Config) -> anyhow::
         .ok_or_else(|| anyhow::anyhow!("Ginput key '{ginput_key}', passed to regenerate LUTs, is not defined in the configuration"))?;
     let runner = get_runner_for_ginput(ginput);
     runner.run_lut_regen().await?;
+    Ok(())
+}
+
+pub fn start_o2_update_job(config: Config) -> GinputHandle {
+    tokio::spawn(async move { run_o2_update_job(config).await })
+}
+
+async fn run_o2_update_job(config: Config) -> anyhow::Result<()> {
+    let url = url::Url::parse(&config.execution.o2_file_source_url).with_context(|| {
+        anyhow::anyhow!(
+            "Could not parse configured O2 file URL ({})",
+            config.execution.o2_file_source_url
+        )
+    })?;
+    let host = url.host_str().ok_or_else(|| {
+        anyhow!(
+            "Could not find host in configured O2 file URL ({})",
+            config.execution.o2_file_source_url
+        )
+    })?;
+    let downloader = ReqwestDownloader::new_netrc(host)?;
+    downloader
+        .download_one_file_to(
+            &config.execution.o2_file_source_url,
+            &config.execution.o2_file_path,
+        )
+        .with_context(|| {
+            anyhow!(
+                "Error occurrec while downloading O2 file from {} to {}",
+                config.execution.o2_file_source_url,
+                config.execution.o2_file_path.display()
+            )
+        })?;
     Ok(())
 }
 

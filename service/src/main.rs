@@ -179,6 +179,26 @@ async fn driver() -> anyhow::Result<()> {
         lut_job.at_time(at);
     }
 
+    info!("Setting up input file update to run");
+    let tx_input_file_update = tx_jobs.clone();
+    let input_file_job = sync_scheduler
+        .every(timing_config.lut_regen_days.days())
+        .run(move || {
+            debug!("Scheduler: sending ");
+            match tx_input_file_update.try_send(jobs::JobMessage::UpdateInputFiles) {
+                Ok(_) => (),
+                Err(TrySendError::Closed(_)) => {
+                    warn!("Could not send UpdateInputFiles message, channel closed")
+                }
+                Err(TrySendError::Full(_)) => {
+                    warn!("Could not send UpdateInputFiles message, channel full")
+                }
+            }
+        });
+    if let Some(at) = timing_config.input_files_update_at {
+        input_file_job.at_time(at);
+    }
+
     info!("Setting up job status request handling");
     let tx_job_status_request = tx_jobs.clone();
     sync_scheduler

@@ -16,6 +16,8 @@ failure_input_file_dir = "."
 submitted_job_queue = "submitted"
 std_site_job_queue = "standard"
 error_handler = { type = "Logging" }
+o2_file_source_url = "https://tccondata.org/2b-private-qc/o2_mean_dmf.dat"
+o2_file_path = "o2_mean_dmf.dat"
 
 [execution.queues.standard]
 max_num_procs = 4
@@ -186,6 +188,7 @@ disable_job = false
 job_start_seconds = 60
 status_report_seconds = 15
 lut_regen_days = 1
+input_files_update_days = 1
 delete_expired_jobs_hours = 24
 disable_std_site_gen = false
 std_site_gen_hours = 12

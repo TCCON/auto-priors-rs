@@ -10,12 +10,11 @@ use orm::utils::get_date_range_intersection;
 use orm::{
     self,
     config::{KeyedMetDownloadConfig, MetCfgKey, ProcCfgKey},
+    downloading::{DownloadError, Downloader},
     met::{AddMetFileError, MetDayState, MetFile},
     utils::DateIterator,
 };
 use sqlx::Connection;
-
-use crate::utils::{self, DownloadError};
 
 /// Manage meteorology downloads and database
 #[derive(Debug, Args)]
@@ -593,7 +592,7 @@ pub async fn download_files_for_dates_cli(
     conn: &mut orm::MySqlConn,
     clargs: DownloadDatesCli,
     config: &orm::config::Config,
-    downloader: impl utils::Downloader + Clone,
+    downloader: impl Downloader + Clone,
 ) -> Result<(), anyhow::Error> {
     let met_keys = met_keys_from_target_keys(config, &clargs.target_keys, clargs.proc_keys)?;
     // needed to make the inner values references
@@ -663,7 +662,7 @@ pub async fn download_missing_files_cli(
     conn: &mut orm::MySqlConn,
     clargs: DownloadMissingCli,
     config: &orm::config::Config,
-    downloader: impl utils::Downloader + Clone,
+    downloader: impl Downloader + Clone,
 ) -> Result<(), anyhow::Error> {
     download_missing_files(
         conn,
@@ -683,7 +682,7 @@ pub async fn download_missing_files(
     end_date: Option<NaiveDate>,
     proc_key_requested: Option<&ProcCfgKey>,
     config: &orm::config::Config,
-    downloader: impl utils::Downloader + Clone,
+    downloader: impl Downloader + Clone,
     dry_run: bool,
 ) -> anyhow::Result<()> {
     // To minimize the effort, we will get a list of the unique mets across all of the processing configurations,
@@ -736,7 +735,7 @@ async fn download_missing_files_for_met(
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
     met_cfg_key: &MetCfgKey,
-    downloader: impl utils::Downloader + Clone,
+    downloader: impl Downloader + Clone,
     dry_run: bool,
 ) -> anyhow::Result<()> {
     debug!("Getting dates to try downloading between {start_date:?} and {end_date:?} for met {met_cfg_key}");
@@ -955,7 +954,7 @@ pub async fn download_files_for_dates(
     start_date: NaiveDate,
     end_date: Option<NaiveDate>,
     config: &orm::config::Config,
-    downloader: impl utils::Downloader + Clone,
+    downloader: impl Downloader + Clone,
     dry_run: bool,
 ) -> anyhow::Result<()> {
     // First check that the dates are valid
@@ -994,7 +993,7 @@ async fn download_one_file_set_one_date(
     conn: &mut orm::MySqlConn,
     date: NaiveDate,
     file_cfg: KeyedMetDownloadConfig<'_>,
-    mut downloader: impl utils::Downloader,
+    mut downloader: impl Downloader,
     dry_run: bool,
 ) -> Result<(), DownloadError> {
     let mut transaction = conn

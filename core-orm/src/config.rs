@@ -1156,6 +1156,14 @@ pub struct ExecutionConfig {
     #[serde(default)]
     pub grouped_stdsite_json_file: Option<PathBuf>,
 
+    /// URL (should be to somewhere on tccondata.org) that we can download the yearly O2 mole fraction
+    /// file created by ginput. Note that this requires the login information for tccondata.org's private
+    /// side to be in your ~/.netrc file.
+    pub o2_file_source_url: String,
+
+    /// Local path where the yearly O2 mean DMF file will be saved and given to ginput as an input argument.
+    pub o2_file_path: PathBuf,
+
     /// Determines maximum number of jobs allowed to run simultaneously for different work sets
     #[serde(default)]
     pub queues: HashMap<String, JobQueueOptions>,
@@ -1185,6 +1193,8 @@ impl Default for ExecutionConfig {
             std_sites_output_base: Default::default(),
             flat_stdsite_json_file: Default::default(),
             grouped_stdsite_json_file: Default::default(),
+            o2_file_source_url: "https://tccondata.org/2b-private-qc/o2_mean_dmf.dat".to_string(),
+            o2_file_path: PathBuf::from("./o2_mean_dmf.dat"),
             ginput: Default::default(),
             job_max_days: None,
             job_split_into_days: None,
@@ -1506,6 +1516,14 @@ pub struct ServiceTimingOptions {
     /// omitted, then that will run at midnight.
     pub lut_regen_at: Option<NaiveTime>,
 
+    /// How frequently (in days) to insert jobs to update the input files
+    /// for ginput.
+    pub input_files_update_days: u32,
+
+    /// What time of the day, in HH:MM:SS format, to update the input files. If
+    /// omitted, then that will run at midnight.
+    pub input_files_update_at: Option<NaiveTime>,
+
     /// How many hours between tries to clean up jobs whose output is ready
     /// to be deleted.
     pub delete_expired_jobs_hours: u32,
@@ -1561,8 +1579,10 @@ impl Default for ServiceTimingOptions {
             disable_job: false,
             job_start_seconds: 60,
             status_report_seconds: 60,
-            lut_regen_days: 24,
+            lut_regen_days: 1,
             lut_regen_at: NaiveTime::from_hms_opt(0, 0, 0),
+            input_files_update_days: 1,
+            input_files_update_at: NaiveTime::from_hms_opt(0, 0, 0),
             delete_expired_jobs_hours: 12,
             delete_expired_jobs_offset_minutes: None,
             disable_std_site_gen: false,

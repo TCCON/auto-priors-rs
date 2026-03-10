@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use cli::met_download::download_missing_files;
-use cli::utils::WgetDownloader;
 use log::{debug, info, warn};
 use orm::config::Config;
+use orm::downloading::WgetDownloader;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 

@@ -1,12 +1,12 @@
 #![allow(dead_code)]
 use anyhow::Context;
 use orm::config::{MetCfgKey, ProcCfgKey};
+use orm::downloading::{DownloadError, Downloader};
 use orm::met::MetFile;
 use orm::{self, MySqlConn};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use tccon_priors_cli::utils::Downloader;
 
 pub fn test_proc_key() -> ProcCfgKey {
     ProcCfgKey("std-geosfpit".to_string())
@@ -70,10 +70,7 @@ impl Downloader for TestDownloader {
         Ok(())
     }
 
-    fn download_files(
-        &mut self,
-        save_dir: &std::path::Path,
-    ) -> Result<(), tccon_priors_cli::utils::DownloadError> {
+    fn download_files(&mut self, save_dir: &std::path::Path) -> Result<(), DownloadError> {
         for url in self.files.iter() {
             let basename = url.split('/').last().ok_or_else(|| {
                 anyhow::Error::msg(format!("Could not determine basename of URL {url}"))

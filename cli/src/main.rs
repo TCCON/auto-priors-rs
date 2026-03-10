@@ -5,6 +5,7 @@ use dotenv;
 use env_logger;
 use log::{self, debug};
 use orm;
+use orm::downloading::WgetDownloader;
 use tccon_priors_cli::api::{self, ApiActions, ApiCli};
 use tccon_priors_cli::auth::{self, AuthActions, AuthCli};
 use tccon_priors_cli::config::{self, ConfigActions, ConfigCli};
@@ -16,8 +17,6 @@ use tccon_priors_cli::met_download::{self, MetActions, MetCli};
 use tccon_priors_cli::siteinfo::{self, StdSiteActions, StdSiteCli};
 use tccon_priors_cli::stdsites::{self, StdSiteJobActions, StdSiteJobCli};
 use tokio;
-
-use tccon_priors_cli::utils;
 
 #[derive(Debug, Parser)]
 #[clap(version)]
@@ -67,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     // The download functions require a downloader object mainly to support mocking in tests; however, in
     // principle we could also build alternate downloaders to support systems where wget isn't available
     // for whatever reason.
-    let wget_dl = utils::WgetDownloader::new();
+    let wget_dl = WgetDownloader::new();
 
     match args.command {
         Commands::Met(MetCli {

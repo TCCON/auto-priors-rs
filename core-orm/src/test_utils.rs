@@ -151,6 +151,7 @@ pub fn make_dummy_config(scratch_root: PathBuf) -> anyhow::Result<crate::config:
     let mut cfg: crate::config::Config = toml::from_str(s)?;
 
     cfg.execution.ftp_download_root = scratch_root.clone();
+    cfg.execution.o2_file_path = scratch_root.join("o2_mean_dmf.dat");
     for (_, dl_cfg) in cfg.data.met_download.iter_mut() {
         dl_cfg.download_dir = scratch_root.join(dl_cfg.ginput_met_type.standard_subdir());
     }
@@ -183,6 +184,8 @@ pub fn make_dummy_config_with_temp_dirs(
     Ok((cfg, test_dir))
 }
 
+pub fn general_test_output_dir() {}
+
 #[derive(Debug)]
 pub enum TestRootDir {
     Temporary(tempdir::TempDir),
@@ -197,6 +200,10 @@ impl TestRootDir {
         }
     }
 
+    /// Creates an output directory that can either be persistent or temporary.
+    /// If the environmental variable defined by [`TEST_FILE_DIR_VAR`] is set,
+    /// the output will be under that directory in a subdirectory `prefix`.
+    /// Otherwise, it will be in a temporary directory using `prefix`.
     pub fn new(prefix: &str) -> anyhow::Result<Self> {
         if let Some(root) = get_env_var(TEST_FILE_DIR_VAR) {
             Self::new_persistent(&root, prefix)

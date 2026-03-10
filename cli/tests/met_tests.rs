@@ -4,16 +4,14 @@ use chrono::{Duration, NaiveDate};
 use itertools::Itertools;
 use orm::{
     config::{MetCfgKey, ProcCfgKey},
+    downloading::{Downloader, WgetDownloader},
     met::MetFile,
     test_utils::{
         init_logging, make_dummy_config, make_dummy_config_with_temp_dirs, multiline_sql,
         multiline_sql_init, open_test_database,
     },
 };
-use tccon_priors_cli::{
-    met_download::{self, check_one_config_set_files_for_dates},
-    utils::{Downloader, WgetDownloader},
-};
+use tccon_priors_cli::met_download::{self, check_one_config_set_files_for_dates};
 mod common;
 
 static EXPECTED_GEOSFPIT_FILES_20180102: [&'static str; 24] = [

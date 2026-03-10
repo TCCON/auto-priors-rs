@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use orm::{
     config::{Config, GinputCfgKey},
-    jobs::{start_lut_regen_job, start_priors_gen_job, GinputHandle, Job, JobState},
+    jobs::{
+        start_lut_regen_job, start_o2_update_job, start_priors_gen_job, GinputHandle, Job, JobState,
+    },
     MySqlPC, PoolWrapper,
 };
 use sqlx::Connection;
@@ -20,10 +22,28 @@ static LUT_QUEUE_NAME: &'static str = "LUT_REGEN";
 pub enum JobMessage {
     StartJobs,
     RegenLut,
+    UpdateInputFiles,
     CleanUpJobs,
     SendStatusReports,
     StopGracefully,
     StopRapidly,
+}
+
+/// Options for the job manager
+pub struct JobManagerOptions {
+    /// If true (the default), submit a job to regenerate the LUTs when the manager is created
+    pub initial_lut_regen: bool,
+    /// If true (the default), submit a job to update the input files when the manager is created
+    pub initial_input_file_update: bool,
+}
+
+impl Default for JobManagerOptions {
+    fn default() -> Self {
+        Self {
+            initial_lut_regen: true,
+            initial_input_file_update: true,
+        }
+    }
 }
 
 /// A manager for parsing job input files, starting jobs, and regenerating the chemical LUTs
@@ -153,6 +173,23 @@ impl<T: Queueable> JobManager<T> {
         error_handler: ErrorHandler,
         msg_recv: tokio::sync::mpsc::Receiver<JobMessage>,
     ) -> anyhow::Result<Self> {
+        Self::new_from_pool_with_options(
+            pool,
+            shared_config,
+            error_handler,
+            msg_recv,
+            JobManagerOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn new_from_pool_with_options(
+        pool: PoolWrapper,
+        shared_config: Arc<RwLock<Config>>,
+        error_handler: ErrorHandler,
+        msg_recv: tokio::sync::mpsc::Receiver<JobMessage>,
+        options: JobManagerOptions,
+    ) -> anyhow::Result<Self> {
         let mut me = Self {
             pool,
             shared_config,
@@ -161,7 +198,12 @@ impl<T: Queueable> JobManager<T> {
             error_handler,
             msg_recv,
         };
-        me.schedule_lut_regen().await?;
+        if options.initial_lut_regen {
+            me.schedule_lut_regen().await?;
+        }
+        if options.initial_input_file_update {
+            me.schedule_input_file_update().await?;
+        }
         Ok(me)
     }
 
@@ -182,6 +224,10 @@ impl<T: Queueable> JobManager<T> {
                         .schedule_lut_regen()
                         .await
                         .context("Error occurred while scheduling LUT regeneration"),
+                    JobMessage::UpdateInputFiles => self
+                        .schedule_input_file_update()
+                        .await
+                        .context("Error occurred while scheduling input file update"),
                     JobMessage::CleanUpJobs => self
                         .clean_up_expired_jobs()
                         .await
@@ -281,6 +327,27 @@ impl<T: Queueable> JobManager<T> {
             }
         }
 
+        Ok(())
+    }
+
+    async fn schedule_input_file_update(&mut self) -> anyhow::Result<()> {
+        if self.am_i_disabled().await {
+            warn!("Job management disabled in configuration");
+            return Ok(());
+        }
+
+        // This should also block ginput from running, so we use the LUT queue since it has a higher priority
+        // than the basic job queue.
+        let lut_queue = self
+            .job_queues
+            .entry(LUT_QUEUE_NAME.to_string())
+            .or_insert_with(|| Queue::new_blocking(usize::MAX, LUT_REGEN_BLOCKING_PRIORITY));
+        let o2_job = T::new_o2_update_job();
+        if !lut_queue.add(o2_job).await {
+            self.error_handler.report_error(
+                anyhow::anyhow!("Failed to add job to update the O2 input file(s)").as_ref(),
+            );
+        }
         Ok(())
     }
 
@@ -650,6 +717,8 @@ pub trait Queueable {
     /// Create a new instance of this type that will regenerate LUTs for the given `ginput` configuration.
     fn new_lut_job(ginput_key: GinputCfgKey) -> Self;
 
+    fn new_o2_update_job() -> Self;
+
     /// Start the job, updating the database if needed.
     async fn start(&mut self, pool: PoolWrapper, config: &Config) -> anyhow::Result<()>;
 
@@ -831,6 +900,10 @@ pub enum ServiceJobRunner {
         join_handle: Option<GinputHandle>,
         force_cleanup: bool,
     },
+    O2FileUpdateJob {
+        join_handle: Option<GinputHandle>, // this isn't a ginput job now, but likely to be in the future
+        force_cleanup: bool,
+    },
 }
 
 impl ServiceJobRunner {
@@ -901,6 +974,32 @@ impl ServiceJobRunner {
         }
     }
 
+    async fn is_o2_update_job_done(join_handle: &mut Option<GinputHandle>) -> anyhow::Result<bool> {
+        let task = if let Some(runner) = join_handle {
+            runner
+        } else {
+            return Ok(false);
+        };
+
+        if !task.is_finished() {
+            return Ok(false);
+        }
+
+        let inner_res = match task.await {
+            Ok(r) => r,
+            Err(e) => {
+                anyhow::bail!("Panic occurred updating O2 files: {e:?}")
+            }
+        };
+
+        match inner_res {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                anyhow::bail!("Error occurred updating O2 files: {e:?}")
+            }
+        }
+    }
+
     async fn start_ginput_job(
         pool: PoolWrapper,
         job: Job,
@@ -919,6 +1018,15 @@ impl ServiceJobRunner {
     ) -> anyhow::Result<()> {
         *join_handle = Some(start_lut_regen_job(ginput_key, config));
         debug!("LUT job started, join handle = {join_handle:?}");
+        Ok(())
+    }
+
+    async fn start_o2_job(
+        join_handle: &mut Option<GinputHandle>,
+        config: Config,
+    ) -> anyhow::Result<()> {
+        *join_handle = Some(start_o2_update_job(config));
+        debug!("O2 file update job started, join handle = {join_handle:?}");
         Ok(())
     }
 
@@ -967,6 +1075,24 @@ impl ServiceJobRunner {
             Ok(false)
         }
     }
+
+    async fn cancel_o2_job(join_handle: &mut Option<GinputHandle>) -> anyhow::Result<bool> {
+        if let Some(task) = join_handle {
+            task.abort();
+            match task.await {
+                Ok(_) => (),
+                Err(e) if e.is_cancelled() => (),
+                Err(e) => {
+                    anyhow::bail!(
+                        "Updating O2 files encountered an error before being cancelled: {e:?}"
+                    );
+                }
+            }
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 #[async_trait]
@@ -983,6 +1109,10 @@ impl Queueable for ServiceJobRunner {
                 join_handle: _,
                 force_cleanup: _,
             } => format!("ServiceJobRunner(lut ginput = {ginput_key})"),
+            Self::O2FileUpdateJob {
+                join_handle: _,
+                force_cleanup: _,
+            } => format!("ServiceJobRunner(O2 update)"),
         }
     }
 
@@ -997,6 +1127,13 @@ impl Queueable for ServiceJobRunner {
     fn new_lut_job(ginput_key: GinputCfgKey) -> Self {
         Self::LutRegenJob {
             ginput_key,
+            join_handle: None,
+            force_cleanup: false,
+        }
+    }
+
+    fn new_o2_update_job() -> Self {
+        Self::O2FileUpdateJob {
             join_handle: None,
             force_cleanup: false,
         }
@@ -1017,6 +1154,10 @@ impl Queueable for ServiceJobRunner {
                 join_handle,
                 force_cleanup: _,
             } => join_handle.is_some(),
+            Self::O2FileUpdateJob {
+                join_handle,
+                force_cleanup: _,
+            } => join_handle.is_some(),
         }
     }
 
@@ -1029,6 +1170,10 @@ impl Queueable for ServiceJobRunner {
             } => *force_cleanup = true,
             Self::LutRegenJob {
                 ginput_key: _,
+                join_handle: _,
+                force_cleanup,
+            } => *force_cleanup = true,
+            Self::O2FileUpdateJob {
                 join_handle: _,
                 force_cleanup,
             } => *force_cleanup = true,
@@ -1059,6 +1204,16 @@ impl Queueable for ServiceJobRunner {
                     Self::is_lut_job_done(&ginput_key, join_handle).await
                 }
             }
+            Self::O2FileUpdateJob {
+                join_handle,
+                force_cleanup,
+            } => {
+                if *force_cleanup {
+                    Ok(true)
+                } else {
+                    Self::is_o2_update_job_done(join_handle).await
+                }
+            }
         }
     }
 
@@ -1074,6 +1229,10 @@ impl Queueable for ServiceJobRunner {
                 join_handle,
                 force_cleanup: _,
             } => Self::start_lut_job(ginput_key.clone(), join_handle, config.clone()).await,
+            Self::O2FileUpdateJob {
+                join_handle,
+                force_cleanup: _,
+            } => Self::start_o2_job(join_handle, config.clone()).await,
         }
     }
 
@@ -1094,6 +1253,13 @@ impl Queueable for ServiceJobRunner {
             } => {
                 *force_cleanup = true;
                 Self::cancel_lut_job(ginput_key, join_handle).await
+            }
+            Self::O2FileUpdateJob {
+                join_handle,
+                force_cleanup,
+            } => {
+                *force_cleanup = true;
+                Self::cancel_o2_job(join_handle).await
             }
         }
     }
@@ -1139,6 +1305,10 @@ mod tests {
         }
 
         fn new_lut_job(_ginput_key: GinputCfgKey) -> Self {
+            Self::new_from_seconds(5)
+        }
+
+        fn new_o2_update_job() -> Self {
             Self::new_from_seconds(5)
         }
 
