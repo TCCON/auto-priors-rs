@@ -2350,6 +2350,7 @@ struct GinputAutomationArgs {
 
     base_vmr_file: Option<PathBuf>,
     zgrid_file: Option<PathBuf>,
+    o2_dmf_file: PathBuf,
 
     map_file_format: String,
 
@@ -2526,30 +2527,27 @@ pub fn start_o2_update_job(config: Config) -> GinputHandle {
 }
 
 async fn run_o2_update_job(config: Config) -> anyhow::Result<()> {
-    let url = url::Url::parse(&config.execution.o2_file_source_url).with_context(|| {
+    let url = url::Url::parse(&config.data.o2_file_source_url).with_context(|| {
         anyhow::anyhow!(
             "Could not parse configured O2 file URL ({})",
-            config.execution.o2_file_source_url
+            config.data.o2_file_source_url
         )
     })?;
     let host = url.host_str().ok_or_else(|| {
         anyhow!(
             "Could not find host in configured O2 file URL ({})",
-            config.execution.o2_file_source_url
+            config.data.o2_file_source_url
         )
     })?;
     let downloader = ReqwestDownloader::new_netrc(host)?;
     downloader
-        .download_one_file_to(
-            &config.execution.o2_file_source_url,
-            &config.execution.o2_file_path,
-        )
+        .download_one_file_to(&config.data.o2_file_source_url, &config.data.o2_file_path)
         .await
         .with_context(|| {
             anyhow!(
                 "Error occurrec while downloading O2 file from {} to {}",
-                config.execution.o2_file_source_url,
-                config.execution.o2_file_path.display()
+                config.data.o2_file_source_url,
+                config.data.o2_file_path.display()
             )
         })?;
     Ok(())
@@ -2642,6 +2640,7 @@ async fn setup_ginput_args_for_date(
         site_alts: vec![0.0; nlocs],
         base_vmr_file: config.data.base_vmr_file.to_owned(),
         zgrid_file: config.data.zgrid_file.to_owned(),
+        o2_dmf_file: config.data.o2_file_path.to_owned(),
         map_file_format: job.map_fmt.to_string(),
         n_threads: config.execution.max_numpy_threads,
     };
@@ -2790,4 +2789,63 @@ pub fn get_ftp_path_from_dirs(
     ftp_download_server
         .join(&output)
         .with_context(|| format!("Could not join FTP url and output relative path {output}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{init_logging, make_dummy_config, open_test_database, TestRootDir};
+
+    #[tokio::test]
+    async fn test_creating_ginput_args_json() {
+        init_logging();
+        let (pool, _test_db) = open_test_database(true)
+            .await
+            .expect("Opening connection to database should succeed");
+        let out_dir = TestRootDir::new("ginput-args")
+            .expect("Should be able to create test output directory");
+        let config = make_dummy_config(out_dir.path().to_path_buf())
+            .expect("Failed to make test configuration");
+        let mut conn = pool
+            .get_connection()
+            .await
+            .expect("Should be able to get connection from the database pool");
+
+        let date = NaiveDate::from_ymd_opt(2018, 1, 1).unwrap();
+        let job = Job {
+            job_id: 1,
+            state: JobState::Pending,
+            site_id: vec!["xx".to_string()],
+            start_date: date,
+            end_date: date + chrono::Days::new(1),
+            lat: vec![Some(90.0)],
+            lon: vec![Some(180.0)],
+            email: Some("nobody@test.net".to_string()),
+            delete_time: None,
+            priority: 0,
+            queue: "standard".to_string(),
+            processing_key: JobProcKey::Default,
+            root_save_dir: out_dir.path().to_path_buf(),
+            save_tarball: TarChoice::No,
+            mod_fmt: ModFmt::Text,
+            vmr_fmt: VmrFmt::Text,
+            map_fmt: MapFmt::NetCDF,
+            submit_time: chrono::Utc::now().naive_local(),
+            complete_time: None,
+            output_file: None,
+        };
+
+        let ginput_args = setup_ginput_args_for_date(&mut conn, date, &job, &config)
+            .await
+            .expect("Should be able to create ginput arguments");
+
+        // Because writing the arguments is wrapped up in run_gen_priors_for_date, but I want to
+        // just write out arguments (without running ginput) to have a test automation file to
+        // develop ginput with, this extracts that logic. Not ideal, but simple.
+        let args_file = out_dir.path().join("ginput_args.json");
+        let args_file_h =
+            std::fs::File::create(&args_file).expect("Should be able to create arguments file");
+        serde_json::to_writer_pretty(args_file_h, &ginput_args)
+            .expect("Writing arguments should not fail");
+    }
 }

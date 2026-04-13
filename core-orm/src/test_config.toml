@@ -16,8 +16,6 @@ failure_input_file_dir = "."
 submitted_job_queue = "submitted"
 std_site_job_queue = "standard"
 error_handler = { type = "Logging" }
-o2_file_source_url = "https://tccondata.org/2b-private-qc/o2_mean_dmf.dat"
-o2_file_path = "o2_mean_dmf.dat"
 
 [execution.queues.standard]
 max_num_procs = 4
@@ -90,6 +88,8 @@ end_date = "2018-01-08"
 [data]
 zgrid_file = './cli/tests/common/config_target_dummy'
 base_vmr_file = './cli/tests/common/config_target_dummy'
+o2_file_source_url = "https://tccondata.org/2b-private-qc/o2_mean_dmf.dat"
+o2_file_path = "o2_mean_dmf.dat"
 
 [data.met_download.geosfpit-eta-met]
 url_pattern = "http://goldsfs1.gesdisc.eosdis.nasa.gov/data/GEOS5/DFPITI3NVASM.5.12.4/%Y/%j/.hidden/GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4"

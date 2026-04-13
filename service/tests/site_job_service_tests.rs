@@ -397,7 +397,7 @@ async fn test_request_job_run_ginput() {
 }
 
 #[tokio::test]
-#[ignore = "required downloading a file"]
+#[ignore = "requires downloading a file"]
 async fn test_downloading_o2_mean_dmf() {
     init_logging();
     let start = std::time::SystemTime::now();
@@ -406,7 +406,7 @@ async fn test_downloading_o2_mean_dmf() {
     let config = make_dummy_config(out_dir).expect("Failed to make test configuration");
     // We don't actually need the test sites, but this is a convenient way to initialize the pool.
     let (pool, _test_db) = multiline_sql_init_pool!("sql/init_test_sites.sql");
-    let o2_file = config.execution.o2_file_path.clone();
+    let o2_file = config.data.o2_file_path.clone();
     let shared_config = Arc::new(tokio::sync::RwLock::new(config));
 
     // We'll use the manager to mimic the real behavior, but unlike the ginput tests, we want the

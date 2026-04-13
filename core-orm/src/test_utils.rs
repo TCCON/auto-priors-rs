@@ -151,7 +151,7 @@ pub fn make_dummy_config(scratch_root: PathBuf) -> anyhow::Result<crate::config:
     let mut cfg: crate::config::Config = toml::from_str(s)?;
 
     cfg.execution.ftp_download_root = scratch_root.clone();
-    cfg.execution.o2_file_path = scratch_root.join("o2_mean_dmf.dat");
+    cfg.data.o2_file_path = scratch_root.join("o2_mean_dmf.dat");
     for (_, dl_cfg) in cfg.data.met_download.iter_mut() {
         dl_cfg.download_dir = scratch_root.join(dl_cfg.ginput_met_type.standard_subdir());
     }

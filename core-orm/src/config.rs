@@ -1156,14 +1156,6 @@ pub struct ExecutionConfig {
     #[serde(default)]
     pub grouped_stdsite_json_file: Option<PathBuf>,
 
-    /// URL (should be to somewhere on tccondata.org) that we can download the yearly O2 mole fraction
-    /// file created by ginput. Note that this requires the login information for tccondata.org's private
-    /// side to be in your ~/.netrc file.
-    pub o2_file_source_url: String,
-
-    /// Local path where the yearly O2 mean DMF file will be saved and given to ginput as an input argument.
-    pub o2_file_path: PathBuf,
-
     /// Determines maximum number of jobs allowed to run simultaneously for different work sets
     #[serde(default)]
     pub queues: HashMap<String, JobQueueOptions>,
@@ -1193,8 +1185,6 @@ impl Default for ExecutionConfig {
             std_sites_output_base: Default::default(),
             flat_stdsite_json_file: Default::default(),
             grouped_stdsite_json_file: Default::default(),
-            o2_file_source_url: "https://tccondata.org/2b-private-qc/o2_mean_dmf.dat".to_string(),
-            o2_file_path: PathBuf::from("./o2_mean_dmf.dat"),
             ginput: Default::default(),
             job_max_days: None,
             job_split_into_days: None,
@@ -1221,7 +1211,7 @@ pub enum GinputConfig {
 }
 
 /// Configuration section dealing with input data for jobs
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DataConfig {
     /// The path to an integral.gnd file that specifies an altitude grid. If omitted,
     /// or an empty string, then the priors are produced on the native GEOS grid.
@@ -1231,12 +1221,32 @@ pub struct DataConfig {
     /// gases. If omitted or an empty string, the secondary gases are not included.
     pub base_vmr_file: Option<PathBuf>,
 
+    /// URL (should be to somewhere on tccondata.org) that we can download the yearly O2 mole fraction
+    /// file created by ginput. Note that this requires the login information for tccondata.org's private
+    /// side to be in your ~/.netrc file.
+    pub o2_file_source_url: String,
+
+    /// Local path where the yearly O2 mean DMF file will be saved and given to ginput as an input argument.
+    pub o2_file_path: PathBuf,
+
     /// A map of configurations that specify how to download a particular type of met files.
     /// Note that this is NOT a full set of met files that ginput requires. For instance,
     /// from GEOS IT, we require 3D met, 2D met, and 3D chemistry files. Each entry in this
     /// map specifies one of those files. The processing configuration section specifies
     /// how we combine them together.
     pub met_download: HashMap<MetCfgKey, MetDownloadConfig>,
+}
+
+impl Default for DataConfig {
+    fn default() -> Self {
+        Self {
+            zgrid_file: Default::default(),
+            base_vmr_file: Default::default(),
+            o2_file_source_url: "https://tccondata.org/2b-private-qc/o2_mean_dmf.dat".to_string(),
+            o2_file_path: PathBuf::from("./o2_mean_dmf.dat"),
+            met_download: Default::default(),
+        }
+    }
 }
 
 /// Configuration for how to download input reanalysis files for ginput
