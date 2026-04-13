@@ -44,7 +44,8 @@ User has the responsibility to obtain export licenses, or other export authority
     - Create the 'tccon' user with `CREATE USER 'tccon'@'localhost' IDENTIFIED BY '*****';` - replace the `*`s with a real password.
     - Grant all permissions to the 'tccon' user on the 'priors' database with `GRANT ALL PRIVILEGES ON 'priors'.* TO 'tccon'@'localhost';`. If you get an error about the 'priors' database not existing, create it first with `CREATE DATABASE 'priors';`
     - To work with the web app, this assumes that you have the Django site status/metadata portal database on the same server.
-      Grant the same user read access to those databases with ``GRANT SELECT ON `djopstat`.* TO `tccon`@`localhost` ``.
+      Assuming the Django database is named `djopstat`, you would grant the same user read access to those databases with
+      ``GRANT SELECT ON `djopstat`.* TO `tccon`@`localhost` ``.
 4. Ensure you have the `sqlx-cli` Cargo extension installed and set up to work with MySQL.
     - Run `cargo sqlx --help`, if that produces an error, you need to install it
     - To install, run `cargo install sqlx-cli --features native-tls,mysql`. (This will install it with support for only MySQL databases, which avoids errors from SqLite or Postgress libraries not being installed. See the [sqlx-cli docs](https://crates.io/crates/sqlx-cli) if you want to include support for other database types.)

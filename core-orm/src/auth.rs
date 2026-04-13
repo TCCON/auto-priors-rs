@@ -15,7 +15,10 @@ pub type AuthSession = axum_login::AuthSession<WebBackend>;
 // TODO: rework the v_auth queries.
 // The migrations no longer create a view into the Django database, so these won't work.
 // Gemini suggests using a separate environmental variable to define the URL for the auth
-// database, and creating a separate pool for it. We'll see.
+// database, and creating a separate pool for it. We'll also need to check if the user
+// is admin/superuser in the Django database and add a separate `is_admin` to the user type.
+// This should probably be handled by moving the `load_from_db` function behind a feature
+// so that we can support different auth backends.
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
@@ -181,7 +184,6 @@ pub fn load_jwt_hmac_secret(file: &Path) -> anyhow::Result<(EncodingKey, Decodin
 )]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum Permission {
-    Admin,
     Query,
     Submit,
     Download,
