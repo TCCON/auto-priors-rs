@@ -12,6 +12,11 @@ pub mod api;
 
 pub type AuthSession = axum_login::AuthSession<WebBackend>;
 
+// TODO: rework the v_auth queries.
+// The migrations no longer create a view into the Django database, so these won't work.
+// Gemini suggests using a separate environmental variable to define the URL for the auth
+// database, and creating a separate pool for it. We'll see.
+
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
     pub id: i64,
@@ -25,13 +30,12 @@ impl User {
         conn: &mut MySqlConn,
         username: &str,
     ) -> Result<Option<Self>, WebAuthError> {
-        let opt_user = sqlx::query_as!(
-            Self,
-            "SELECT id,username,email,password FROM v_auth_user WHERE username = ?",
-            username
-        )
-        .fetch_optional(&mut *conn)
-        .await?;
+        // Safety: use prepared statements to avoid SQL injection
+        let opt_user: Option<Self> =
+            sqlx::query_as("SELECT id,username,email,password FROM v_auth_user WHERE username = ?")
+                .bind(username)
+                .fetch_optional(&mut *conn)
+                .await?;
         Ok(opt_user)
     }
 
@@ -141,13 +145,12 @@ impl AuthnBackend for WebBackend {
 
     async fn get_user(&self, user_id: &UserId<Self>) -> Result<Option<Self::User>, Self::Error> {
         let mut conn = self.pool.get_connection().await?;
-        let user: Option<Self::User> = sqlx::query_as!(
-            User,
-            "SELECT id,username,email,password FROM v_auth_user WHERE id = ?",
-            user_id
-        )
-        .fetch_optional(&mut *conn)
-        .await?;
+        // Safety: use prepared statements to avoid SQL injection
+        let user: Option<Self::User> =
+            sqlx::query_as("SELECT id,username,email,password FROM v_auth_user WHERE id = ?")
+                .bind(user_id)
+                .fetch_optional(&mut *conn)
+                .await?;
 
         Ok(user)
     }
