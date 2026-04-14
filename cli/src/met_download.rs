@@ -342,7 +342,10 @@ pub struct MetTableCli {
     #[clap(short = 'a', long, group = "met")]
     all_mets: bool,
 
-    /// Give this option
+    /// Give this option to select specific meteorologies to include in the table. The value
+    /// must be a met key from the configuration, i.e., a key under the "data.met_download"
+    /// section. Repeat this option to select more than one met. If given, this will take
+    /// precedence over --all-mets. If a met key is not recognized, it is simply ignored.
     #[clap(short = 'm', long, group = "met")]
     mets: Option<Vec<MetCfgKey>>,
 
@@ -835,6 +838,7 @@ pub struct RescanMetCli {
     /// be rescanned. Without this, only the mets specified in the list are rescanned.
     /// Note that this means TARGET_KEYS can be met keys OR processing keys, but not
     /// a mixture.
+    #[clap(short = 'p', long)]
     pub proc_keys: bool,
 
     /// Set this flag to print what would be added to the database, but not actually modify the database.
