@@ -2794,7 +2794,7 @@ pub fn get_ftp_path_from_dirs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{init_logging, make_dummy_config, open_test_database, TestRootDir};
+    use crate::test_utils::{init_logging, make_dummy_config_with_temp_dirs, open_test_database};
 
     #[tokio::test]
     async fn test_creating_ginput_args_json() {
@@ -2802,9 +2802,7 @@ mod tests {
         let (pool, _test_db) = open_test_database(true)
             .await
             .expect("Opening connection to database should succeed");
-        let out_dir = TestRootDir::new("ginput-args")
-            .expect("Should be able to create test output directory");
-        let config = make_dummy_config(out_dir.path().to_path_buf())
+        let (config, out_dir) = make_dummy_config_with_temp_dirs("ginput-args")
             .expect("Failed to make test configuration");
         let mut conn = pool
             .get_connection()
@@ -2834,6 +2832,8 @@ mod tests {
             complete_time: None,
             output_file: None,
         };
+
+        dbg!(&config);
 
         let ginput_args = setup_ginput_args_for_date(&mut conn, date, &job, &config)
             .await
