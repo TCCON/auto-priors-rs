@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::path::Path;
@@ -21,6 +22,7 @@ use crate::config::ProcCfgKey;
 use crate::jobs;
 use crate::jobs::JobProcKey;
 use crate::met;
+use crate::met::MetDayState;
 use crate::siteinfo::SiteInfo;
 use crate::siteinfo::{self, SiteType, StdOutputStructure};
 use crate::utils::DateIterator;
@@ -362,6 +364,7 @@ impl StdSiteJob {
         .await?;
 
         let mut ndates = 0;
+        let nexpected = date_iter.expected_length();
         for date in date_iter {
             debug!("Maybe adding {date} for {site_id}");
             if extant_site_dates_and_procs.contains(&date) {
@@ -379,18 +382,13 @@ impl StdSiteJob {
                 debug!("Added new StdSiteJob row ({rid}) for {site_id} on {date} to generate {processing_key}");
                 ndates += 1;
                 if ndates % 100 == 0 {
-                    // TODO: add a length hint method to DateIterator and use that to update this message with how many
-                    // there are to go.
-                    log::info!("Adding 'JobNeeded' entries ({ndates} complete so far)")
+                    log::info!("Adding 'JobNeeded' entries for {site_id} w/processing {processing_key} ({ndates} of {nexpected} complete so far)")
                 }
 
-                let met_state = crate::met::MetFile::is_date_complete_for_processing_config(
-                    conn,
-                    config,
-                    date,
-                    processing_key,
-                )
-                .await?;
+                let met_state = met_complete_dates
+                    .get(&date).ok_or_else(|| {
+                        anyhow!("Logic error: date {date} was not in the map of met completion, but that map should include all dates between {first_date} and {last_date}")
+                    })?;
                 if !met_state.is_complete() {
                     warn!("Missing met data for date {}, setting standard site job table row for site {site_id} to 'MissingMet'", date);
                     Self::set_state_by_id(conn, StdSiteJobState::MissingMet, rid).await
@@ -401,7 +399,9 @@ impl StdSiteJob {
             }
         }
 
-        info!("{ndates} row in StdSiteJobs added for site {site_id}");
+        info!(
+            "{ndates} row(s) in StdSiteJobs added for site {site_id} w/processing {processing_key}"
+        );
         Ok(())
     }
 
@@ -607,6 +607,28 @@ impl StdSiteJob {
             today + chrono::Duration::days(1000)
         };
 
+        // Get all of the met states at once - querying the database a single time, rather than per-job should be much faster,
+        // especially if the database is on another system. If the min/max are None, that should mean that there were no rows
+        // returned. While technically this might give us more dates than we need if the jobs are spread out in time, in most
+        // cases we're probably getting a contiguous date range, so the single database hit will be much faster.
+        let min_date = query.iter().map(|r| r.date).min();
+        let max_date = query.iter().map(|r| r.date).max();
+        let proc_keys =
+            HashSet::from_iter(query.iter().map(|r| ProcCfgKey(r.processing_key.clone())));
+        let met_states = if let (Some(start), Some(end)) = (min_date, max_date) {
+            Self::build_map_of_available_met(
+                conn,
+                config,
+                start,
+                end + chrono::Duration::days(1),
+                &proc_keys,
+            )
+            .await?
+        } else {
+            info!("No rows found requiring a job to be submitted for a standard site");
+            return Ok(());
+        };
+
         for rec in query {
             // Really the site_ids and ids values should never be None; the way the above query works, we should only get a record if there are rows with sites that
             // need a job. However, we can't prove that the GROUP_CONCAT operation will produce something, so we double check that these aren't Nones. Also, we return
@@ -625,13 +647,14 @@ impl StdSiteJob {
             let date = rec.date;
             let proc_key = ProcCfgKey(rec.processing_key);
 
-            let day_state = crate::met::MetFile::is_date_complete_for_processing_config(
-                conn, config, date, &proc_key,
-            )
-            .await?;
+            let day_state = met_states
+                .get(&proc_key)
+                .map(|inner| inner.get(&date))
+                .flatten()
+                .ok_or_else(|| anyhow!("Logic error: the map of met states should include an entry for proc key = {proc_key} and date = {date}"))?;
 
             if !day_state.is_complete() {
-                warn!("Default meteorology not available for {}, setting these rows' states to MissingMet", rec.date);
+                warn!("Required meteorology not available for {}, setting these rows' states to MissingMet", rec.date);
                 for rid in rids {
                     Self::set_state_by_id(conn, StdSiteJobState::MissingMet, rid).await
                         .with_context(|| format!("Error occurred while setting row {rid} in the standard site jobs table to state 'MissingMet'"))?;
@@ -689,6 +712,28 @@ impl StdSiteJob {
         }
 
         Ok(())
+    }
+
+    async fn build_map_of_available_met(
+        conn: &mut MySqlConn,
+        config: &Config,
+        min_date: NaiveDate,
+        max_date: NaiveDate,
+        proc_keys: &HashSet<ProcCfgKey>,
+    ) -> anyhow::Result<HashMap<ProcCfgKey, HashMap<NaiveDate, MetDayState>>> {
+        let mut all_met_states = HashMap::new();
+        for proc_key in proc_keys {
+            let keyed_cfgs = config.get_mets_for_processing_config(&proc_key)?;
+            let these_states = crate::met::MetFile::are_dates_complete_for_config_set(
+                conn,
+                min_date,
+                Some(max_date + chrono::Duration::days(1)),
+                &keyed_cfgs,
+            )
+            .await?;
+            all_met_states.insert(proc_key.to_owned(), these_states);
+        }
+        Ok(all_met_states)
     }
 
     pub async fn make_standard_site_tarballs(

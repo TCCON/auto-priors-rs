@@ -291,6 +291,19 @@ impl DateIterator {
         }
     }
 
+    pub fn expected_length(&self) -> usize {
+        let mut ndays = 0;
+        for (range_start, range_end) in self.date_ranges.iter() {
+            let start = self.not_before.unwrap_or(*range_start).max(*range_start);
+            let end = self.not_after.unwrap_or(*range_end).min(*range_end);
+            let range_ndays = (end - start).num_days();
+            if range_ndays > 0 {
+                ndays += range_ndays as usize;
+            }
+        }
+        ndays
+    }
+
     fn filter_empty_ranges(
         date_ranges: Vec<(NaiveDate, NaiveDate)>,
     ) -> Vec<(NaiveDate, NaiveDate)> {
@@ -1136,6 +1149,11 @@ mod tests {
     #[test]
     fn test_date_iterator_empty() {
         let mut it = DateIterator::new(vec![]);
+        assert_eq!(
+            it.expected_length(),
+            0,
+            "Expected length did not match the actual length"
+        );
         assert_eq!(it.next(), None);
     }
 
@@ -1145,6 +1163,11 @@ mod tests {
             NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(),
             NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(),
         )]);
+        assert_eq!(
+            it.expected_length(),
+            0,
+            "Expected length did not match the actual length"
+        );
         assert_eq!(it.next(), None);
     }
 
@@ -1153,6 +1176,11 @@ mod tests {
         let it = DateIterator::new_one_range(
             NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(),
             NaiveDate::from_ymd_opt(2018, 1, 2).unwrap(),
+        );
+        assert_eq!(
+            it.expected_length(),
+            1,
+            "Expected length did not match the actual length"
         );
         let dates: Vec<NaiveDate> = it.collect();
         assert_eq!(dates, [NaiveDate::from_ymd_opt(2018, 1, 1).unwrap()]);
@@ -1174,7 +1202,13 @@ mod tests {
                 NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
             ),
         ]);
+        let expected_length = it.expected_length();
         let dates: Vec<NaiveDate> = it.collect();
+        assert_eq!(
+            expected_length,
+            dates.len(),
+            "Expected length did not match the actual length"
+        );
         assert_eq!(
             dates,
             [
@@ -1192,7 +1226,13 @@ mod tests {
             NaiveDate::from_ymd_opt(2018, 1, 4).unwrap(),
         )]);
 
+        let expected_length = it.expected_length();
         let dates: Vec<NaiveDate> = it.collect();
+        assert_eq!(
+            expected_length,
+            dates.len(),
+            "Expected length did not match the actual length"
+        );
         assert_eq!(
             dates,
             [
@@ -1214,7 +1254,13 @@ mod tests {
             None,
         );
 
+        let expected_length = it.expected_length();
         let dates: Vec<NaiveDate> = it.collect();
+        assert_eq!(
+            expected_length,
+            dates.len(),
+            "Expected length did not match the actual length"
+        );
         assert_eq!(
             dates,
             [
@@ -1235,7 +1281,13 @@ mod tests {
             Some(NaiveDate::from_ymd_opt(2018, 1, 3).unwrap()),
         );
 
+        let expected_length = it.expected_length();
         let dates: Vec<NaiveDate> = it.collect();
+        assert_eq!(
+            expected_length,
+            dates.len(),
+            "Expected length did not match the actual length"
+        );
         assert_eq!(
             dates,
             [
@@ -1256,7 +1308,13 @@ mod tests {
             Some(NaiveDate::from_ymd_opt(2018, 1, 4).unwrap()),
         );
 
+        let expected_length = it.expected_length();
         let dates: Vec<NaiveDate> = it.collect();
+        assert_eq!(
+            expected_length,
+            dates.len(),
+            "Expected length did not match the actual length"
+        );
         assert_eq!(
             dates,
             [
@@ -1283,7 +1341,13 @@ mod tests {
             ),
         ]);
 
+        let expected_length = it.expected_length();
         let dates: Vec<NaiveDate> = it.collect();
+        assert_eq!(
+            expected_length,
+            dates.len(),
+            "Expected length did not match the actual length"
+        );
         assert_eq!(
             dates,
             [
@@ -1319,7 +1383,13 @@ mod tests {
             Some(NaiveDate::from_ymd_opt(2021, 1, 1).unwrap()),
         );
 
+        let expected_length = it.expected_length();
         let dates: Vec<NaiveDate> = it.collect();
+        assert_eq!(
+            expected_length,
+            dates.len(),
+            "Expected length did not match the actual length"
+        );
         assert_eq!(
             dates,
             [
@@ -1347,7 +1417,13 @@ mod tests {
             ),
         ]);
 
+        let expected_length = it.expected_length();
         let dates: Vec<NaiveDate> = it.collect();
+        assert_eq!(
+            expected_length,
+            dates.len(),
+            "Expected length did not match the actual length"
+        );
         assert_eq!(
             dates,
             [

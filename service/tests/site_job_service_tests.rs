@@ -1,4 +1,4 @@
-use std::{collections::HashSet, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 use chrono::NaiveDate;
 use itertools::Itertools;
@@ -723,6 +723,59 @@ async fn test_request_job_run_ginput() {
 
     // Unlike the standard site runs, this should be all we need to do. There should now be two jobs in the
     // testing/output directory.
+}
+
+#[tokio::test]
+async fn test_std_site_update_execution_time() {
+    init_logging();
+    let config = make_ginput_test_config();
+    let (pool, _test_db) = multiline_sql_init_pool!("sql/init_test_sites.sql");
+    let mut conn = pool
+        .get_connection()
+        .await
+        .expect("Should be able to get connection to database pool");
+
+    // Stress test the system by doing a whole year of both kinds of met data
+    let start = NaiveDate::from_ymd_opt(2023, 1, 1).unwrap();
+    let end = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+    add_dummy_met_for_date_range(&mut conn, start, end, true).await;
+    add_dummy_met_for_date_range(&mut conn, start, end, false).await;
+
+    let exec_start = std::time::Instant::now();
+
+    StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
+        .await
+        .unwrap();
+
+    let table_update_time = exec_start.elapsed();
+
+    StdSiteJob::add_jobs_for_pending_rows(&mut *conn, &config)
+        .await
+        .unwrap();
+    let add_jobs_time = exec_start.elapsed() - table_update_time;
+
+    dbg!(table_update_time);
+    dbg!(add_jobs_time);
+
+    // This test is for two sites for a year, and it's also running with a local
+    // database. In production, we're going to have 30+ sites for 20+ years, and
+    // the database might be on another computer. So if this overall takes 1 second,
+    // in production it would take a minimum of 1 s * (30 / 2 sites) * (20 / 1 years)
+    // = 600 seconds, and it could easily be an order of magnitude more with network
+    // calls.
+
+    // The table update I was able to get pretty fast (< 500 ms on my laptop) by only calling
+    // the database once to get all of the available met data. Adding the jobs took a bit longer,
+    // but was still about 750 ms.
+    assert!(
+        table_update_time.as_secs_f32() < 0.75,
+        "Standard site table update took too long!"
+    );
+
+    assert!(
+        add_jobs_time.as_secs_f32() < 1.0,
+        "Adding standard site jobs took too long!"
+    )
 }
 
 #[tokio::test]
