@@ -1269,6 +1269,8 @@ impl Queueable for ServiceJobRunner {
 mod tests {
     use std::time::Instant;
 
+    use orm::test_utils::init_logging;
+
     use crate::error::LoggingErrorHandler;
 
     use super::*;
@@ -1344,7 +1346,10 @@ mod tests {
         }
     }
 
-    async fn make_dummy_job_manager() -> (JobManager<DummyJobRunner>, orm::test_utils::TestDb) {
+    async fn make_dummy_job_manager(
+        initial_lut_regen: bool,
+        initial_input_file_update: bool,
+    ) -> (JobManager<DummyJobRunner>, orm::test_utils::TestDb) {
         let mut config = orm::config::Config::default();
         config.execution.queues.insert(
             TEST_QUEUE_NAME.to_string(),
@@ -1359,11 +1364,16 @@ mod tests {
             .await
             .expect("Should be able to create a connection to the test database");
 
-        let jm = JobManager::new_from_pool(
+        let options = JobManagerOptions {
+            initial_lut_regen,
+            initial_input_file_update,
+        };
+        let jm = JobManager::new_from_pool_with_options(
             pool,
             Arc::new(RwLock::new(config)),
             ErrorHandler::Logging(LoggingErrorHandler {}),
             rx,
+            options,
         )
         .await
         .expect("Could not make dummy JobManager");
@@ -1377,7 +1387,8 @@ mod tests {
     // 3) [x] Once LUT jobs finish, standard jobs are allowed to start
     #[tokio::test]
     async fn test_lut_with_running_jobs() {
-        let (mut manager, _test_db) = make_dummy_job_manager().await;
+        init_logging();
+        let (mut manager, _test_db) = make_dummy_job_manager(false, false).await;
         let test_job = DummyJobRunner::new_from_seconds(u64::MAX);
         let mut std_queue = Queue::new(TEST_QUEUE_MAX_NUM_ITEMS);
         for _ in 0..TEST_QUEUE_MAX_NUM_ITEMS {
@@ -1423,7 +1434,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lut_blocks_std_jobs() {
-        let (mut manager, _test_db) = make_dummy_job_manager().await;
+        let (mut manager, _test_db) = make_dummy_job_manager(false, false).await;
         let test_job = DummyJobRunner::new_from_seconds(u64::MAX);
         let mut std_queue = Queue::new(TEST_QUEUE_MAX_NUM_ITEMS);
         std_queue.add(test_job.clone()).await;
@@ -1485,7 +1496,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_jobs_unblock() {
-        let (mut manager, _test_db) = make_dummy_job_manager().await;
+        let (mut manager, _test_db) = make_dummy_job_manager(false, false).await;
         let test_job = DummyJobRunner::new_from_seconds(5);
         let mut std_queue = Queue::new(TEST_QUEUE_MAX_NUM_ITEMS);
         std_queue.add(test_job.clone()).await;
