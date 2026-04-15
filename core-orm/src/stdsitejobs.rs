@@ -545,16 +545,20 @@ impl StdSiteJob {
         .collect_vec();
 
         for (date, proc_key) in dates_missing_met {
+            debug!(
+                "Checking if previously incomplete date {date} for {proc_key} now has all its met"
+            );
             let day_state =
                 met::MetFile::is_date_complete_for_processing_config(conn, config, date, &proc_key)
                     .await?;
             if day_state.is_complete() {
                 // Assumes that if a date was missing met, it can't have an output file, so we only need to set the state
+                debug!("{date} is now complete, updating rows in the StdSiteJobs table");
                 let res = sqlx::query!(
                     "UPDATE StdSiteJobs SET state = ? WHERE date = ? AND processing_key = ? AND state = ?",
                     StdSiteJobState::JobNeeded,
-                    proc_key,
                     date,
+                    proc_key,
                     StdSiteJobState::MissingMet
                 )
                 .execute(&mut *conn)

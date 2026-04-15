@@ -1,9 +1,10 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use chrono::NaiveDate;
 use itertools::Itertools;
 use orm::{
     config::ProcCfgKey,
+    jobs::JobProcKey,
     multiline_sql, multiline_sql_init, multiline_sql_init_pool,
     stdsitejobs::{StdSiteJob, StdSiteJobState},
     test_utils::{
@@ -409,6 +410,89 @@ async fn test_site_job_missing_met_defaults() {
 
         assert_eq!(row.state, expected_state, "Wrong state for row: {row:?}");
     }
+
+    // Also check that the actual jobs added were only for the dates with met
+    let ginput_jobs = orm::jobs::Job::get_jobs_in_state(&mut conn, orm::jobs::JobState::Pending)
+        .await
+        .expect("Should be able to get pending jobs");
+    let expected_ginput_job_keys = [
+        (fpit_start, vec!["std-geosfpit"]),
+        (fpit_end, vec!["std-geosfpit"]),
+        (it_start, vec!["std-geosit"]),
+        (it_end, vec!["std-geosit"]),
+    ];
+    verify_jobs(&expected_sites, &expected_ginput_job_keys, &ginput_jobs);
+
+    // ------- //
+    // PHASE 2 //
+    // ------- //
+
+    eprintln!("=======\nPHASE 2\n=======");
+
+    // Next, check that if we add the met, those rows get updated to be in progress
+    add_dummy_met_for_date_range(
+        &mut conn,
+        fpit_start + chrono::Duration::days(1),
+        fpit_end,
+        true,
+    )
+    .await;
+    add_dummy_met_for_date_range(
+        &mut conn,
+        it_start + chrono::Duration::days(1),
+        it_end,
+        false,
+    )
+    .await;
+
+    StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
+        .await
+        .unwrap();
+    StdSiteJob::add_jobs_for_pending_rows(&mut *conn, &config)
+        .await
+        .unwrap();
+
+    let rows_after_fill = get_site_job_rows(&mut conn).await;
+    let expected_sites = get_expected_sites(&mut conn).await;
+    let mut expected_keys = get_expected_keys_for_date_range(
+        fpit_start,
+        fpit_end + chrono::Duration::days(1),
+        vec!["std-geosfpit"],
+    );
+    let tmp = get_expected_keys_for_date_range(
+        it_start,
+        it_end + chrono::Duration::days(1),
+        vec!["std-geosit"],
+    );
+    expected_keys.extend(tmp);
+
+    // Now we first check that the right number of rows were added
+    verify_site_job_rows(&expected_sites, &expected_keys, &rows_after_fill);
+    // ...then that all of them are in the right state
+    let all_in_prog = rows_after_fill
+        .iter()
+        .all(|r| r.state == StdSiteJobState::InProgress);
+    assert!(
+        all_in_prog,
+        "After filling in the met, all rows should be 'in progress'"
+    );
+
+    // And recheck the actual ginput jobs too
+    let ginput_jobs = orm::jobs::Job::get_jobs_in_state(&mut conn, orm::jobs::JobState::Pending)
+        .await
+        .expect("Should be able to get pending jobs");
+    let mut expected_ginput_job_keys = get_expected_keys_for_date_range(
+        fpit_start,
+        fpit_end + chrono::Duration::days(1),
+        vec!["std-geosfpit"],
+    );
+    let tmp = get_expected_keys_for_date_range(
+        it_start,
+        it_end + chrono::Duration::days(1),
+        vec!["std-geosit"],
+    );
+    expected_ginput_job_keys.extend(tmp);
+    verify_jobs(&expected_sites, &expected_ginput_job_keys, &ginput_jobs);
 }
 
 /// Test that standard site jobs added for days that are missing meteorology
@@ -460,6 +544,63 @@ async fn test_site_job_missing_met_alternate() {
 
         assert_eq!(row.state, expected_state, "Wrong state for row: {row:?}");
     }
+
+    // Also check that the actual jobs added were only for the dates with met
+    let ginput_jobs = orm::jobs::Job::get_jobs_in_state(&mut conn, orm::jobs::JobState::Pending)
+        .await
+        .expect("Should be able to get pending jobs");
+    let expected_ginput_job_keys = [
+        (start, vec!["std-geosfpit", "altco-geosfpit"]),
+        (end, vec!["std-geosfpit", "altco-geosfpit"]),
+    ];
+    verify_jobs(&expected_sites, &expected_ginput_job_keys, &ginput_jobs);
+
+    // ------- //
+    // PHASE 2 //
+    // ------- //
+
+    eprintln!("=======\nPHASE 2\n=======");
+
+    // Next, check that if we add the met, those rows get updated to be in progress
+    add_dummy_met_for_date_range(&mut conn, start + chrono::Duration::days(1), end, true).await;
+    add_dummy_met_for_date_range(&mut conn, start + chrono::Duration::days(1), end, false).await;
+
+    StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
+        .await
+        .unwrap();
+    StdSiteJob::add_jobs_for_pending_rows(&mut *conn, &config)
+        .await
+        .unwrap();
+
+    let rows_after_fill = get_site_job_rows(&mut conn).await;
+    let expected_sites = get_expected_sites(&mut conn).await;
+    let expected_keys = get_expected_keys_for_date_range(
+        start,
+        end + chrono::Duration::days(1),
+        vec!["std-geosfpit", "altco-geosfpit"],
+    );
+
+    // Now we first check that the right number of rows were added
+    verify_site_job_rows(&expected_sites, &expected_keys, &rows_after_fill);
+    // ...then that all of them are in the right state
+    let all_in_prog = rows_after_fill
+        .iter()
+        .all(|r| r.state == StdSiteJobState::InProgress);
+    assert!(
+        all_in_prog,
+        "After filling in the met, all rows should be 'in progress'"
+    );
+
+    // And recheck the actual ginput jobs too
+    let ginput_jobs = orm::jobs::Job::get_jobs_in_state(&mut conn, orm::jobs::JobState::Pending)
+        .await
+        .expect("Should be able to get pending jobs");
+    let expected_ginput_job_keys = get_expected_keys_for_date_range(
+        start,
+        end + chrono::Duration::days(1),
+        vec!["std-geosfpit", "altco-geosfpit"],
+    );
+    verify_jobs(&expected_sites, &expected_ginput_job_keys, &ginput_jobs);
 }
 
 /// Test that running standard sites with the configuration set to have the GEOS IT
@@ -862,6 +1003,56 @@ fn verify_site_job_rows(
                     "Did not find a row for site {site_id} on {date} for processing '{proc}'"
                 );
             }
+        }
+    }
+}
+
+fn verify_jobs(
+    expected_sites: &[String],
+    expected_keys: &[(NaiveDate, Vec<&str>)],
+    jobs: &[orm::jobs::Job],
+) {
+    // This debug should print to the console if the test fails, which can be helpful
+    // to diagnose why it failed.
+    let jobs = dbg!(jobs);
+
+    // Check that only the rows we expected to be added were
+    let n_rows = expected_keys
+        .iter()
+        .fold(0, |total, (_, procs)| total + procs.len());
+    assert_eq!(
+        jobs.len(),
+        n_rows,
+        "Too many or too few ginput jobs were added"
+    );
+
+    // First check that all of the jobs have the right sites
+    for job in jobs {
+        assert_eq!(
+            job.site_id.len(),
+            expected_sites.len(),
+            "Job {} had wrong number of sites",
+            job.job_id
+        );
+        let all_sites_found = expected_sites.iter().all(|sid| job.site_id.contains(&sid));
+        assert!(
+            all_sites_found,
+            "Job {} had wrong sites: expected = {:?}, actual = {:?}",
+            job.job_id, expected_sites, job.site_id
+        );
+    }
+
+    // Then check that there is a job for each date & processing
+    for (date, procs) in expected_keys {
+        for proc in procs {
+            let proc = JobProcKey::Specified(ProcCfgKey(proc.to_string()));
+            let found = jobs
+                .iter()
+                .any(|j| &j.start_date == date && j.processing_key == proc);
+            assert!(
+                found,
+                "Did not find a ginput job for date {date} and processing key {proc:?}"
+            );
         }
     }
 }
