@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT date FROM v_StdSiteJobs WHERE site_id = ? AND state = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "date",
+        "type_info": {
+          "type": "Date",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "char_set": 63,
+          "max_size": 10
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "facf33b3e0d6df910bc80c33dbed66fb3cdaefdfd6da1761f1bd0b6c417c8a46"
+}
