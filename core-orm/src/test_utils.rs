@@ -4,12 +4,13 @@ use std::{
 };
 
 use anyhow::Context;
+use chrono::NaiveDate;
 #[cfg(feature = "container-tests")]
 use testcontainers_modules::{
     mariadb, testcontainers::core::ContainerAsync, testcontainers::runners::AsyncRunner,
 };
 
-use crate::PoolWrapper;
+use crate::{MySqlConn, PoolWrapper};
 
 static TEST_DB_ENV_VARS: [&'static str; 2] = ["PRIORS_TEST_DATABASE_URL", "TEST_DATABASE_URL"];
 static TEST_FILE_DIR_VAR: &'static str = "PRIORS_TEST_FILE_ROOT";
@@ -257,6 +258,69 @@ pub fn init_logging() {
         .format_source_path(true)
         .is_test(true)
         .try_init();
+}
+
+pub async fn add_dummy_met_for_date(conn: &mut MySqlConn, date: NaiveDate, geos_fpit: bool) {
+    let keys_and_patterns = if geos_fpit {
+        [
+            (
+                "geosfpit-eta-met",
+                "GEOS.fpit.asm.inst3_3d_asm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4",
+            ),
+            (
+                "geosfpit-surf-met",
+                "GEOS.fpit.asm.inst3_2d_asm_Nx.GEOS5124.%Y%m%d_%H%M.V01.nc4",
+            ),
+            (
+                "geosfpit-eta-chm",
+                "GEOS.fpit.asm.inst3_3d_chm_Nv.GEOS5124.%Y%m%d_%H%M.V01.nc4",
+            ),
+        ]
+    } else {
+        [
+            (
+                "geosit-eta-met",
+                "GEOS.it.asm.asm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4",
+            ),
+            (
+                "geosit-surf-met",
+                "GEOS.it.asm.asm_inst_1hr_glo_L576x361_slv.GEOS5294.%Y-%m-%dT%H%M.V01.nc4",
+            ),
+            (
+                "geosit-eta-chm",
+                "GEOS.it.asm.chm_inst_3hr_glo_L576x361_v72.GEOS5294.%Y-%m-%dT%H%M.V01.nc4",
+            ),
+        ]
+    };
+
+    for ihr in 0..8 {
+        let hr = ihr * 3;
+        let datetime = date.and_hms_opt(hr, 0, 0).unwrap();
+        for (key, pat) in keys_and_patterns {
+            let filename = datetime.format(pat).to_string();
+            sqlx::query!(
+                "INSERT INTO MetFiles(file_path, product_key, filedate) VALUES(?,?,?)",
+                filename,
+                key,
+                datetime
+            )
+            .execute(&mut *conn)
+            .await
+            .expect("Should be able to add met files to the database");
+        }
+    }
+}
+
+/// Adds GEOS FP-IT or GEOS IT met files for dates from start (inclusive) to end (exclusive)
+pub async fn add_dummy_met_for_date_range(
+    conn: &mut MySqlConn,
+    start: NaiveDate,
+    end: NaiveDate,
+    geos_fpit: bool,
+) {
+    for date in crate::utils::DateIterator::new_one_range(start, end) {
+        add_dummy_met_for_date(conn, date, geos_fpit).await;
+    }
 }
 
 /// Execute a multi-statement SQL file on the database behind a connections.

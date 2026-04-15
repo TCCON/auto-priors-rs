@@ -156,8 +156,8 @@ impl StdSiteJob {
         not_before: Option<NaiveDate>,
     ) -> anyhow::Result<()> {
         for proc_key in config.get_auto_proc_cfgs() {
-            let (first_date, last_met_date) = if let Some(dates) =
-                Self::get_date_range_for_proc_cfg(conn, config, proc_key).await?
+            let (first_date, last_date) = if let Some(dates) =
+                Self::get_auto_date_range_for_proc_cfg(conn, config, proc_key).await?
             {
                 let start = not_before.unwrap_or(dates.0).max(dates.0);
                 (start, dates.1)
@@ -166,25 +166,20 @@ impl StdSiteJob {
                 continue;
             };
 
-            Self::fill_missing_dates_for_all_sites(
-                conn,
-                config,
-                first_date,
-                last_met_date,
-                proc_key,
-            )
-            .await
-            .map_err(|e| {
-                let n = e.len();
-                let msg = e
-                    .into_iter()
-                    .map(|(sid, err)| format!("  - {sid}, {err}"))
-                    .join("\n");
-                anyhow::anyhow!("{n} sites had an error while filling in missing dates:\n{msg}")
-            })
-            .context(
-                "Error occurred while filling in missing days in the standard site jobs table",
-            )?;
+            debug!("Possible range of dates to add standard site jobs for {proc_key} = {first_date}, {last_date}");
+            Self::fill_missing_dates_for_all_sites(conn, config, first_date, last_date, proc_key)
+                .await
+                .map_err(|e| {
+                    let n = e.len();
+                    let msg = e
+                        .into_iter()
+                        .map(|(sid, err)| format!("  - {sid}, {err}"))
+                        .join("\n");
+                    anyhow::anyhow!("{n} sites had an error while filling in missing dates:\n{msg}")
+                })
+                .context(
+                    "Error occurred while filling in missing days in the standard site jobs table",
+                )?;
             Self::reset_rows_for_regen(conn).await
             .context("Error occurred while resetting rows flagged for regeneration in the standard site jobs table")?;
             Self::try_reset_days_missing_met(conn, config).await
@@ -193,11 +188,12 @@ impl StdSiteJob {
         Ok(())
     }
 
-    /// Helper functino that returns the range of dates that a given processing
-    /// configuration can have priors generated for. The returned value will be
-    /// `Some(_)` as long as there is at least one day of complete met data
-    /// required, otherwise it will be `None`.
-    async fn get_date_range_for_proc_cfg(
+    /// Helper function that returns the range of dates that a given processing
+    /// configuration can have priors automatically generated for. The returned
+    /// value will be `Some(_)` as long as there is at least one day with all the
+    /// met data required, otherwise it will be `None`. Note that the last date
+    /// returned is exclusive.
+    async fn get_auto_date_range_for_proc_cfg(
         conn: &mut MySqlConn,
         config: &Config,
         proc_key: &ProcCfgKey,
@@ -208,18 +204,27 @@ impl StdSiteJob {
             .ok_or_else(|| anyhow!("Processing configuration '{proc_key}' not found"))?;
 
         let met_cfgs = proc_cfg.get_met_configs(config)?;
-        let first_avail_date =
+        let met_first_avail_date =
             met::MetFile::get_first_or_last_complete_date_for_config_set(conn, &met_cfgs, true)
                 .await
                 .context("Error occurred while trying to identify the first complete day for default meteorologies")?;
-        let last_avail_date =
+        let met_last_avail_date =
             met::MetFile::get_first_or_last_complete_date_for_config_set(conn, &met_cfgs, false)
                 .await
-                .context("Error occurred while trying to identify the last complete day for default meteorologies")?;
+                .context("Error occurred while trying to identify the last complete day for default meteorologies")?
+                .map(|d| d + chrono::Duration::days(1)); // the returned value is the actual last complete day, so add one day to make exclusive
 
-        if let (Some(start), Some(end)) = (first_avail_date, last_avail_date) {
+        let proc_first_auto_date = proc_cfg.auto_start_date();
+        let proc_last_auto_date = proc_cfg.auto_end_date();
+
+        if let (Some(met_start), Some(met_end)) = (met_first_avail_date, met_last_avail_date) {
+            // At least one day of met data is available, so limit the date range to the smaller of that defined
+            // by the available met and the configured range of dates
+            let start = proc_first_auto_date.max(met_start);
+            let end = proc_last_auto_date.unwrap_or(met_end).min(met_end);
             Ok(Some((start, end)))
         } else {
+            // No met data available, so we can't generate these priors at all.
             Ok(None)
         }
     }
@@ -265,8 +270,8 @@ impl StdSiteJob {
         last_date: Option<NaiveDate>,
     ) -> anyhow::Result<()> {
         for proc_key in config.get_auto_proc_cfgs() {
-            let opt_dates = Self::get_date_range_for_proc_cfg(conn, config, proc_key).await?;
-            let (first_met_date, last_met_date) = if let Some(dates) = opt_dates {
+            let opt_dates = Self::get_auto_date_range_for_proc_cfg(conn, config, proc_key).await?;
+            let (first_auto_date, last_auto_date) = if let Some(dates) = opt_dates {
                 dates
             } else {
                 warn!(
@@ -277,8 +282,8 @@ impl StdSiteJob {
 
             // Ensure that, if the input requested a specific date range, we limit to the range of actually available
             // met data.
-            let first_add_date = first_date.unwrap_or(first_met_date).max(first_met_date);
-            let last_add_date = last_date.unwrap_or(last_met_date).min(last_met_date);
+            let first_add_date = first_date.unwrap_or(first_auto_date).max(first_auto_date);
+            let last_add_date = last_date.unwrap_or(last_auto_date).min(last_auto_date);
 
             StdSiteJob::fill_missing_dates_for_site(
                 conn,
@@ -297,12 +302,13 @@ impl StdSiteJob {
     /// Fill in missing rows for a given site for a given processing configuration.
     /// Note that if you are looking for the equivalent of [`Self::update_std_site_job_table`]
     /// for a single site, use [`Self::fill_missing_dates_for_site_all_proc_configs`].
+    /// Also note that `last_date` is exclusive.
     async fn fill_missing_dates_for_site(
         conn: &mut MySqlConn,
         config: &Config,
         site_id: &str,
         first_date: NaiveDate,
-        last_met_date: NaiveDate,
+        last_date: NaiveDate,
         processing_key: &ProcCfgKey,
     ) -> anyhow::Result<()> {
         // First we get dates for which there is already an entry (in any state) for this site in the table
@@ -332,29 +338,35 @@ impl StdSiteJob {
             anyhow::bail!("Multiple open-ended locations for site {site_id}, this is an invalid configuration for a site");
         }
 
+        // We only use `last_date` as a default for end date here to ensure we have a non-optional end
+        // date. The `DateIterator` takes care of limiting the range of requested dates to that which
+        // we can automatically produce.
         let date_ranges: Vec<_> = locations
             .iter()
-            .map(|loc| {
-                (
-                    loc.start_date,
-                    loc.end_date
-                        .unwrap_or_else(|| last_met_date + Duration::days(1)),
-                )
-            })
+            .map(|loc| (loc.start_date, loc.end_date.unwrap_or(last_date)))
             .collect();
 
         // Last, we insert an "JobNeeded" entry for this site & date for each date missing.
         // We could use a transaction here, but it's not actually critical that we revert if only some
         // adds fail.  We don't worry about missing met here, we'll do that when we submit jobs
-        let date_iter = DateIterator::new_with_bounds(
-            date_ranges,
-            Some(first_date),
-            Some(last_met_date + Duration::days(1)),
-        );
+        let date_iter =
+            DateIterator::new_with_bounds(date_ranges, Some(first_date), Some(last_date));
+
+        let keyed_cfgs = config.get_mets_for_processing_config(&processing_key)?;
+        let met_complete_dates = crate::met::MetFile::are_dates_complete_for_config_set(
+            conn,
+            first_date,
+            Some(last_date),
+            &keyed_cfgs,
+        )
+        .await?;
 
         let mut ndates = 0;
         for date in date_iter {
-            if !extant_site_dates_and_procs.contains(&date) {
+            debug!("Maybe adding {date} for {site_id}");
+            if extant_site_dates_and_procs.contains(&date) {
+                debug!("{date} already exists for {site_id}, {processing_key}, no need to re-add");
+            } else {
                 let rid = Self::add_std_site_job_row_from_args(
                     conn,
                     site_id,
@@ -364,6 +376,7 @@ impl StdSiteJob {
                     None,
                 )
                 .await?;
+                debug!("Added new StdSiteJob row ({rid}) for {site_id} on {date} to generate {processing_key}");
                 ndates += 1;
                 if ndates % 100 == 0 {
                     // TODO: add a length hint method to DateIterator and use that to update this message with how many
@@ -371,13 +384,19 @@ impl StdSiteJob {
                     log::info!("Adding 'JobNeeded' entries ({ndates} complete so far)")
                 }
 
-                if !crate::met::MetFile::is_date_complete_for_default_processing(conn, config, date)
-                    .await?
-                    .is_complete()
-                {
+                let met_state = crate::met::MetFile::is_date_complete_for_processing_config(
+                    conn,
+                    config,
+                    date,
+                    processing_key,
+                )
+                .await?;
+                if !met_state.is_complete() {
                     warn!("Missing met data for date {}, setting standard site job table row for site {site_id} to 'MissingMet'", date);
                     Self::set_state_by_id(conn, StdSiteJobState::MissingMet, rid).await
                             .with_context(|| format!("Error occurred while setting row {rid} in the standard site jobs table to state 'MissingMet'"))?;
+                } else {
+                    debug!("All met files found for {processing_key} on {date}, {site_id} std. site job row {rid} left in default state (not set to 'MissingMet')");
                 }
             }
         }
@@ -416,12 +435,14 @@ impl StdSiteJob {
     /// Note that this will try all sites, even if an error occurs while processing one. If any site errors, the returned `Err`
     /// will contain the individual error messages from each site.
     ///
+    /// Also note that `last_date` is exclusive.
+    ///
     /// Currently, this is an inner function for the main table update driver only.
     async fn fill_missing_dates_for_all_sites(
         conn: &mut MySqlConn,
         config: &Config,
         first_date: NaiveDate,
-        last_met_date: NaiveDate,
+        last_date: NaiveDate,
         processing_key: &ProcCfgKey,
     ) -> Result<(), Vec<(String, anyhow::Error)>> {
         let site_ids = siteinfo::StdSite::get_site_ids(conn, None)
@@ -434,7 +455,7 @@ impl StdSiteJob {
                 config,
                 &site_id,
                 first_date,
-                last_met_date,
+                last_date,
                 processing_key,
             )
             .await

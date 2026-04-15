@@ -5,8 +5,12 @@ use itertools::Itertools;
 use orm::{
     config::ProcCfgKey,
     multiline_sql, multiline_sql_init, multiline_sql_init_pool,
-    stdsitejobs::StdSiteJob,
-    test_utils::{get_workspace_testing_dir, init_logging, make_dummy_config},
+    stdsitejobs::{StdSiteJob, StdSiteJobState},
+    test_utils::{
+        add_dummy_met_for_date, add_dummy_met_for_date_range, get_workspace_testing_dir,
+        init_logging, make_dummy_config,
+    },
+    utils::DateIterator,
     MySqlConn, PoolWrapper,
 };
 use tccon_priors_service::{
@@ -20,6 +24,7 @@ struct JobTestRow {
     site_id: Option<String>,
     date: NaiveDate,
     processing_key: String,
+    state: StdSiteJobState,
 }
 
 /// Verify that jobs are added for all of the days for which we have the right met files
@@ -272,6 +277,189 @@ async fn test_removed_alternate_config() {
 
     let rows = get_site_job_rows(&mut conn).await;
     verify_site_job_rows(&expected_sites, &expected_keys, &rows);
+}
+
+/// Confirm that standard site jobs are not added past the configured end date even if the require met is available
+/// Since the test configuration says that the standard GEOS FP-IT processing configuration ends on 2023-06-01, we
+/// will confirm that no jobs are added for it beyond 2023-05-31, even if its met goes farther
+#[tokio::test]
+async fn test_jobs_not_added_past_configured_end() {
+    init_logging();
+
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    add_dummy_met_for_date_range(
+        &mut conn,
+        NaiveDate::from_ymd_opt(2023, 5, 30).unwrap(),
+        NaiveDate::from_ymd_opt(2023, 6, 3).unwrap(),
+        true,
+    )
+    .await;
+
+    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
+
+    StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
+        .await
+        .unwrap();
+    StdSiteJob::add_jobs_for_pending_rows(&mut *conn, &config)
+        .await
+        .unwrap();
+
+    // Check that only the rows for May 30th and 31st were added
+    let rows = get_site_job_rows(&mut conn).await;
+    let expected_sites = get_expected_sites(&mut conn).await;
+    let expected_keys = get_expected_keys_for_date_range(
+        NaiveDate::from_ymd_opt(2023, 5, 30).unwrap(),
+        NaiveDate::from_ymd_opt(2023, 6, 1).unwrap(),
+        vec!["std-geosfpit"],
+    );
+    verify_site_job_rows(&expected_sites, &expected_keys, &rows);
+}
+
+/// Confirm that standard site jobs are not added before the configured start date even if the require met is available
+/// Since the test configuration says that the standard GEOS IT processing configuration starts on 2023-06-01, we
+/// will confirm that no jobs are added for it before 2023-06-31, even if its met goes farther back in time.
+#[tokio::test]
+async fn test_jobs_not_added_before_configured_start() {
+    init_logging();
+
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    add_dummy_met_for_date_range(
+        &mut conn,
+        NaiveDate::from_ymd_opt(2023, 5, 30).unwrap(),
+        NaiveDate::from_ymd_opt(2023, 6, 3).unwrap(),
+        false,
+    )
+    .await;
+
+    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
+
+    StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
+        .await
+        .unwrap();
+    StdSiteJob::add_jobs_for_pending_rows(&mut *conn, &config)
+        .await
+        .unwrap();
+
+    // Check that only the rows for June 1st and 2nd were added
+    let rows = get_site_job_rows(&mut conn).await;
+    let expected_sites = get_expected_sites(&mut conn).await;
+    let expected_keys = get_expected_keys_for_date_range(
+        NaiveDate::from_ymd_opt(2023, 6, 1).unwrap(),
+        NaiveDate::from_ymd_opt(2023, 6, 3).unwrap(),
+        vec!["std-geosit"],
+    );
+    verify_site_job_rows(&expected_sites, &expected_keys, &rows);
+}
+
+/// Test that standard site jobs added for days that are missing meteorology
+/// are correctly flagged as such in the database.
+#[tokio::test]
+async fn test_site_job_missing_met_defaults() {
+    init_logging();
+
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    // We will need to insert met files for a start and end date with a gap in the middle. Do this for both GEOS FP-IT
+    // and GEOS IT, around the test changeover date
+    let fpit_start = NaiveDate::from_ymd_opt(2023, 5, 20).unwrap();
+    let fpit_end = NaiveDate::from_ymd_opt(2023, 5, 31).unwrap();
+    let it_start = NaiveDate::from_ymd_opt(2023, 6, 1).unwrap();
+    let it_end = NaiveDate::from_ymd_opt(2023, 6, 10).unwrap();
+    add_dummy_met_for_date(&mut conn, fpit_start, true).await;
+    add_dummy_met_for_date(&mut conn, fpit_end, true).await;
+    add_dummy_met_for_date(&mut conn, it_start, false).await;
+    add_dummy_met_for_date(&mut conn, it_end, false).await;
+
+    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
+
+    StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
+        .await
+        .unwrap();
+    StdSiteJob::add_jobs_for_pending_rows(&mut *conn, &config)
+        .await
+        .unwrap();
+
+    let rows = get_site_job_rows(&mut conn).await;
+    let expected_sites = get_expected_sites(&mut conn).await;
+    let mut expected_keys = get_expected_keys_for_date_range(
+        fpit_start,
+        fpit_end + chrono::Duration::days(1),
+        vec!["std-geosfpit"],
+    );
+    let tmp = get_expected_keys_for_date_range(
+        it_start,
+        it_end + chrono::Duration::days(1),
+        vec!["std-geosit"],
+    );
+    expected_keys.extend(tmp);
+
+    // Now we first check that the right number of rows were added
+    verify_site_job_rows(&expected_sites, &expected_keys, &rows);
+    // Then we check that they all have the right state (InProgress for the days with met,
+    // MissingMet for the others)
+    for row in rows {
+        let expected_state = if row.date == fpit_start
+            || row.date == fpit_end
+            || row.date == it_start
+            || row.date == it_end
+        {
+            StdSiteJobState::InProgress
+        } else {
+            StdSiteJobState::MissingMet
+        };
+
+        assert_eq!(row.state, expected_state, "Wrong state for row: {row:?}");
+    }
+}
+
+/// Test that standard site jobs added for days that are missing meteorology
+/// needed for the alternate processing are correctly flagged as such in the database.
+/// This is a regression test to catch a previous bug where we were only checking
+/// for the default met for each date being present, not the actual met that we needed
+/// for the processing configuration.
+#[tokio::test]
+async fn test_site_job_missing_met_alternate() {
+    init_logging();
+
+    let (mut conn, _test_db) = multiline_sql_init!("sql/init_test_sites.sql");
+    // We will need to insert met files for a start and end date with a gap in the middle. Since we only care about
+    // the alternate met, we only need to do the period before the transition, but need both FPIT and IT met.
+    let start = NaiveDate::from_ymd_opt(2023, 5, 20).unwrap();
+    let end = NaiveDate::from_ymd_opt(2023, 5, 31).unwrap();
+    add_dummy_met_for_date(&mut conn, start, true).await;
+    add_dummy_met_for_date(&mut conn, end, true).await;
+    add_dummy_met_for_date(&mut conn, start, false).await;
+    add_dummy_met_for_date(&mut conn, end, false).await;
+
+    let config = make_dummy_config(PathBuf::from(".")).expect("Failed to make test configuration");
+
+    StdSiteJob::update_std_site_job_table(&mut *conn, &config, None)
+        .await
+        .unwrap();
+    StdSiteJob::add_jobs_for_pending_rows(&mut *conn, &config)
+        .await
+        .unwrap();
+
+    let rows = get_site_job_rows(&mut conn).await;
+    let expected_sites = get_expected_sites(&mut conn).await;
+    let expected_keys = get_expected_keys_for_date_range(
+        start,
+        end + chrono::Duration::days(1),
+        vec!["std-geosfpit", "altco-geosfpit"],
+    );
+
+    // Now we first check that the right number of rows were added
+    verify_site_job_rows(&expected_sites, &expected_keys, &rows);
+    // Then we check that they all have the right state (InProgress for the days with met,
+    // MissingMet for the others)
+    for row in rows {
+        let expected_state = if row.date == start || row.date == end {
+            StdSiteJobState::InProgress
+        } else {
+            StdSiteJobState::MissingMet
+        };
+
+        assert_eq!(row.state, expected_state, "Wrong state for row: {row:?}");
+    }
 }
 
 /// Test that running standard sites with the configuration set to have the GEOS IT
@@ -615,11 +803,23 @@ fn get_expected_keys_without_proc(proc_to_remove: &str) -> [(NaiveDate, Vec<&'st
     expected
 }
 
+/// Return the list of all date + processing key combinations expected for a given date range.
+/// `end` is exclusive. `proc_key` will usually be a combination of "std-geosfpit", "std-geosit",
+/// and "altco-geosfpit".
+fn get_expected_keys_for_date_range(
+    start: NaiveDate,
+    end: NaiveDate,
+    proc_keys: Vec<&'static str>,
+) -> Vec<(NaiveDate, Vec<&'static str>)> {
+    let date_iter = DateIterator::new_one_range(start, end);
+    date_iter.map(|d| (d, proc_keys.clone())).collect()
+}
+
 /// Helper function: retrieve the site jobs rows present in the database.
 async fn get_site_job_rows(conn: &mut MySqlConn) -> Vec<JobTestRow> {
     sqlx::query_as!(
         JobTestRow,
-        "SELECT site_id,date,processing_key FROM v_StdSiteJobs"
+        "SELECT site_id,date,processing_key,state FROM v_StdSiteJobs"
     )
     .fetch_all(&mut *conn)
     .await

@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "SELECT site_id,date,processing_key FROM v_StdSiteJobs",
+  "query": "SELECT site_id,date,processing_key,state FROM v_StdSiteJobs",
   "describe": {
     "columns": [
       {
@@ -32,6 +32,16 @@
           "char_set": 224,
           "max_size": 256
         }
+      },
+      {
+        "ordinal": 3,
+        "name": "state",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL",
+          "char_set": 63,
+          "max_size": 4
+        }
       }
     ],
     "parameters": {
@@ -40,8 +50,9 @@
     "nullable": [
       true,
       false,
+      false,
       false
     ]
   },
-  "hash": "1410d6bfaf612718887939ed82fdc134e910358e5686c9b3a1e59d52facf7691"
+  "hash": "a2f007a50285886e41564cd3e55dc82b4b87d89b0b3564e6f5d7a56f9a3a8f6f"
 }
