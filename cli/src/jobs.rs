@@ -1,4 +1,10 @@
-use std::{borrow::Cow, collections::HashMap, fmt::Display, path::PathBuf, str::FromStr};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    fmt::Display,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
@@ -9,6 +15,7 @@ use orm::{
     config::Config,
     error::JobError,
     jobs::{FairShare, Job, JobState, MapFmt, ModFmt, TarChoice, VmrFmt},
+    utils::DateIterator,
     MySqlConn,
 };
 use tabled::Tabled;
@@ -48,6 +55,9 @@ pub enum JobActions {
 
     /// Describe the current state of the job
     Status(JobStatusCli),
+
+    /// Output the JSON formatted ginput arguments for one or more jobs
+    WriteGinputArgs(WriteGinputArgsCli),
 }
 
 #[derive(Debug, Args)]
@@ -174,6 +184,25 @@ pub struct SetPriorityCli {
     /// job's priority.
     #[clap(short = 'a', long)]
     allow_any_state: bool,
+}
+
+/// Output the JSON-formatted ginput arguments for one or more jobs.
+///
+/// This is intended for offline testing/debugging. Normally, these JSON
+/// files will be written as part of the service running jobs.
+#[derive(Debug, Args)]
+pub struct WriteGinputArgsCli {
+    /// The ID numbers of the job or jobs to output arguments for
+    job_ids: Vec<i32>,
+
+    /// If this is given, the JSON files that would be used to run
+    /// the requested jobs will be written to this directory. Otherwise,
+    /// they will all be printed to stdout. Note that piping the standard
+    /// output to a file will only create a valid JSON file if you choose
+    /// a single job with a single date, since each date for each job gets
+    /// its own JSON object.
+    #[clap(short = 'o', long)]
+    output_dir: Option<PathBuf>,
 }
 
 pub async fn set_job_priority_cli(
@@ -633,6 +662,56 @@ async fn make_jobs_table_helper(
         }
         builder.push_record(row);
     }
+    Ok(())
+}
+
+pub async fn create_ginput_args_json_cli(
+    conn: &mut MySqlConn,
+    config: &Config,
+    clargs: WriteGinputArgsCli,
+) -> anyhow::Result<()> {
+    create_ginput_args_json(conn, config, &clargs.job_ids, clargs.output_dir.as_deref()).await
+}
+
+pub async fn create_ginput_args_json(
+    conn: &mut MySqlConn,
+    config: &Config,
+    job_ids: &[i32],
+    output_dir: Option<&Path>,
+) -> anyhow::Result<()> {
+    for jid in job_ids {
+        let job = Job::get_job_with_id(conn, *jid)
+            .await
+            .with_context(|| format!("Error getting job ID = {jid}"))?;
+
+        let date_iter = DateIterator::new_one_range(job.start_date, job.end_date);
+        for date in date_iter {
+            let ginput_args =
+                orm::jobs::setup_ginput_args_for_date(conn, date, &job, config, false)
+                    .await
+                    .with_context(|| format!("Error creating arguments for job ID = {jid}"))?;
+            if let Some(output_path) = output_dir {
+                let date_fmt = date.format("%Y%m%d");
+                let args_file = output_path.join(format!("ginput_args_job{jid}_{date_fmt}.json"));
+                let args_file_h = std::fs::File::create(&args_file).with_context(|| {
+                    format!("Error creating arguments file {}", args_file.display())
+                })?;
+                serde_json::to_writer_pretty(args_file_h, &ginput_args).with_context(|| {
+                    format!("Error writing arguments file {}", args_file.display())
+                })?;
+                info!(
+                    "Wrote arguments for job ID = {jid} on {date} to {}",
+                    args_file.display()
+                );
+            } else {
+                let s = serde_json::to_string_pretty(&ginput_args).with_context(|| {
+                    format!("Error creating arguments JSON string for job ID = {jid} on {date}")
+                })?;
+                println!("{s}");
+            }
+        }
+    }
+
     Ok(())
 }
 

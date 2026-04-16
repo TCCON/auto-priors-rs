@@ -193,6 +193,14 @@ async fn main() -> anyhow::Result<()> {
             jobs::print_job_status_cli(&mut conn, subargs).await?;
         }
 
+        Commands::Jobs(JobCli {
+            commands: JobActions::WriteGinputArgs(subargs),
+        }) => {
+            let mut conn = db.get_connection().await?;
+            let loaded_config = load_config()?;
+            jobs::create_ginput_args_json_cli(&mut conn, &loaded_config, subargs).await?;
+        }
+
         Commands::InputFiles(InputFilesCli {
             commands: InputFilesActions::Parse(subargs),
         }) => {

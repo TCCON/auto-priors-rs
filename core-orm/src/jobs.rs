@@ -2334,7 +2334,7 @@ pub fn run_arg_file(save_path: &Path, start_date: NaiveDate) -> PathBuf {
 }
 
 #[derive(Debug, Serialize)]
-struct GinputAutomationArgs {
+pub struct GinputAutomationArgs {
     job_id: i32,
     ginput_met_key: String,
 
@@ -2378,7 +2378,7 @@ async fn run_priors_gen_job(pool: PoolWrapper, mut job: Job, config: Config) -> 
         // dates takes long enough for the connection to reset.
         let res = {
             let mut conn = pool.get_connection().await?;
-            setup_ginput_args_for_date(&mut conn, date, &job, &config).await
+            setup_ginput_args_for_date(&mut conn, date, &job, &config, true).await
         };
         let res = res.with_context(|| {
             format!(
@@ -2587,11 +2587,12 @@ fn get_runner_for_ginput(ginput: &crate::config::GinputConfig) -> Box<dyn InnerG
     }
 }
 
-async fn setup_ginput_args_for_date(
+pub async fn setup_ginput_args_for_date(
     conn: &mut MySqlConn,
     date: NaiveDate,
     job: &Job,
     config: &Config,
+    create_run_directory: bool,
 ) -> anyhow::Result<GinputAutomationArgs> {
     debug!("Job {}: Getting met key for job", job.job_id);
     let proc_cfg_key = if let JobProcKey::Specified(k) = &job.processing_key {
@@ -2617,10 +2618,12 @@ async fn setup_ginput_args_for_date(
         .await
         .map_err(|e| JobError::InvalidSiteLocation(e))?;
 
-    debug!("Job {}: setting up run directory", job.job_id);
     let run_dir = job.run_dir(false);
-    if !run_dir.exists() {
-        std::fs::create_dir_all(&run_dir)?;
+    if create_run_directory {
+        debug!("Job {}: setting up run directory", job.job_id);
+        if !run_dir.exists() {
+            std::fs::create_dir_all(&run_dir)?;
+        }
     }
 
     let nlocs = lons.len();
@@ -2835,7 +2838,7 @@ mod tests {
 
         dbg!(&config);
 
-        let ginput_args = setup_ginput_args_for_date(&mut conn, date, &job, &config)
+        let ginput_args = setup_ginput_args_for_date(&mut conn, date, &job, &config, false)
             .await
             .expect("Should be able to create ginput arguments");
 
