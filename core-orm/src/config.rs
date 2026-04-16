@@ -1664,6 +1664,17 @@ impl EmailConfig {
         message: &str,
     ) -> Result<(), EmailError> {
         let from = self.from_address.to_string();
+        info!("Sending email to {}", to.join(", "));
+        if let Some(cc_list) = cc {
+            info!("{} addresses CC'd: {}", cc_list.len(), cc_list.join(", "));
+        }
+        if let Some(bcc_list) = bcc {
+            info!(
+                "{} addresses BCC'd: {}",
+                bcc_list.len(),
+                bcc_list.join(", ")
+            );
+        }
         match &self.backend {
             EmailBackend::Internal(backend) => {
                 backend.send_mail(to, &from, cc, bcc, subject, message)

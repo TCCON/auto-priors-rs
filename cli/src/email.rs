@@ -9,7 +9,7 @@ use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use clap::{Args, Subcommand};
 use itertools::Itertools;
-use log::warn;
+use log::{info, warn};
 use orm::{config::Config, email::SendMail, jobs::Job, MySqlConn};
 use regex::Regex;
 use serde::Deserialize;
@@ -65,8 +65,30 @@ pub struct EmailSubmittersCli {
     /// newlines are removed and multiple consecutive newlines are reduced to 2. This makes the email
     /// body look nicer in viewers that do softwrapping. Use this flag to disable that and keep all
     /// newlines.
-    #[clap(short = 'k', long)]
+    #[clap(short = 'n', long)]
     keep_newlines: bool,
+
+    /// If given, then the emails will be sent out in batches of this size. This may help with email
+    /// providers that block mass emails.
+    #[clap(short = 'l', long)]
+    batch_size: Option<usize>,
+
+    /// This determines how many seconds to wait between batches. This may also help with email providers
+    /// that block mass emails.
+    #[clap(short = 'p', long, default_value_t = 0)]
+    batch_pause_seconds: u64,
+
+    /// By default, any email now on the blacklist will not
+    /// be included in the list. Pass this flag to include
+    /// them.
+    #[clap(short = 'k', long)]
+    keep_blacklisted: bool,
+
+    /// Use this argument to give a domain to exclude, emails that
+    /// end in this substring will not be printed. Specify multiple
+    /// times for multiple domains.
+    #[clap(short = 'e', long)]
+    exclude_domain: Vec<String>,
 
     /// Use a mock email backend rather that the configured one.
     #[clap(short = 'd', long)]
@@ -99,7 +121,20 @@ pub async fn email_past_job_submitters_cli(
         anyhow::bail!("Must give one of --body or --body-file");
     };
 
-    email_past_job_submitters(conn, config, &args.to, &args.subject, &body, args.dry_run).await
+    let excluded_domains = args.exclude_domain.iter().map(|s| s.as_str()).collect_vec();
+    email_past_job_submitters(
+        conn,
+        config,
+        &args.to,
+        &args.subject,
+        &body,
+        args.batch_size,
+        args.batch_pause_seconds,
+        &excluded_domains,
+        args.keep_blacklisted,
+        args.dry_run,
+    )
+    .await
 }
 
 pub async fn email_past_job_submitters(
@@ -108,25 +143,45 @@ pub async fn email_past_job_submitters(
     to: &str,
     subject: &str,
     body: &str,
+    batch_size: Option<usize>,
+    batch_pause_seconds: u64,
+    exclude_domains: &[&str],
+    keep_blacklisted: bool,
     dry_run: bool,
 ) -> anyhow::Result<()> {
-    let emails = make_submitter_email_list(conn, config).await?;
+    let emails = make_submitter_email_list(conn, config, keep_blacklisted, exclude_domains).await?;
+    let batch_size = batch_size.unwrap_or_else(|| emails.len());
+    let n_total = emails.len();
+    let mut n_sent = 0;
 
-    let emails_ref: Vec<_> = emails.iter().map(|e| e.as_str()).collect();
-    if dry_run {
-        let mock = orm::email::MockEmail {};
-        mock.send_mail(
-            &[to],
-            &config.email.from_address.to_string(),
-            None,
-            Some(&emails_ref),
-            subject,
-            body,
-        )?;
-    } else {
-        config
-            .email
-            .send_mail(&[to], None, Some(&emails_ref), subject, body)?;
+    let emails_iter = emails.iter().map(|e| e.as_str()).chunks(batch_size);
+    for email_batch in emails_iter.into_iter() {
+        let emails_ref = email_batch.collect_vec();
+        if dry_run {
+            let mock = orm::email::MockEmail {};
+            mock.send_mail(
+                &[to],
+                &config.email.from_address.to_string(),
+                None,
+                Some(&emails_ref),
+                subject,
+                body,
+            )?;
+        } else {
+            config
+                .email
+                .send_mail(&[to], None, Some(&emails_ref), subject, body)?;
+        }
+
+        n_sent += emails_ref.len();
+        info!(
+            "Sent emails to {n_sent} of {n_total} addresses so far, {} more to go",
+            n_total - n_sent
+        );
+        if batch_pause_seconds > 0 {
+            info!("Waiting {batch_pause_seconds} before sending next group of emails");
+            tokio::time::sleep(std::time::Duration::from_secs(batch_pause_seconds)).await;
+        }
     }
     Ok(())
 }
@@ -176,7 +231,8 @@ pub async fn print_submitters_emails(
     keep_blacklisted: bool,
     exclude_domains: &[&str],
 ) -> anyhow::Result<()> {
-    let mut emails = make_submitter_email_list(conn, config).await?;
+    let mut emails =
+        make_submitter_email_list(conn, config, keep_blacklisted, exclude_domains).await?;
 
     let n_blacklisted = if !keep_blacklisted {
         let n_init = emails.len();
@@ -221,6 +277,8 @@ pub async fn print_submitters_emails(
 async fn make_submitter_email_list(
     conn: &mut MySqlConn,
     config: &Config,
+    keep_blacklisted: bool,
+    exclude_domains: &[&str],
 ) -> anyhow::Result<Vec<String>> {
     let mut emails = Job::get_distinct_submitter_emails(conn)
         .await?
@@ -242,6 +300,43 @@ async fn make_submitter_email_list(
     }
 
     emails.dedup();
+
+    let n_blacklisted = if !keep_blacklisted {
+        let n_init = emails.len();
+        for entry in &config.blacklist {
+            match entry.identifier {
+                orm::config::BlacklistIdentifier::SubmitterEmail { ref submitter } => {
+                    emails.retain(|s| s != submitter);
+                }
+            }
+        }
+        n_init - emails.len()
+    } else {
+        0
+    };
+
+    let n_excluded = if !exclude_domains.is_empty() {
+        let n_init = emails.len();
+        emails.retain(|s| {
+            for dom in exclude_domains {
+                if s.ends_with(dom) {
+                    return false;
+                }
+            }
+            return true;
+        });
+        n_init - emails.len()
+    } else {
+        0
+    };
+
+    if n_blacklisted > 0 {
+        info!("{n_blacklisted} emails removed because they were on the blacklist.");
+    }
+    if n_excluded > 0 {
+        info!("{n_excluded} emails removed because they matched one of the excluded domains.");
+    }
+
     emails.sort_unstable();
 
     Ok(emails)
