@@ -517,6 +517,7 @@ pub async fn add_jobs_from_input_files(
     // If it gets deleted but not copied, that's one thing, but the real problem comes if a file cannot be deleted. In that case,
     // we might end up parsing the input file over and over because it just sits there. Hence this convoluted logic, which checks
     for input_file in input_files {
+        debug!("Handling input file: {}", input_file.display());
         // This is the key: the first time we encounter a file, as long as we can read it, we will try to
         // parse it. Then, if the move fails, it gets added to a list of files that failed to copy or delete
         if mover.file_previously_errored(&input_file) {
@@ -526,21 +527,19 @@ pub async fn add_jobs_from_input_files(
 
         match InputJob::from_file(&input_file) {
             Ok(job) => {
+                debug!("Input file parsed successfully: {}", input_file.display());
                 jobs.push(job);
                 successful_input_files.push(input_file);
             }
             Err(e) => {
+                debug!(
+                    "Input file not parsed successfully: {}",
+                    input_file.display()
+                );
                 email_user_for_failed_parsing(e, config);
 
                 // Move failed files now; for successful file, we need the job number so that has to happen later
-                let now = chrono::Local::now();
-                let dest_file = config.execution.failure_input_file_dir.join(format!(
-                    "failed_input_file_{}.txt",
-                    now.format("%Y-%m-%d %H:%M:%S.%f")
-                ));
-                if let Err(e) = mover.move_file(&input_file, Some(&dest_file)) {
-                    unmoved_input_file_errors.push(e);
-                }
+                move_failed_file(config, input_file, mover, &mut unmoved_input_file_errors);
             }
         };
     }
@@ -587,6 +586,7 @@ pub async fn add_jobs_from_input_files(
             let job_ids = match request_result {
                 Ok(jids) => jids,
                 Err(JobAddError::InvalidRequest(reasons)) => {
+                    move_failed_file(config, infile, mover, &mut unmoved_input_file_errors);
                     let err = FailedParsingError {
                         reasons,
                         input_file: infile.clone(),
@@ -598,6 +598,7 @@ pub async fn add_jobs_from_input_files(
                 Err(e) => {
                     if e.is_server_error() {
                         log::error!("Server error while processing input file request: {e:?}");
+                        move_failed_file(config, infile, mover, &mut unmoved_input_file_errors);
                         let err = FailedParsingError {
                             reasons: vec!["A server error occurred".to_string()],
                             input_file: infile.clone(),
@@ -606,6 +607,7 @@ pub async fn add_jobs_from_input_files(
                         email_user_for_failed_parsing(err, config);
                         continue;
                     } else {
+                        move_failed_file(config, infile, mover, &mut unmoved_input_file_errors);
                         let err = FailedParsingError {
                             reasons: vec![e.to_string()],
                             input_file: infile.clone(),
@@ -691,6 +693,23 @@ fn confirm_successful_parsing(job: &InputJob, config: &Config, input_file: &Path
             &body,
         )
         .unwrap_or_else(|e| warn!("Failed to send confirmation email to {email}. Reason was: {e}"));
+}
+
+fn move_failed_file(
+    config: &Config,
+    input_file: &Path,
+    mover: &mut InputFileCleanupHandler,
+    unmoved_input_file_errors: &mut Vec<anyhow::Error>,
+) {
+    let now = chrono::Local::now();
+    let dest_file = config.execution.failure_input_file_dir.join(format!(
+        "failed_input_file_{}.txt",
+        now.format("%Y-%m-%d %H:%M:%S.%f")
+    ));
+    if let Err(e) = mover.move_file(&input_file, Some(&dest_file)) {
+        warn!("Failed to move bad input file, error was: {e}");
+        unmoved_input_file_errors.push(e);
+    }
 }
 
 fn email_user_for_failed_parsing(error: FailedParsingError, config: &Config) {
@@ -915,14 +934,24 @@ impl InputFileCleanupHandler {
         delete_original: bool,
     ) -> InputFileMoveError<'p> {
         let res_copy = if let Some(to) = to_file {
+            debug!("Moving {} to {}", from_file.display(), to.display());
             std::fs::copy(from_file, to)
         } else {
+            debug!(
+                "No destination specified, not moving {}",
+                from_file.display()
+            );
             Ok(0)
         };
 
         let res_rm = if delete_original {
+            debug!("Deleting {}", from_file.display());
             std::fs::remove_file(from_file)
         } else {
+            debug!(
+                "delete_original = false, leaving {} in place",
+                from_file.display()
+            );
             Ok(())
         };
 
