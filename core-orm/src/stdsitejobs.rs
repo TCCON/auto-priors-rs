@@ -761,7 +761,9 @@ impl StdSiteJob {
             match job.state {
                 jobs::JobState::Complete => (), // ready to make tarball
                 jobs::JobState::Pending | jobs::JobState::Running => {
-                    info!("Job {jid} still running, cannot make standard site tarball from it yet");
+                    log::trace!(
+                        "Job {jid} still running, cannot make standard site tarball from it yet"
+                    );
                     continue;
                 }
                 jobs::JobState::Errored => {

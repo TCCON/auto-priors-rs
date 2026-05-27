@@ -68,6 +68,8 @@ async fn driver() -> anyhow::Result<()> {
     let service_version = clap::crate_version!();
     println!("Service v{service_version} starting");
     info!("Starting tccon-priors-service v{service_version}");
+    debug!("Debug-level log messages enabled");
+    trace!("Trace-level log messages enabled");
     let db_url = orm::get_database_url(None)?;
     let db = orm::get_database_pool(Some(db_url.clone()))
         .await
