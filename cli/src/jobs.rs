@@ -171,6 +171,7 @@ pub struct BatchResetJobsCli {
     queue: Option<String>,
 
     /// Print the jobs that would be reset, rather than actually resetting them
+    #[clap(short = 'd', long)]
     dry_run: bool,
 }
 
