@@ -10,7 +10,7 @@ use anyhow::Context;
 use chrono::{NaiveDate, NaiveDateTime};
 use clap::{self, Args, Subcommand};
 use itertools::Itertools;
-use log::{debug, info};
+use log::{debug, info, warn};
 use orm::{
     config::Config,
     error::JobError,
@@ -34,6 +34,9 @@ pub enum JobActions {
 
     /// Reset a job to pending, clearing any output
     Reset(ResetJobCli),
+
+    /// Reset multiple jobs to pending, clearing any output
+    BatchReset(BatchResetJobsCli),
 
     /// Delete a job, clearing any output
     Delete(DeleteJobCli),
@@ -153,6 +156,52 @@ pub struct ResetJobCli {
 pub async fn reset_job(db: &mut orm::MySqlConn, clargs: ResetJobCli) -> anyhow::Result<()> {
     orm::jobs::Job::reset_job_with_id(db, clargs.id).await?;
     println!("Reset job #{}", clargs.id);
+    Ok(())
+}
+
+/// Reset all jobs in a particular state, optionally in a specific queue
+#[derive(Debug, Args)]
+pub struct BatchResetJobsCli {
+    /// Only reset jobs in this state
+    #[clap(short='s', long, default_value_t=JobState::Errored)]
+    state: JobState,
+
+    /// Only reset jobs in this queue
+    #[clap(long)]
+    queue: Option<String>,
+
+    /// Print the jobs that would be reset, rather than actually resetting them
+    dry_run: bool,
+}
+
+pub async fn batch_reset_jobs_cli(
+    conn: &mut orm::MySqlConn,
+    cli: BatchResetJobsCli,
+) -> anyhow::Result<()> {
+    batch_reset_jobs(conn, cli.state, cli.queue.as_deref(), cli.dry_run).await
+}
+
+pub async fn batch_reset_jobs(
+    conn: &mut orm::MySqlConn,
+    state: JobState,
+    queue: Option<&str>,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    let jobs = Job::get_jobs_in_state(conn, state).await?;
+    for job in jobs {
+        if queue.is_some_and(|q| job.queue != q) {
+            continue;
+        }
+
+        if dry_run {
+            println!("Would reset job #{}", job.job_id);
+        } else {
+            match Job::reset_job_with_id(conn, job.job_id).await {
+                Ok(_) => info!("Reset job #{}", job.job_id),
+                Err(e) => log::error!("Error resetting job #{}: {e}", job.job_id),
+            }
+        }
+    }
     Ok(())
 }
 

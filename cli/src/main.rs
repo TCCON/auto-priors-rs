@@ -180,6 +180,13 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Commands::Jobs(JobCli {
+            commands: JobActions::BatchReset(subargs),
+        }) => {
+            let mut conn = db.get_connection().await?;
+            jobs::batch_reset_jobs_cli(&mut conn, subargs).await?;
+        }
+
+        Commands::Jobs(JobCli {
             commands: JobActions::SetPriority(subargs),
         }) => {
             let mut conn = db.get_connection().await?;
