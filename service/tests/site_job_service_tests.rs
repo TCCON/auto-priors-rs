@@ -767,14 +767,28 @@ async fn test_std_site_update_execution_time() {
     // The table update I was able to get pretty fast (< 500 ms on my laptop) by only calling
     // the database once to get all of the available met data. Adding the jobs took a bit longer,
     // but was still about 750 ms.
+    let threshold_mult: f32 = std::env::var("TIMING_THRESH_MULT")
+        .unwrap_or_else(|_| {
+            log::info!("No TIMING_THRESH_MULT specified, using 1.0");
+            "1.0".to_string()
+        })
+        .parse()
+        .unwrap_or_else(|e| {
+            log::error!(
+                "Could not parse TIMING_THRESH_MULT value, defaulting to 1.0. Error was: {e}"
+            );
+            1.0
+        });
+    let max_time = 0.75 * threshold_mult;
     assert!(
-        table_update_time.as_secs_f32() < 0.75,
-        "Standard site table update took too long!"
+        table_update_time.as_secs_f32() < max_time,
+        "Standard site table update took too long! Use TIMING_THRESH_MULT env var to scale the threshold (current limit = {max_time})."
     );
 
+    let max_time = 1.0 * threshold_mult;
     assert!(
-        add_jobs_time.as_secs_f32() < 1.0,
-        "Adding standard site jobs took too long!"
+        add_jobs_time.as_secs_f32() < max_time,
+        "Adding standard site jobs took too long! Use TIMING_THRESH_MULT env var to scale the threshold (current limit = {max_time})."
     )
 }
 
