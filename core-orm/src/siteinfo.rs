@@ -551,6 +551,28 @@ impl StdSite {
         return Ok(site_ids);
     }
 
+    pub async fn get_site_id_map_to_name(
+        conn: &mut MySqlConn,
+        site_type: Option<SiteType>,
+    ) -> anyhow::Result<HashMap<String, String>> {
+        let sites = if let Some(stype) = site_type {
+            sqlx::query_as!(
+                QStdSite,
+                "SELECT * FROM StdSiteList WHERE site_type = ? ORDER BY site_id",
+                stype
+            )
+            .fetch_all(conn)
+            .await?
+        } else {
+            sqlx::query_as!(QStdSite, "SELECT * FROM StdSiteList ORDER BY site_id")
+                .fetch_all(conn)
+                .await?
+        };
+
+        let site_map = HashMap::from_iter(sites.into_iter().map(|site| (site.site_id, site.name)));
+        Ok(site_map)
+    }
+
     pub async fn create(
         conn: &mut MySqlConn,
         site_id: &str,

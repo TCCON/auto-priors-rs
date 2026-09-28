@@ -1633,6 +1633,12 @@ pub struct EmailConfig {
 
     /// Additional emails to send to when sending an email to all past submitters
     pub extra_submitters: Mailboxes,
+
+    /// The sheet ID of the Google Sheet recording requests for new standard sites.
+    /// If omitted, then the sheet ID will need to be specified on the command line
+    /// when fetching the latest requests. The sheet ID is the part of the URL
+    /// of the sheet after `/d/` and before the next slash.
+    pub std_site_req_sheet_id: Option<String>,
 }
 
 impl Default for EmailConfig {
@@ -1649,6 +1655,7 @@ impl Default for EmailConfig {
             std_site_req_emails: Default::default(),
             backend: Default::default(),
             extra_submitters: Default::default(),
+            std_site_req_sheet_id: Default::default(),
         }
     }
 }

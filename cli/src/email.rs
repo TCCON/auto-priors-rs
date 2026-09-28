@@ -416,12 +416,18 @@ pub fn send_test_email_cli(config: &Config, args: TestEmailCli) -> anyhow::Resul
 
 #[derive(Debug, Args)]
 pub struct StdSiteRequestCli {
-    /// Path to the .csv of the priors requests, downloaded from Google sheets
-    request_csv: PathBuf,
-
     /// Emails to send the requests to. If none given, then will send to the emails in the
     /// configuration under [email.std_site_req_emails].
     to: Vec<String>,
+
+    /// Path to the .csv of the priors requests, downloaded from Google sheets. If omitted,
+    /// will be fetched based on the sheet ID configured or passed to the
+    #[clap(short = 'r', long)]
+    request_csv: Option<PathBuf>,
+
+    /// The google sheet ID (normally the part after "/d/" in the sharing URL) to fetch.
+    #[clap(long)]
+    sheet_id: Option<String>,
 
     /// Whether to send the emails or only send mock emails.
     #[clap(short = 'd', long)]
@@ -546,26 +552,74 @@ pub async fn email_std_site_request_info_cli(
         anyhow::bail!("Must provide emails to send to by command line or configuration")
     };
 
+    let sheet_id = args
+        .sheet_id
+        .as_deref()
+        .or(config.email.std_site_req_sheet_id.as_deref());
+
+    let csv_data = if let Some(csv_path) = args.request_csv.as_deref() {
+        read_request_csv(csv_path).with_context(|| {
+            format!(
+                "Error reading from local request CSV file {}",
+                csv_path.display()
+            )
+        })?
+    } else if let Some(sheet_id) = sheet_id {
+        get_std_site_request_csv(sheet_id)
+            .await
+            .with_context(|| format!("Error downloading request sheet with ID {sheet_id}"))?
+    } else {
+        anyhow::bail!("Must provide one of the following: --request-csv, --sheet-id, or the std_site_req_sheet_id entry in the [email] section of the config");
+    };
     let to_emails = to_emails.iter().map(|s| s.as_str()).collect_vec();
-    email_std_site_request_info(conn, config, &args.request_csv, &to_emails, args.dry_run).await
+    email_std_site_request_info(conn, config, &csv_data, &to_emails, args.dry_run).await
     // debug_csv(&args.request_csv);
     // Ok(())
+}
+
+async fn get_std_site_request_csv(sheet_id: &str) -> anyhow::Result<String> {
+    let url = format!("https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv");
+    log::info!("Downloading latest standard site requests from {url}");
+    let response = reqwest::get(&url).await?.error_for_status()?;
+    // Recommended by Claude: check that the content type is CSV
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !content_type.starts_with("text/csv") {
+        anyhow::bail!("Expected 'text/csv' content type, got '{content_type}'");
+    }
+    let body = response.text().await?;
+    Ok(body)
+}
+
+fn read_request_csv(csv_file: &Path) -> anyhow::Result<String> {
+    log::info!("Reading standard site requests from {}", csv_file.display());
+    let mut f = std::fs::File::open(csv_file)?;
+    let mut buf = String::new();
+    f.read_to_string(&mut buf)?;
+    Ok(buf)
 }
 
 pub async fn email_std_site_request_info(
     conn: &mut MySqlConn,
     config: &Config,
-    request_csv: &Path,
+    request_csv_data: &str,
     to: &[&str],
     dry_run: bool,
 ) -> anyhow::Result<()> {
     // Get the spreadsheet entries. We need to skip over the first line
     // because we're ignoring the headers since they are too long to use as field names.
-    let f = std::fs::File::open(request_csv)?;
-    let mut f = BufReader::new(f);
-    let mut buf = String::new();
-    f.read_line(&mut buf)?;
+    let mut f = BufReader::new(request_csv_data.as_bytes());
+    f.skip_until(b'\n')?;
     let mut reader = csv::ReaderBuilder::new().has_headers(false).from_reader(f);
+
+    // Also get the currently defined standard sites so we can check for conflicts in the site IDs
+    let site_id_to_name = orm::siteinfo::StdSite::get_site_id_map_to_name(conn, None)
+        .await
+        .context("Error while getting the list of existing site IDs")?;
+
     for result in reader.deserialize() {
         let row: RequestRow = result?;
         if row.decision.is_some() {
@@ -578,7 +632,10 @@ pub async fn email_std_site_request_info(
             row.custom_loc_sids.as_deref(),
         )
         .await?;
-        let body = format!("{row}\nFrom the database, found {n_by_email} jobs under the custom location request email(s) and of those {n_by_sids} contained the custom location site ID(s)");
+        let mut body = format!("{row}\nFrom the database, found {n_by_email} jobs under the custom location request email(s) and of those {n_by_sids} contained the custom location site ID(s)");
+        if let Some(conflicting_site_name) = site_id_to_name.get(&row.desired_site_id) {
+            body.push_str(&format!("\nWARNING: requested site ID ({}) conflicts with existing standard site ({conflicting_site_name})", row.desired_site_id));
+        }
         let subject = "Standard site priors request summary";
 
         if dry_run {
