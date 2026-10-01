@@ -148,7 +148,7 @@ pub async fn open_test_database(reset_db: bool) -> anyhow::Result<(PoolWrapper, 
 }
 
 pub fn make_dummy_config(scratch_root: PathBuf) -> anyhow::Result<crate::config::Config> {
-    let s = include_str!("test_config.toml");
+    let s = include_str!("test_inputs/test_config.toml");
     let mut cfg: crate::config::Config = toml::from_str(s)?;
 
     cfg.execution.ftp_download_root = scratch_root.clone();

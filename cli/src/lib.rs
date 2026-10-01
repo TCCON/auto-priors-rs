@@ -6,6 +6,7 @@ pub mod email;
 pub mod input_files;
 pub mod jobs;
 pub mod met_download;
+pub mod shared_cli;
 pub mod siteinfo;
 pub mod stdsites;
 

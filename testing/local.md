@@ -33,7 +33,12 @@ up to date.
 ## Running tests with Podman
 
 Start podman with `podman machine start`.
-It should provide a `DOCKER_HOST` variable to use - copy or export that, as it's difficult to get after the fact.
+It should provide a `DOCKER_HOST` variable to use - copy or export that.
+If you need it after the fact, you can use the following to set it:
+
+```bash
+export DOCKER_HOST="unix://$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')"
+```
 
 
 Ensure that podman is running by confirming that `podman info` produces output.

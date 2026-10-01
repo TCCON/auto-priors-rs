@@ -1,14 +1,24 @@
+use std::{collections::HashMap, fmt::Display, path::Path};
+
 use anyhow::{self, Context};
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use clap::{self, Args, Subcommand};
+use inquire::{validator::Validation, InquireError};
+use itertools::Itertools;
 use log::warn;
 use orm::{
     self,
     config::Config,
-    siteinfo::{JsonType, SiteInfo, SiteType, StdOutputStructure, StdSite},
+    siteinfo::{
+        request_form::{get_request_csv_data, RequestIter, RequestRow},
+        JsonType, SiteInfo, SiteType, StdOutputStructure, StdSite,
+    },
     MySqlConn,
 };
 use sqlx::Connection;
+use strum::VariantArray;
+
+use crate::shared_cli;
 
 /// Manage definition of standard sites and their locations
 #[derive(Debug, Args)]
@@ -23,6 +33,7 @@ pub enum StdSiteActions {
     Edit(EditSiteCli),
     Print(PrintSitesCli),
     AddInfo(AddSiteInfoCli),
+    AddFromReq(AddSitesFromRequestCli),
     SetNonop(SetNonopCli),
     DeleteInfo(DeleteInfoCli),
     PrintInfo(PrintLocsCli),
@@ -379,4 +390,352 @@ pub async fn print_locations_for_site(
     println!("{table}");
 
     Ok(())
+}
+
+/// Add new sites and their initial location/time span from the
+/// request form CSV.
+#[derive(Debug, clap::Args)]
+pub struct AddSitesFromRequestCli {
+    #[clap(flatten)]
+    csv_src: shared_cli::SiteRequetFormComponent,
+}
+
+pub async fn add_sites_from_request_cli(
+    conn: &mut MySqlConn,
+    config: &Config,
+    args: AddSitesFromRequestCli,
+) -> anyhow::Result<()> {
+    add_sites_from_request(
+        conn,
+        config,
+        args.csv_src.request_csv.as_deref(),
+        args.csv_src.sheet_id.as_deref(),
+    )
+    .await
+}
+
+pub(crate) async fn add_sites_from_request(
+    conn: &mut MySqlConn,
+    config: &Config,
+    request_csv_file: Option<&Path>,
+    request_sheet_id: Option<&str>,
+) -> anyhow::Result<()> {
+    let csv_data = get_request_csv_data(config, request_csv_file, request_sheet_id).await?
+        .ok_or_else(|| anyhow::anyhow!("Must provide one of the following: --request-csv, --sheet-id, or the std_site_req_sheet_id entry in the [email] section of the config"))?;
+    let requests: Vec<RequestRow> = RequestIter::new(&csv_data, true)
+        .try_collect()
+        .context("Error occurred while reading the request CSV file")?;
+    let mut existing_site_ids = StdSite::get_site_id_map_to_name(conn, None)
+        .await
+        .context("Error getting the existing list of standard sites")?;
+    let mut sites_to_add = vec![];
+    for row in requests.iter() {
+        // Custom errors from the interactive prompts we don't know should cancel the run.
+        // The other variants indicate that the user cancelled or there is a problem interacting
+        // with the terminal, so those should all immediately return - either because we want
+        // to stop or because the issue is probably going to happen again.
+        match SiteToAdd::from_request_row(row, &existing_site_ids) {
+            Ok(site) => {
+                // Make sure we can't duplicate a site ID accidentally
+                existing_site_ids.insert(site.site_id.clone(), site.site_name.clone());
+                sites_to_add.push(Ok(site))
+            }
+            Err(InquireError::Custom(e)) => sites_to_add.push(Err(e)),
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    loop {
+        println!("{} sites to add:", sites_to_add.len());
+        let mut choices = vec![AddSiteChoice::AddAll, AddSiteChoice::Abort];
+
+        for (isite, site_res) in sites_to_add.iter().enumerate() {
+            choices.push(AddSiteChoice::Edit(isite));
+            match site_res {
+                Ok(site) => println!("== {} ==\n{site}", isite + 1),
+                Err(err) => println!("== {} ==\nERROR: {err}", isite + 1),
+            }
+        }
+
+        let choice = inquire::Select::new("What do you want to do?", choices).prompt()?;
+        match choice {
+            AddSiteChoice::Edit(_index) => println!("Editing isn't implemented yet, sorry."),
+            AddSiteChoice::AddAll => {
+                let n_bad = sites_to_add
+                    .iter()
+                    .fold(0, |n, res| if res.is_err() { n + 1 } else { n });
+                let valid_sites = sites_to_add
+                    .iter()
+                    .filter_map(|res| res.as_ref().ok())
+                    .collect_vec();
+                let msg = if n_bad > 0 {
+                    format!(
+                        "Are you sure you want to add {} sites? ({n_bad} skipped due to errors.)",
+                        valid_sites.len()
+                    )
+                } else {
+                    format!("Are you sure you want to add {} sites?", valid_sites.len())
+                };
+                let confirmed = inquire::Confirm::new(&msg).prompt()?;
+                if confirmed {
+                    add_request_sites(conn, config, &valid_sites)
+                        .await
+                        .context(
+                        "Error occurred while adding sites; transaction aborted - no sites added",
+                    )?;
+                    break;
+                }
+            }
+            AddSiteChoice::Abort => break,
+        }
+    }
+    Ok(())
+}
+
+enum AddSiteChoice {
+    Edit(usize),
+    AddAll,
+    Abort,
+}
+
+impl Display for AddSiteChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddSiteChoice::Edit(index) => write!(f, "Edit {}", index + 1),
+            AddSiteChoice::AddAll => write!(f, "Add all"),
+            AddSiteChoice::Abort => write!(f, "Abort"),
+        }
+    }
+}
+
+async fn add_request_sites(
+    conn: &mut MySqlConn,
+    config: &Config,
+    sites: &[&SiteToAdd],
+) -> anyhow::Result<()> {
+    let mut transaction = conn.begin().await?;
+    for site in sites {
+        add_new_std_site(
+            &mut transaction,
+            &site.site_id,
+            &site.site_name,
+            site.site_type,
+        )
+        .await
+        .with_context(|| format!("An error occurred adding the site '{}'", site.site_id))?;
+
+        add_std_site_info_range(
+            &mut transaction,
+            config,
+            &site.site_id,
+            site.start_date,
+            site.end_date,
+            Some(site.location.clone()),
+            Some(site.longitude),
+            Some(site.latitude),
+            site.comment.as_deref(),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "An error occurred adding the first info range for site '{}'",
+                site.site_id
+            )
+        })?;
+    }
+    transaction.commit().await?;
+    Ok(())
+}
+
+struct SiteToAdd {
+    site_id: String,
+    site_name: String,
+    site_type: SiteType,
+    start_date: NaiveDate,
+    end_date: Option<NaiveDate>,
+    location: String,
+    longitude: f32,
+    latitude: f32,
+    comment: Option<String>,
+}
+
+impl SiteToAdd {
+    fn from_request_row(
+        row: &RequestRow,
+        existing_site_ids: &HashMap<String, String>,
+    ) -> Result<Self, inquire::InquireError> {
+        let req_site_id = if !row.desired_site_id.is_empty() {
+            &row.desired_site_id
+        } else if let Some(custom_ids) = &row.custom_loc_sids {
+            custom_ids
+        } else {
+            "?"
+        };
+        println!(
+            "Request from {} for site {req_site_id} for lat = {}, lon = {}",
+            row.contact_email, row.desired_latitude, row.desired_longitude
+        );
+
+        let longitude = Self::parse_latlon(&row.desired_longitude, "longitude", 180.0)?;
+        let latitude = Self::parse_latlon(&row.desired_latitude, "latitude", 90.0)?;
+        let site_id = Self::get_site_id(&row.desired_site_id, existing_site_ids)?;
+        let site_name =
+            inquire::Text::new("Enter the name for the site, e.g., 'Park Falls' (without quotes)")
+                .with_validator(Self::validate_no_quotes)
+                .prompt()?;
+        // Assume that EM27s are the most commonly requested site type
+        let i_init = SiteType::VARIANTS
+            .iter()
+            .position(|v| v == &SiteType::EM27)
+            .unwrap_or(0);
+        let site_type = inquire::Select::new("Select the site type", SiteType::VARIANTS.to_vec())
+            .with_starting_cursor(i_init)
+            .prompt()?;
+        let location = inquire::Text::new(
+            "Enter the location for the site, e.g. 'Wisconsin, USA' (without quotes)",
+        )
+        .with_validator(Self::validate_no_quotes)
+        .prompt()?;
+
+        // Prefer generation to start/end on month boundaries
+        let start_date = row
+            .obs_start_date
+            .with_day(1)
+            .expect("day = 1 should be valid");
+        // Flattening will squash errors for out of range dates, but that
+        // makes sense to turn those into open ended ranges.
+        let end_date = row
+            .obs_end_date
+            .map(|d| {
+                d.with_day(1)
+                    .expect("day = 1 should be valid")
+                    .checked_add_months(chrono::Months::new(1))
+            })
+            .flatten();
+
+        let comment = inquire::Text::new("Enter an optional comment (empty for none)").prompt()?;
+        let comment = if comment.is_empty() {
+            None
+        } else {
+            Some(comment)
+        };
+
+        Ok(Self {
+            site_id,
+            site_name,
+            site_type,
+            start_date,
+            end_date,
+            location,
+            latitude,
+            longitude,
+            comment,
+        })
+    }
+
+    fn parse_latlon(
+        input: &str,
+        field: &str,
+        max_value: f32,
+    ) -> Result<f32, inquire::InquireError> {
+        if let Ok(value) = input.parse() {
+            return Ok(value);
+        }
+
+        let new_input = inquire::Text::new(&format!("Input correct {field} value"))
+            .with_validator(|input: &str| Self::validate_latlon(input, max_value))
+            .prompt()?;
+
+        let value: f32 = new_input
+            .parse()
+            .expect("input should have been validated to be parseable");
+        Ok(value)
+    }
+
+    fn validate_latlon(
+        input: &str,
+        max_value: f32,
+    ) -> Result<Validation, inquire::CustomUserError> {
+        let val = if let Ok(x) = input.parse::<f32>() {
+            x
+        } else {
+            return Ok(Validation::Invalid(
+                "Input must be parseable as a float".into(),
+            ));
+        };
+
+        if val.abs() > max_value {
+            return Ok(Validation::Invalid(
+                "Input must be between -{max_value} and +{max_value}".into(),
+            ));
+        }
+
+        Ok(Validation::Valid)
+    }
+
+    fn get_site_id(
+        request_value: &str,
+        existing_site_ids: &HashMap<String, String>,
+    ) -> Result<String, inquire::InquireError> {
+        let existing_site_name = existing_site_ids.get(request_value);
+        if request_value.len() == 2 && existing_site_name.is_none() {
+            Ok(request_value.to_string())
+        } else {
+            let site_id = inquire::Text::new("Enter site ID (2 characters)")
+                .with_validator(|inp: &str| Self::validate_site_id(inp, existing_site_ids))
+                .prompt()?;
+            Ok(site_id)
+        }
+    }
+
+    fn validate_site_id(
+        input: &str,
+        existing_site_ids: &HashMap<String, String>,
+    ) -> Result<Validation, inquire::CustomUserError> {
+        if input.len() != 2 {
+            return Ok(Validation::Invalid("Site ID must be 2 characters".into()));
+        } else if let Some(name) = existing_site_ids.get(input) {
+            return Ok(Validation::Invalid(
+                format!("'{input}' is already used by site '{name}'").into(),
+            ));
+        } else {
+            return Ok(Validation::Valid);
+        }
+    }
+
+    fn validate_no_quotes(input: &str) -> Result<Validation, inquire::CustomUserError> {
+        if input.starts_with(&['\'', '"']) || input.ends_with(&['\'', '"']) {
+            Ok(Validation::Invalid(
+                "Do not enclose the value in quotes".into(),
+            ))
+        } else {
+            Ok(Validation::Valid)
+        }
+    }
+}
+
+impl Display for SiteToAdd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "  {} ({}), {} site",
+            self.site_name, self.site_id, self.site_type
+        )?;
+        writeln!(
+            f,
+            "  lat = {:.4}, lon = {:.4} ({})",
+            self.latitude, self.longitude, self.location
+        )?;
+        // Do not end with a newline, so whichever line might be last
+        // uses write! instead of writeln!
+        if let Some(end) = self.end_date {
+            write!(f, "  From {} to {}", self.start_date, end)?;
+        } else {
+            write!(f, "  Starts on {} (open-ended)", self.start_date)?;
+        }
+        if let Some(cmt) = self.comment.as_deref() {
+            write!(f, "\n  Comment: {cmt}")?;
+        }
+        Ok(())
+    }
 }

@@ -11,6 +11,7 @@ async-trait.workspace = true
 axum-login.workspace = true
 base64.workspace = true
 chrono = { workspace = true, features = ["serde"] }
+csv.workspace = true
 djangohashers.workspace = true
 dotenv.workspace = true
 env_logger.workspace = true

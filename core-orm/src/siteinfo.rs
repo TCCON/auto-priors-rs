@@ -19,8 +19,10 @@ use crate::{config::Config, jobs::Job, stdsitejobs::StdSiteJob, utils};
 
 use super::MySqlConn;
 
+pub mod request_form;
+
 /// An enum describing the type of site
-#[derive(Debug, Type, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Type, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, strum::VariantArray)]
 #[repr(i8)] // NB: SQL enums start at 1
 pub enum SiteType {
     /// This site is neither TCCON nor an EM27. (`i8` value = `0`.)
@@ -594,6 +596,7 @@ impl StdSite {
             .fetch_one(conn)
             .await?;
 
+        log::info!("Created new site '{site_name}' (site ID = '{site_id}')");
         Self::try_from(new_site)
     }
 
@@ -1449,6 +1452,7 @@ impl SiteInfo {
 
         // Originally tried to query the newly added row and actually return an instance of `Self`,
         // but the row didn't seem to be in place at this point, so that failed.
+        log::info!("Created new info block for site with DB ID {site} (location = '{location}', lon = {longitude}, lat = {latitude}) for {start_date} to {end_date:?}");
         Ok(q.last_insert_id())
     }
 
