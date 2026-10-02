@@ -459,7 +459,34 @@ pub(crate) async fn add_sites_from_request(
 
         let choice = inquire::Select::new("What do you want to do?", choices).prompt()?;
         match choice {
-            AddSiteChoice::Edit(_index) => println!("Editing isn't implemented yet, sorry."),
+            AddSiteChoice::Edit(index) => match sites_to_add.get_mut(index) {
+                Some(Ok(site)) => {
+                    // This site's own ID is in the map (we inserted it when the site was
+                    // created), so take it out for the duration of the edit; otherwise
+                    // keeping the current site ID would be rejected as a duplicate.
+                    existing_site_ids.remove(&site.site_id);
+                    let edit_result = site.edit_interactive(&existing_site_ids);
+                    // Re-register the site under its (possibly new) ID and name whether or
+                    // not the edit succeeded - a failed edit leaves the site unchanged, so
+                    // this restores the original entry in that case.
+                    existing_site_ids.insert(site.site_id.clone(), site.site_name.clone());
+                    match edit_result {
+                        Ok(()) => (),
+                        Err(InquireError::Custom(e)) => {
+                            println!("Site {} was not edited: {e}", index + 1)
+                        }
+                        Err(InquireError::OperationCanceled) => {
+                            println!("Cancelled edits, site {} was not edited", index + 1)
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                Some(Err(err)) => println!(
+                    "Site {} could not be read from the request form ({err}), so there is nothing to edit.",
+                    index + 1
+                ),
+                None => println!("There is no site {} to edit.", index + 1),
+            },
             AddSiteChoice::AddAll => {
                 let n_bad = sites_to_add
                     .iter()
@@ -633,6 +660,89 @@ impl SiteToAdd {
         })
     }
 
+    /// Interactively edit an existing site in place.
+    ///
+    /// This prompts for the same values as [`Self::from_request_row`] (plus the date
+    /// range, which that function takes from the request row), with the site's current
+    /// value pre-filled as the initial value of each prompt, so pressing enter keeps
+    /// the current value. `self` is only modified once every prompt has completed, so
+    /// an aborted or failed edit leaves it untouched.
+    ///
+    /// `existing_site_ids` must *not* contain this site's own site ID, otherwise
+    /// keeping the current site ID will be rejected as a duplicate.
+    fn edit_interactive(
+        &mut self,
+        existing_site_ids: &HashMap<String, String>,
+    ) -> Result<(), inquire::InquireError> {
+        println!(
+            "Editing {} ({}) - press enter to keep the current value of a field.",
+            self.site_name, self.site_id
+        );
+
+        let site_id = inquire::Text::new("Enter site ID (2 characters)")
+            .with_initial_value(&self.site_id)
+            .with_validator(|inp: &str| Self::validate_site_id(inp, existing_site_ids))
+            .prompt()?;
+        let site_name =
+            inquire::Text::new("Enter the name for the site, e.g., 'Park Falls' (without quotes)")
+                .with_initial_value(&self.site_name)
+                .with_validator(Self::validate_no_quotes)
+                .prompt()?;
+        // Start the cursor on this site's current type rather than the default EM27
+        let i_init = SiteType::VARIANTS
+            .iter()
+            .position(|v| v == &self.site_type)
+            .unwrap_or(0);
+        let site_type = inquire::Select::new("Select the site type", SiteType::VARIANTS.to_vec())
+            .with_starting_cursor(i_init)
+            .prompt()?;
+        let location = inquire::Text::new(
+            "Enter the location for the site, e.g. 'Wisconsin, USA' (without quotes)",
+        )
+        .with_initial_value(&self.location)
+        .with_validator(Self::validate_no_quotes)
+        .prompt()?;
+        let latitude = Self::edit_latlon(self.latitude, "latitude", 90.0)?;
+        let longitude = Self::edit_latlon(self.longitude, "longitude", 180.0)?;
+
+        let start_date = Self::edit_date(
+            "Enter the first date this location applies (YYYY-MM-DD)",
+            Some(self.start_date),
+            false,
+            None,
+        )?
+        .expect("a start date should be required by the validator");
+        let end_date = Self::edit_date(
+            "Enter the last date (exclusive) this location applies (YYYY-MM-DD, empty for open ended)",
+            self.end_date,
+            true,
+            Some(start_date),
+        )?;
+
+        let comment = inquire::Text::new("Enter an optional comment (empty for none)")
+            .with_initial_value(self.comment.as_deref().unwrap_or(""))
+            .prompt()?;
+        let comment = if comment.is_empty() {
+            None
+        } else {
+            Some(comment)
+        };
+
+        // Only commit the new values now that every prompt has succeeded, so that
+        // cancelling partway through doesn't leave a half-edited site behind.
+        self.site_id = site_id;
+        self.site_name = site_name;
+        self.site_type = site_type;
+        self.start_date = start_date;
+        self.end_date = end_date;
+        self.location = location;
+        self.latitude = latitude;
+        self.longitude = longitude;
+        self.comment = comment;
+
+        Ok(())
+    }
+
     fn parse_latlon(
         input: &str,
         field: &str,
@@ -650,6 +760,83 @@ impl SiteToAdd {
             .parse()
             .expect("input should have been validated to be parseable");
         Ok(value)
+    }
+
+    /// Like [`Self::parse_latlon`], but always prompts, pre-filled with `current`.
+    fn edit_latlon(
+        current: f32,
+        field: &str,
+        max_value: f32,
+    ) -> Result<f32, inquire::InquireError> {
+        let initial = current.to_string();
+        let new_input = inquire::Text::new(&format!("Enter the {field}"))
+            .with_initial_value(&initial)
+            .with_validator(move |input: &str| Self::validate_latlon(input, max_value))
+            .prompt()?;
+
+        let value: f32 = new_input
+            .parse()
+            .expect("input should have been validated to be parseable");
+        Ok(value)
+    }
+
+    /// Prompt for a date in YYYY-MM-DD format, pre-filled with `current`.
+    ///
+    /// If `optional` is true, an empty input is accepted and returns `None`.
+    /// If `after` is given, the date entered must be later than that date.
+    fn edit_date(
+        message: &str,
+        current: Option<NaiveDate>,
+        optional: bool,
+        after: Option<NaiveDate>,
+    ) -> Result<Option<NaiveDate>, inquire::InquireError> {
+        let initial = current.map(|d| d.to_string()).unwrap_or_default();
+        let new_input = inquire::Text::new(message)
+            .with_initial_value(&initial)
+            .with_validator(move |input: &str| Self::validate_date(input, optional, after))
+            .prompt()?;
+
+        let new_input = new_input.trim();
+        if new_input.is_empty() {
+            return Ok(None);
+        }
+
+        let date = NaiveDate::parse_from_str(new_input, "%Y-%m-%d")
+            .expect("input should have been validated as a date");
+        Ok(Some(date))
+    }
+
+    fn validate_date(
+        input: &str,
+        optional: bool,
+        after: Option<NaiveDate>,
+    ) -> Result<Validation, inquire::CustomUserError> {
+        let input = input.trim();
+        if input.is_empty() {
+            if optional {
+                return Ok(Validation::Valid);
+            } else {
+                return Ok(Validation::Invalid("A date is required".into()));
+            }
+        }
+
+        let date = if let Ok(d) = NaiveDate::parse_from_str(input, "%Y-%m-%d") {
+            d
+        } else {
+            return Ok(Validation::Invalid(
+                "Date must be in YYYY-MM-DD format".into(),
+            ));
+        };
+
+        if let Some(min_date) = after {
+            if date <= min_date {
+                return Ok(Validation::Invalid(
+                    format!("Date must be after {min_date}").into(),
+                ));
+            }
+        }
+
+        Ok(Validation::Valid)
     }
 
     fn validate_latlon(
