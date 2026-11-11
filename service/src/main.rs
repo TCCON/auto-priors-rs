@@ -536,7 +536,7 @@ async fn process_signals(
             } // reload config
             signal::SIGINT | signal::SIGUSR1 => {
                 // TODO: SIGINT causing immediate termination, so have to use USR1
-                info!("Beginning graceful shutdown");
+                info!("Beginning graceful shutdown (received signal {sig})");
                 shutdown_components(
                     ExitCommand::Graceful,
                     tx_scheduler,
@@ -550,7 +550,7 @@ async fn process_signals(
                 break;
             }
             signal::SIGTERM | signal::SIGQUIT | signal::SIGUSR2 => {
-                info!("Beginning rapid shutdown");
+                info!("Beginning rapid shutdown (received signal {sig})");
                 shutdown_components(
                     ExitCommand::Rapid,
                     tx_scheduler,

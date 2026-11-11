@@ -118,7 +118,23 @@ Now, running `systemctl status automodrust.service` should show that the service
 
 It is possible to run a `systemd` service as a regular user.
 To do so, you put the `.service` file under `~/.config/systemd/user`, then run the same `systemctl` commands as above with the `--user` flag added.
-However, we have found that this does not always start the service automatically when the server reboots.
+There are two footguns to be aware of.
+
+First, some OSes will by default terminate services running under a user when that user logs out.
+Allowing a service to continue after log out is controlled by "lingering."
+You can check if lingering is enabled for your user with:
+
+```bash
+loginctl show-user "$USER" -p Linger
+```
+
+It should print `Linger=yes`, otherwise use the following command to enable lingering:
+
+```
+loginctl enable-linger "$USER"
+```
+
+Second, we have found that the service does not always automatically when the server reboots.
 The issue seems to occur if your user's home directory is on a drive that is not mounted when `systemd` tries to start its child processes.
 To get around this, we use a "kickstart" script that runs every hour via a cron job:
 

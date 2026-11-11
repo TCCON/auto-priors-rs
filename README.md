@@ -77,6 +77,12 @@ PRIOR_CONFIG_FILE=/home/tccon/auto-priors-rs/auto-priors.toml
 ## Further documention
 
 More documentation is available in the `book` subdirectory.
+This includes, for example:
+
+- details on the configuration,
+- how to run this as a service, and
+- overall structure of the code.
+
 You can browse the markdown in `book/src` directly, or use `mdbook` to render it.
 To render it:
 
